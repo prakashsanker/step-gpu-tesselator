@@ -48,7 +48,9 @@ async function loadStepFile(file: File) {
   console.log(file);
   const result = occt.ReadStepFile(fileContent, null);
 
-  console.log(result);
+  console.log("RESULT");
+  console.log(result.meshes[0]);
+  console.log(result.logs);
 
   if (!result.success) {
     console.error("STEP file loading failed:", result);
@@ -64,8 +66,15 @@ async function loadStepFile(file: File) {
     const idxArray = mesh.index.array as number[];
     const normalArray = mesh.attributes.normal ? (mesh.attributes.normal.array as number[]) : null;
 
+    console.log({
+      positions: posArray.length,
+      indices: idxArray.length,
+      normals: normalArray?.length
+    });
+
     const geometry = new THREE.BufferGeometry();
     const positionAttr = new THREE.Float32BufferAttribute(posArray, 3);
+
 
     geometry.setAttribute("position", positionAttr);
 
@@ -80,11 +89,12 @@ async function loadStepFile(file: File) {
       geometry.setIndex(idxArray); // Three.js accepts a number[] here
     }
 
+    console.log("MESH COLOR");
+    console.log(mesh.color);
+
     const material = new THREE.MeshStandardMaterial({
       // If mesh.color is present, it's [R,G,B] in 0–255 range → convert to 0–1
-      color: mesh.color
-        ? new THREE.Color(mesh.color[0] / 255, mesh.color[1] / 255, mesh.color[2] / 255)
-        : new THREE.Color(0xdddddd), // default light gray
+      color: new THREE.Color(0xdddddd), // default light gray
       metalness: 0.1,
       roughness: 0.7,
       side: THREE.DoubleSide, // show both sides of faces
@@ -120,18 +130,49 @@ function clearSceneMeshes() {
 
 function centerGroup(group: THREE.Group) {
   const box = new THREE.Box3().setFromObject(group);
-  const center = box.getCenter(new THREE.Vector3());
 
+  if (box.isEmpty()) {
+    console.warn("centerGroup: empty bounding box");
+    return;
+  }
+
+  const center = box.getCenter(new THREE.Vector3());
+  const sizeVec = box.getSize(new THREE.Vector3());
+  const size = sizeVec.length() || 10; // diagonal length
+
+  // Move group so its center is at the origin
   group.position.sub(center);
 
-  const size = box.getSize(new THREE.Vector3()).length();
+  // Choose a camera distance proportional to the model size
+  const distance = size * 1.2;
 
-  const distance = size * 1.5 || 200;
+  // Make sure the camera frustum actually covers the model
+  camera.near = Math.max(size / 1000, 0.1);
+  camera.far = size * 10;
+  camera.updateProjectionMatrix();
+
   camera.position.set(distance, distance, distance);
 
-  controls.target.set(0,0,0);
+  controls.target.set(0, 0, 0);
   controls.update();
+
+  console.log("BBox size:", sizeVec, "diag:", size, "cam distance:", distance, "near/far:", camera.near, camera.far);
 }
+
+// function centerGroup(group: THREE.Group) {
+//   const box = new THREE.Box3().setFromObject(group);
+//   const center = box.getCenter(new THREE.Vector3());
+
+//   group.position.sub(center);
+
+//   const size = box.getSize(new THREE.Vector3()).length();
+
+//   const distance = size * 1.5 || 200;
+//   camera.position.set(distance, distance, distance);
+
+//   controls.target.set(0,0,0);
+//   controls.update();
+// }
 
 const fileInput = document.getElementById("file-input") as HTMLInputElement | null;
 
