@@ -14,7 +14,6 @@
     "vite": "^7.2.4"
   },
   "dependencies": {
-    "occt-import-js": "^0.0.23",
     "three": "^0.181.2"
   }
 }
