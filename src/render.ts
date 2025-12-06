@@ -1,6 +1,6 @@
 type Mesh = {
     positions: Float32Array;
-    indices: Uint16Array;
+    indices: Uint32Array;
   };
   
   export async function renderMeshWithWebGPU(mesh: Mesh, canvas: HTMLCanvasElement) {

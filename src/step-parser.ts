@@ -1,10 +1,11 @@
 import {getGPUDevice} from "./lib";
+import { gpuTesselate } from "./gpu-tesselate";
 // Minimal STEP → mesh parser for the square face example
 type Vec3 = [number, number, number];
 
 export interface Mesh {
   positions: Float32Array;
-  indices: Uint16Array;
+  indices: Uint32Array;
 }
 
 // --- Internal STEP structures we care about ---
@@ -146,15 +147,21 @@ export async function parseStepToMesh(stepText: string): Mesh {
 
   console.log("positions", positions);
 
-  const gpuIndices = await tesselate(uniquePoints);
-  console.log("GPU INDICES");
-  console.log(gpuIndices);
-  let indices = new Uint16Array(gpuIndices.length);
-  for (let i =0; i < gpuIndices.length; i++) {
-    indices[i] = gpuIndices[i];
-  }
+  const indices = await gpuTesselate(uniquePoints);
 
-  return { positions, indices };
+  return { positions, indices};
+
+
+
+  // const gpuIndices = await tesselate(uniquePoints);
+  // console.log("GPU INDICES");
+  // console.log(gpuIndices);
+  // let indices = new Uint16Array(gpuIndices.length);
+  // for (let i =0; i < gpuIndices.length; i++) {
+  //   indices[i] = gpuIndices[i];
+  // }
+
+  // return { positions, indices };
 }
 
 export async function tesselate(uniquePoints): Promise<{
@@ -238,11 +245,11 @@ export async function tesselate(uniquePoints): Promise<{
           return;
         }
 
-        let i = t + 1u; // 1, 2, 3
+        let i = t + 1u; // 1, 2
 
-        let base = t * 3u; // 0, 3, 6
+        let base = t * 3u; // 3, 6
 
-        outIndices.values[base + 0u] = 0u; // 0
+        outIndices.values[base + 0u] = 0u; // 3 -> 0
         outIndices.values[base + 1u] = i; // 
         outIndices.values[base + 2u] = i+1;
       }
