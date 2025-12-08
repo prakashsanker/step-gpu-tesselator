@@ -1,5 +1,7 @@
 import { parseBrowserFileToMesh } from "./step-parser";
-import { render } from "./gpu-render";
+import { createThreeMeshFromTesselation, render } from "./threejs-render";
+
+// /import { render } from "./gpu-render";
 
 /**
  * Minimal browser entrypoint:
@@ -12,9 +14,10 @@ async function handleFile(file: File) {
   const parseStart = performance.now();
   const mesh = await parseBrowserFileToMesh(file);
   const parseEnd = performance.now();
-  const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-  render(mesh, canvas);
-
+  // const canvas = document.getElementById("canvas") as HTMLCanvasElement;
+  const threeMesh = createThreeMeshFromTesselation(mesh);
+  
+  render(threeMesh);
 
   console.log(
     `[Profile] STEP parse (custom parser): ${(parseEnd - parseStart).toFixed(
