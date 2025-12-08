@@ -176,8 +176,9 @@ function parseStep(stepText: string): StepModel {
     faces: new Map(),
   };
 
-  // Remove comments (/* ... */ and -- ... end-of-line)
-  let text = stepText.replace(/\/\*[\s\S]*?\*\//g, "");     // block comments
+  // Remove comments (/* ... */, / ... */, and -- ... end-of-line)
+  let text = stepText.replace(/\/\*[\s\S]*?\*\//g, "");     // block comments /* ... */
+  text = text.replace(/\/[^*][\s\S]*?\*\//g, "");          // block comments / ... */ (single slash)
   text = text.replace(/--.*$/gm, "");                       // line comments
 
   // Split into lines and process entity lines starting with '#'
@@ -187,14 +188,18 @@ function parseStep(stepText: string): StepModel {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    if (!trimmed.startsWith("#")) continue;
+    console.log("TRIMMED", trimmed);
 
+    if (!trimmed.startsWith("#")) continue;
+    console.log("DO WE MAKE IT HERE?")
     const match = trimmed.match(entityRegex);
     if (!match) continue;
+    console.log("DO WE GET A MATCH?");
 
     const id = parseInt(match[1], 10);
     const type = match[2];
     const args = match[3]; // raw argument string inside (...)
+    console.log("TYPE", type);
 
     switch (type) {
       case "CARTESIAN_POINT":
@@ -272,6 +277,12 @@ function parseOrientedEdge(id: number, args: string, model: StepModel) {
   if (!m) throw new Error(`Failed to parse ORIENTED_EDGE args: ${args}`);
   const edgeElementId = parseInt(m[1], 10);
   const orientation = m[2] === ".T.";
+  console.log("PARSE ORIENTED EDGE", id);
+  console.log("args", args);
+  console.log("EDGE ELEMENT ID", edgeElementId);
+
+  console.log("=====");
+
 
   model.orientedEdges.set(id, {
     id,
