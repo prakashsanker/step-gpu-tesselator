@@ -1,5 +1,5 @@
 import { parseBrowserFileToMesh } from "./step-parser";
-import { renderMeshWithWebGPU} from "./render";
+import { render } from "./gpu-render";
 
 /**
  * Minimal browser entrypoint:
@@ -13,7 +13,7 @@ async function handleFile(file: File) {
   const mesh = await parseBrowserFileToMesh(file);
   const parseEnd = performance.now();
   const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-  renderMeshWithWebGPU(mesh, canvas);
+  render(mesh, canvas);
 
 
   console.log(

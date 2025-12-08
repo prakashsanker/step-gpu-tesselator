@@ -1,6 +1,6 @@
 import { getGPUDevice } from "./lib"; 
 
-const BYTE_SIZE = 4;
+export const BYTE_SIZE = 4;
 
 
 export async function gpuTesselate(uniquePoints) {

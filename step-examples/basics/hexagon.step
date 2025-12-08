@@ -1,0 +1,88 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Unit hexagon face example'),'2;1');
+FILE_NAME('hexagon_face.stp','20250101',(''),(''),'','ChatGPT','');
+FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+ENDSEC;
+DATA;
+
+/* ==== Geometric context: 3D, plane in XY with Z up ==== */
+
+#1 = CARTESIAN_POINT('', (0.0, 0.0, 0.0)); /* origin /
+#2 = DIRECTION('', (0.0, 0.0, 1.0)); / Z axis /
+#3 = DIRECTION('', (1.0, 0.0, 0.0)); / X axis /
+#4 = AXIS2_PLACEMENT_3D('', #1, #2, #3); / placement for plane /
+#5 = PLANE('', #4); / supporting plane for the face */
+
+/* ==== Corner points of a regular hexagon (radius 1, centered at origin in XY) ==== */
+
+#10 = CARTESIAN_POINT('', ( 1.0, 0.0, 0.0)); /* P0 /
+#11 = CARTESIAN_POINT('', ( 0.5, 0.866025403784, 0.0)); / P1 /
+#12 = CARTESIAN_POINT('', (-0.5, 0.866025403784, 0.0)); / P2 /
+#13 = CARTESIAN_POINT('', (-1.0, 0.0, 0.0)); / P3 /
+#14 = CARTESIAN_POINT('', (-0.5, -0.866025403784, 0.0)); / P4 /
+#15 = CARTESIAN_POINT('', ( 0.5, -0.866025403784, 0.0)); / P5 */
+
+/* ==== Topological vertices (wrap the points) ==== */
+
+#20 = VERTEX_POINT('', #10); /* V0 /
+#21 = VERTEX_POINT('', #11); / V1 /
+#22 = VERTEX_POINT('', #12); / V2 /
+#23 = VERTEX_POINT('', #13); / V3 /
+#24 = VERTEX_POINT('', #14); / V4 /
+#25 = VERTEX_POINT('', #15); / V5 */
+
+/* ==== Directions for edge lines (unit-length along each side) ==== */
+
+#30 = DIRECTION('', (-0.5, 0.866025403784, 0.0)); /* P0 -> P1 /
+#31 = DIRECTION('', (-1.0, 0.0, 0.0)); / P1 -> P2 /
+#32 = DIRECTION('', (-0.5, -0.866025403784, 0.0)); / P2 -> P3 /
+#33 = DIRECTION('', ( 0.5, -0.866025403784, 0.0)); / P3 -> P4 /
+#34 = DIRECTION('', ( 1.0, 0.0, 0.0)); / P4 -> P5 /
+#35 = DIRECTION('', ( 0.5, 0.866025403784, 0.0)); / P5 -> P0 */
+
+/* ==== Geometric curves for edges (unbounded lines) ==== */
+
+#40 = LINE('', #10, #30); /* edge P0->P1 lies on this line /
+#41 = LINE('', #11, #31); / edge P1->P2 lies on this line /
+#42 = LINE('', #12, #32); / edge P2->P3 lies on this line /
+#43 = LINE('', #13, #33); / edge P3->P4 lies on this line /
+#44 = LINE('', #14, #34); / edge P4->P5 lies on this line /
+#45 = LINE('', #15, #35); / edge P5->P0 lies on this line */
+
+/* ==== Edge_curves: connect two vertices along a curve ==== /
+/ EDGE_CURVE(name, vertex_start, vertex_end, edge_geometry, same_sense); */
+
+#50 = EDGE_CURVE('', #20, #21, #40, .T.); /* V0 -> V1 /
+#51 = EDGE_CURVE('', #21, #22, #41, .T.); / V1 -> V2 /
+#52 = EDGE_CURVE('', #22, #23, #42, .T.); / V2 -> V3 /
+#53 = EDGE_CURVE('', #23, #24, #43, .T.); / V3 -> V4 /
+#54 = EDGE_CURVE('', #24, #25, #44, .T.); / V4 -> V5 /
+#55 = EDGE_CURVE('', #25, #20, #45, .T.); / V5 -> V0 */
+
+/* ==== Oriented edges: specify traversal direction around the face ==== /
+/ ORIENTED_EDGE(name, edge_start, edge_end, edge_element, orientation); */
+
+#60 = ORIENTED_EDGE('', *, , #50, .T.); / V0 -> V1 */
+#61 = ORIENTED_EDGE('', *, , #51, .T.); / V1 -> V2 */
+#62 = ORIENTED_EDGE('', *, , #52, .T.); / V2 -> V3 */
+#63 = ORIENTED_EDGE('', *, , #53, .T.); / V3 -> V4 */
+#64 = ORIENTED_EDGE('', *, , #54, .T.); / V4 -> V5 */
+#65 = ORIENTED_EDGE('', *, , #55, .T.); / V5 -> V0 */
+
+/* ==== Edge loop: ordered boundary of the face ==== */
+
+#70 = EDGE_LOOP('', (#60, #61, #62, #63, #64, #65));
+
+/* ==== Outer boundary of the face ==== /
+/ FACE_OUTER_BOUND(name, bound, orientation); orientation = .T. means "same as surface" */
+
+#80 = FACE_OUTER_BOUND('', #70, .T.);
+
+/* ==== The face itself: advanced_face(surface, bounds) ==== /
+/ ADVANCED_FACE(name, bounds, face_geometry, same_sense); */
+
+#90 = ADVANCED_FACE('', (#80), #5, .T.);
+
+ENDSEC;
+END-ISO-10303-21;

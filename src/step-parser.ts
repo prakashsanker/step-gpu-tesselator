@@ -69,7 +69,8 @@ export async function parseStepToMesh(stepText: string): Mesh {
   // This function is browser-safe: it expects the STEP file contents as a string,
   // leaving file I/O (File API, fetch, Node fs, etc.) to the caller.
   const model = parseStep(stepText);
-
+  console.log("MODEL");
+  console.log(model);
   if (model.faces.size === 0) {
     throw new Error("No ADVANCED_FACE found in STEP file.");
   }
@@ -129,15 +130,8 @@ export async function parseStepToMesh(stepText: string): Mesh {
   if (!vec3Equal(first, last)) {
     boundaryPoints.push(first);
   }
-  console.log("BOUNDARY POINTS", boundaryPoints);
 
-
-  // Now deduplicate last point for triangulation (we want N unique vertices)
   const uniquePoints = boundaryPoints.slice(0, boundaryPoints.length - 1);
-  console.log("UNIQUE POINTS", uniquePoints);
-  // unique points is the cartesian points, in an array of arrays. 
-
-  // Build positions array -- this is the uniquePoints themselves flattened.
   const positions = new Float32Array(uniquePoints.length * 3);
   uniquePoints.forEach((p, i) => {
     positions[i * 3 + 0] = p[0];
@@ -145,170 +139,10 @@ export async function parseStepToMesh(stepText: string): Mesh {
     positions[i * 3 + 2] = p[2];
   });
 
-  console.log("positions", positions);
-
   const indices = await gpuTesselate(uniquePoints);
 
   return { positions, indices};
-
-
-
-  // const gpuIndices = await tesselate(uniquePoints);
-  // console.log("GPU INDICES");
-  // console.log(gpuIndices);
-  // let indices = new Uint16Array(gpuIndices.length);
-  // for (let i =0; i < gpuIndices.length; i++) {
-  //   indices[i] = gpuIndices[i];
-  // }
-
-  // return { positions, indices };
 }
-
-export async function tesselate(uniquePoints): Promise<{
-  indicesU32: Uint32Array;
-  triCount: number;
-  vertexCount: number;
-}>  {
-    // 1. Assume you already have a WebGPU device
-  const device = await getGPUDevice();
-
-  // 2. Input: flat positions for N vertices (uniquePointsFlat.length === N * 3)
-
-  const uniquePointsFlat = new Float32Array(uniquePoints.length * 3);
-  uniquePoints.forEach((p, i) => {
-    uniquePointsFlat[i * 3 + 0] = p[0];
-    uniquePointsFlat[i * 3 + 1] = p[1];
-    uniquePointsFlat[i * 3 + 2] = p[2];
-  });
-  const vertexCount = uniquePoints.length;
-
-  // 3. Create input buffer (read-only in shader)
-  const inputBuffer = device.createBuffer({
-    size: uniquePointsFlat.byteLength,
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(inputBuffer, 0, uniquePointsFlat);
-
-
-  // // 5. Compute triangle + index count
-  const triCount = uniquePoints.length - 2;  // this is the number of triangles, this is the number of sides in the polygon - 2
-  const indexCount = triCount * 3;
-  const indicesBuffer = device.createBuffer({
-    size: indexCount * 4, // Uint16 → 2 bytes each
-    usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC
-  });
-
-  // 6. Uniform buffer for counts
-  const uniformData = new Uint32Array([
-    vertexCount,  // N
-    triCount,     // triCount
-  ]);
-  const uniformBuffer = device.createBuffer({
-    size: Math.ceil((uniformData.length * 4) / 16) * 16, // Uniform buffers have to be 16 byte aligned. We have 2 4 byte variables in vertex count and tri count, we need an extra 8 bytes. 
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-  device.queue.writeBuffer(uniformBuffer, 0, uniformData);
-
-  // 7. Create shader module
-  const shaderModule = device.createShaderModule({
-    code: /* wgsl */ `
-          struct Positions {
-        values: array<f32>,
-      };
-
-      struct Indices {
-        values: array<u32>, // may reinterpret as u16 on CPU
-      };
-
-      struct Params {
-        vertexCount: u32,  // N
-        triCount: u32,     // N - 2
-        padding0: u32,
-        padding1: u32,
-      };
-
-      @group(0) @binding(0)
-      var<storage, read> inputPositions : Positions;
-
-      @group(0) @binding(1)
-      var<storage, read_write> outIndices : Indices;
-
-      @group(0) @binding(2)
-      var<uniform> params : Params;
-
-
-      @compute @workgroup_size(64)
-      fn main_indices(@builtin(global_invocation_id) global_id : vec3<u32>) {
-        let t = global_id.x; // triangle index (0..triCount-1)
-
-        if (t >= params.triCount) {
-          return;
-        }
-
-        let i = t + 1u; // 1, 2
-
-        let base = t * 3u; // 3, 6
-
-        outIndices.values[base + 0u] = 0u; // 3 -> 0
-        outIndices.values[base + 1u] = i; // 
-        outIndices.values[base + 2u] = i+1;
-      }
-    `,
-  });
-
-  const indicesPipeline = device.createComputePipeline({
-    layout: "auto",
-    compute: {
-      module: shaderModule,
-      entryPoint: "main_indices"
-    }
-  })
-
-  // 9. Bind group
-  const bindGroup = device.createBindGroup({
-    layout: indicesPipeline.getBindGroupLayout(0),
-    entries: [
-      {
-        binding: 0,
-        resource: { buffer: inputBuffer },
-      },
-      {
-        binding: 1,
-        resource: { buffer: indicesBuffer },
-      },
-      {
-        binding: 2,
-        resource: { buffer: uniformBuffer },
-      },
-    ],
-  });
-
-  // 10. Encode commands
-  const commandEncoder = device.createCommandEncoder();
-  const pass = commandEncoder.beginComputePass();
-  pass.setPipeline(indicesPipeline);
-  pass.setBindGroup(0, bindGroup);
-
-  // // We’ll launch 1D workgroups, 1 thread per vertex for copying
-  const workgroupSize = 64;
-  const vertexWorkgroupCount = Math.ceil(triCount / workgroupSize);
-  pass.dispatchWorkgroups(vertexWorkgroupCount);
-
-  pass.end();
-  const commandBuffer = commandEncoder.finish();
-  device.queue.submit([commandBuffer]);
-
-  await indicesBuffer.mapAsync(GPUMapMode.READ);
-  const arrayBuffer = indicesBuffer.getMappedRange();
-
-  // Copy into a typed array we can safely use after unmap
-  const indicesU32 = new Uint32Array(arrayBuffer.slice(0));
-
-  indicesBuffer.unmap();
-
-  return { indicesU32, vertexCount, triCount };
-}
-
 /**
  * Browser helper: take a `File` (e.g. from an `<input type="file">`) and
  * parse it into a `Mesh`. Uses the standard `File.text()` API, so it works
