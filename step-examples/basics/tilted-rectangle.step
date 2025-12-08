@@ -1,0 +1,63 @@
+ISO-10303-21;
+HEADER;
+  FILE_DESCRIPTION(('Non-axis-aligned rectangle face'),'2;1');
+  FILE_NAME('tilted_rectangle.stp','20250101',(''),(''),'','ChatGPT','');
+  FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+ENDSEC;
+DATA;
+
+  /* ==== Geometric context: 3D, plane in XY with Z up ==== */
+
+  #1 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));              /* origin */
+  #2 = DIRECTION('', (0.0, 0.0, 1.0));                    /* Z axis */
+  #3 = DIRECTION('', (1.0, 0.0, 0.0));                    /* X axis */
+  #4 = AXIS2_PLACEMENT_3D('', #1, #2, #3);                /* placement for plane */
+  #5 = PLANE('', #4);                                     /* supporting plane for the face */
+
+  /* ==== Corner points of the rotated rectangle ==== */
+
+  #10 = CARTESIAN_POINT('', ( 0.0, 0.0, 0.0));            /* P0 */
+  #11 = CARTESIAN_POINT('', ( 1.0, 1.0, 0.0));            /* P1 */
+  #12 = CARTESIAN_POINT('', ( 0.0, 2.0, 0.0));            /* P2 */
+  #13 = CARTESIAN_POINT('', (-1.0, 1.0, 0.0));            /* P3 */
+
+  #20 = VERTEX_POINT('', #10);
+  #21 = VERTEX_POINT('', #11);
+  #22 = VERTEX_POINT('', #12);
+  #23 = VERTEX_POINT('', #13);
+
+  /* ==== Edge curve geometry (simple lines along each side) ==== */
+
+  #30 = DIRECTION('', ( 1.0,  1.0, 0.0));                 /* P0→P1 */
+  #31 = DIRECTION('', (-1.0,  1.0, 0.0));                 /* P1→P2 */
+  #32 = DIRECTION('', (-1.0, -1.0, 0.0));                 /* P2→P3 */
+  #33 = DIRECTION('', ( 1.0, -1.0, 0.0));                 /* P3→P0 */
+
+  #40 = LINE('', #10, #30);
+  #41 = LINE('', #11, #31);
+  #42 = LINE('', #12, #32);
+  #43 = LINE('', #13, #33);
+
+  #50 = EDGE_CURVE('', #20, #21, #40, .T.);
+  #51 = EDGE_CURVE('', #21, #22, #41, .T.);
+  #52 = EDGE_CURVE('', #22, #23, #42, .T.);
+  #53 = EDGE_CURVE('', #23, #20, #43, .T.);
+
+  /* ==== Oriented edges in loop order ==== */
+
+  #60 = ORIENTED_EDGE('', *, *, #50, .T.);
+  #61 = ORIENTED_EDGE('', *, *, #51, .T.);
+  #62 = ORIENTED_EDGE('', *, *, #52, .T.);
+  #63 = ORIENTED_EDGE('', *, *, #53, .T.);
+
+  #70 = EDGE_LOOP('', (#60, #61, #62, #63));
+  #80 = FACE_OUTER_BOUND('', #70, .T.);
+  #90 = ADVANCED_FACE('', (#80), #5, .T.);
+
+  /* ==== Simple shell / brep wrapper (often ignored by custom parsers) ==== */
+
+  #100 = CLOSED_SHELL('', (#90));
+  #110 = MANIFOLD_SOLID_BREP('TILTED_RECT', #100);
+
+ENDSEC;
+END-ISO-10303-21;
