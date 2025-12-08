@@ -37,7 +37,7 @@ export function render(threeMesh: THREE.Mesh) {
     0.01,
     1000
   );
-  camera.position.set(2, 2, 2);
+  camera.position.set(4, 4, 4);
   camera.lookAt(0, 0, 0);
 
   const controls = new OrbitControls(camera, renderer.domElement);

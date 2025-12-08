@@ -1,5 +1,6 @@
 import {getGPUDevice} from "./lib";
 import { gpuTesselate } from "./gpu-tesselate";
+import { isCounterClockWise } from "./signed-area";
 // Minimal STEP → mesh parser for the square face example
 type Vec3 = [number, number, number];
 
@@ -68,80 +69,91 @@ interface StepModel {
 export async function parseStepToMesh(stepText: string): Mesh {
   // This function is browser-safe: it expects the STEP file contents as a string,
   // leaving file I/O (File API, fetch, Node fs, etc.) to the caller.
-  const model = parseStep(stepText);
-  console.log("MODEL");
-  console.log(model);
-  if (model.faces.size === 0) {
-    throw new Error("No ADVANCED_FACE found in STEP file.");
-  }
 
-  // For this minimal example, just take the first face, because there is only one face. 
-  const face = [...model.faces.values()][0];
-
-  // Get its outer bound
-  const outerBoundId = face.boundIds[0];
-  const outerBound = model.faceBounds.get(outerBoundId);
-  if (!outerBound) throw new Error(`FACE_OUTER_BOUND #${outerBoundId} not found`);
-
-  const loop = model.edgeLoops.get(outerBound.loopId);
-  if (!loop) throw new Error(`EDGE_LOOP #${outerBound.loopId} not found`);
-
-  // Walk oriented edges in order to get vertex coordinates around the boundary
-  const boundaryPoints: Vec3[] = [];
-
-  for (const orientedEdgeId of loop.orientedEdgeIds) {
-    const oedge = model.orientedEdges.get(orientedEdgeId);
-    if (!oedge) throw new Error(`ORIENTED_EDGE #${orientedEdgeId} not found`);
-
-    const edgeCurve = model.edgeCurves.get(oedge.edgeElementId);
-    if (!edgeCurve) throw new Error(`EDGE_CURVE #${oedge.edgeElementId} not found`);
-
-    // Figure out start/end vertex IDs depending on orientation
-    let startVertexId = edgeCurve.startVertexId;
-    let endVertexId = edgeCurve.endVertexId;
-
-    // If orientation is false (.F.), we reverse the direction
-    if (!oedge.orientation) {
-      [startVertexId, endVertexId] = [endVertexId, startVertexId];
+  try {
+    const model = parseStep(stepText);
+    console.log("MODEL");
+    console.log(model);
+    if (model.faces.size === 0) {
+      throw new Error("No ADVANCED_FACE found in STEP file.");
     }
 
-    const startVertex = model.vertices.get(startVertexId);
-    const endVertex = model.vertices.get(endVertexId);
-    if (!startVertex || !endVertex) {
-      throw new Error(`VERTEX_POINT (#${startVertexId} or #${endVertexId}) not found`);
+    // For this minimal example, just take the first face, because there is only one face. 
+    const face = [...model.faces.values()][0];
+
+    // Get its outer bound
+    const outerBoundId = face.boundIds[0];
+    const outerBound = model.faceBounds.get(outerBoundId);
+    if (!outerBound) throw new Error(`FACE_OUTER_BOUND #${outerBoundId} not found`);
+
+    const loop = model.edgeLoops.get(outerBound.loopId);
+    if (!loop) throw new Error(`EDGE_LOOP #${outerBound.loopId} not found`);
+
+    // Walk oriented edges in order to get vertex coordinates around the boundary
+    const boundaryPoints: Vec3[] = [];
+
+    for (const orientedEdgeId of loop.orientedEdgeIds) {
+      const oedge = model.orientedEdges.get(orientedEdgeId);
+      if (!oedge) throw new Error(`ORIENTED_EDGE #${orientedEdgeId} not found`);
+
+      const edgeCurve = model.edgeCurves.get(oedge.edgeElementId);
+      if (!edgeCurve) throw new Error(`EDGE_CURVE #${oedge.edgeElementId} not found`);
+
+      // Figure out start/end vertex IDs depending on orientation
+      let startVertexId = edgeCurve.startVertexId;
+      let endVertexId = edgeCurve.endVertexId;
+
+      // If orientation is false (.F.), we reverse the direction
+      if (!oedge.orientation) {
+        [startVertexId, endVertexId] = [endVertexId, startVertexId];
+      }
+
+      const startVertex = model.vertices.get(startVertexId);
+      const endVertex = model.vertices.get(endVertexId);
+      if (!startVertex || !endVertex) {
+        throw new Error(`VERTEX_POINT (#${startVertexId} or #${endVertexId}) not found`);
+      }
+
+      const startPoint = model.points.get(startVertex.pointId);
+      const endPoint = model.points.get(endVertex.pointId);
+      if (!startPoint || !endPoint) {
+        throw new Error(
+          `CARTESIAN_POINT (#${startVertex.pointId} or #${endVertex.pointId}) not found`
+        );
+      }
+
+      // For building the polygon boundary, we can push the start point of each edge.
+      // The last edge will end where the first one started, so we'll close the loop later.
+      boundaryPoints.push(startPoint.coords);
     }
 
-    const startPoint = model.points.get(startVertex.pointId);
-    const endPoint = model.points.get(endVertex.pointId);
-    if (!startPoint || !endPoint) {
-      throw new Error(
-        `CARTESIAN_POINT (#${startVertex.pointId} or #${endVertex.pointId}) not found`
-      );
+    // Close the loop explicitly if needed (ensure last != first before adding)
+    const first = boundaryPoints[0];
+    const last = boundaryPoints[boundaryPoints.length - 1];
+    if (!vec3Equal(first, last)) {
+      boundaryPoints.push(first);
     }
 
-    // For building the polygon boundary, we can push the start point of each edge.
-    // The last edge will end where the first one started, so we'll close the loop later.
-    boundaryPoints.push(startPoint.coords);
+    let uniquePoints = boundaryPoints.slice(0, boundaryPoints.length - 1);
+    const positions = new Float32Array(uniquePoints.length * 3);
+    uniquePoints.forEach((p, i) => {
+      positions[i * 3 + 0] = p[0];
+      positions[i * 3 + 1] = p[1];
+      positions[i * 3 + 2] = p[2];
+    });
+
+    if (!isCounterClockWise(uniquePoints))  {
+      uniquePoints.reverse();
+    }
+
+    const indices = await gpuTesselate(uniquePoints);
+
+    return { positions, indices};
+
+  } catch(e) {
+    throw e;
   }
-
-  // Close the loop explicitly if needed (ensure last != first before adding)
-  const first = boundaryPoints[0];
-  const last = boundaryPoints[boundaryPoints.length - 1];
-  if (!vec3Equal(first, last)) {
-    boundaryPoints.push(first);
-  }
-
-  const uniquePoints = boundaryPoints.slice(0, boundaryPoints.length - 1);
-  const positions = new Float32Array(uniquePoints.length * 3);
-  uniquePoints.forEach((p, i) => {
-    positions[i * 3 + 0] = p[0];
-    positions[i * 3 + 1] = p[1];
-    positions[i * 3 + 2] = p[2];
-  });
-
-  const indices = await gpuTesselate(uniquePoints);
-
-  return { positions, indices};
+  
 }
 /**
  * Browser helper: take a `File` (e.g. from an `<input type="file">`) and
