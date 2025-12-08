@@ -1,0 +1,64 @@
+ISO-10303-21;
+HEADER;
+  FILE_DESCRIPTION(('Concave pentagon example - CCW'),'2;1');
+  FILE_NAME('pentagon_concave_ccw.stp','20250101',(''),(''),'','ChatGPT','');
+  FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+ENDSEC;
+DATA;
+
+  /* ==== Geometric context ==== */
+
+  #1 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #2 = DIRECTION('', (0.0, 0.0, 1.0));
+  #3 = DIRECTION('', (1.0, 0.0, 0.0));
+  #4 = AXIS2_PLACEMENT_3D('', #1, #2, #3);
+  #5 = PLANE('', #4);
+
+  /* ==== Concave pentagon points (CCW) ==== */
+  /* P0 = (0,0,0), P1 = (2,0,0), P2 = (2,2,0), P3 = (1,1,0), P4 = (0,2,0) */
+
+  #10 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));             /* P0 */
+  #11 = CARTESIAN_POINT('', (2.0, 0.0, 0.0));             /* P1 */
+  #12 = CARTESIAN_POINT('', (2.0, 2.0, 0.0));             /* P2 */
+  #13 = CARTESIAN_POINT('', (1.0, 1.0, 0.0));             /* P3 (concave) */
+  #14 = CARTESIAN_POINT('', (0.0, 2.0, 0.0));             /* P4 */
+
+  #20 = VERTEX_POINT('', #10);
+  #21 = VERTEX_POINT('', #11);
+  #22 = VERTEX_POINT('', #12);
+  #23 = VERTEX_POINT('', #13);
+  #24 = VERTEX_POINT('', #14);
+
+  #100 = VECTOR('', #3, 1.0);
+  #101 = VECTOR('', #3, 1.0);
+  #102 = VECTOR('', #3, 1.0);
+  #103 = VECTOR('', #3, 1.0);
+  #104 = VECTOR('', #3, 1.0);
+
+  #40 = LINE('', #10, #100);
+  #41 = LINE('', #11, #101);
+  #42 = LINE('', #12, #102);
+  #43 = LINE('', #13, #103);
+  #44 = LINE('', #14, #104);
+
+  /* Edges in CCW order: P0 -> P1 -> P2 -> P3 -> P4 -> P0 */
+
+  #30 = EDGE_CURVE('', #20, #21, #40, .T.);  /* P0 -> P1 */
+  #31 = EDGE_CURVE('', #21, #22, #41, .T.);  /* P1 -> P2 */
+  #32 = EDGE_CURVE('', #22, #23, #42, .T.);  /* P2 -> P3 */
+  #33 = EDGE_CURVE('', #23, #24, #43, .T.);  /* P3 -> P4 */
+  #34 = EDGE_CURVE('', #24, #20, #44, .T.);  /* P4 -> P0 */
+
+  #50 = ORIENTED_EDGE('', *, *, #30, .T.);
+  #51 = ORIENTED_EDGE('', *, *, #31, .T.);
+  #52 = ORIENTED_EDGE('', *, *, #32, .T.);
+  #53 = ORIENTED_EDGE('', *, *, #33, .T.);
+  #54 = ORIENTED_EDGE('', *, *, #34, .T.);
+
+  #60 = EDGE_LOOP('', (#50, #51, #52, #53, #54));
+
+  #70 = FACE_OUTER_BOUND('', #60, .T.);
+  #80 = ADVANCED_FACE('', (#70), #5, .T.);
+
+ENDSEC;
+END-ISO-10303-21;
