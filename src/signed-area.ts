@@ -39,15 +39,20 @@ export async function isCounterClockWiseGPU(points): boolean {
         try {
             const device = await getGPUDevice();
 
-            const uintPointsArray = new Uint32Array(points);
+            // Extract only x and y coordinates from points (points may be 3D [x, y, z] or 2D [x, y])
+            // Flatten to: [x1, y1, x2, y2, ...]
+            // This matches WGSL struct layout: array<Point> where Point { x: i32, y: i32 }
+            const xyPoints = points.map(p => [p[0], p[1]]);
+            const flattenedPoints = xyPoints.flat();
+            const intPointsArray = new Int32Array(flattenedPoints);
+            
             const pointsBuffer = device.createBuffer({
                 label: `isCounterClockWiseGPU - points buffer`,
                 usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
-                size: uintPointsArray.byteLength
+                size: intPointsArray.byteLength
             });
 
-            device.queue.writeBuffer(pointsBuffer, 0, uintPointsArray);
-
+            device.queue.writeBuffer(pointsBuffer, 0, intPointsArray);
 
             const partialSumsBuffer = device.createBuffer({
                 label: `isCounterClockWiseGPU - partialSums buffer`,
@@ -66,8 +71,8 @@ export async function isCounterClockWiseGPU(points): boolean {
                 code: `
                     /* wgsl */
 
-                    @group(0) @binding(0) var<storage, read> partialSums: array<u32>;
-                    @group(0) @binding(1) var<storage, read_write> output: u32;
+                    @group(0) @binding(0) var<storage, read> partialSums: array<i32>;
+                    @group(0) @binding(1) var<storage, read_write> output: i32;
                     @compute @workgroup_size(32) fn sum(
                         @builtin(global_invocation_id) id: vec3<u32>
                     ) {
@@ -78,7 +83,7 @@ export async function isCounterClockWiseGPU(points): boolean {
                         }
 
                         // now we want to do the sum as a for loop
-                        var sum: u32 = 0;
+                        var sum: i32 = 0;
                         for (var i: u32 = 0; i < partialSumsLength; i = i + 1) {
                             sum = partialSums[i] + sum;
                         }
@@ -93,13 +98,13 @@ export async function isCounterClockWiseGPU(points): boolean {
                 /* wgsl */
 
                 struct Point {
-                    x: u32,
-                    y: u32
+                    x: i32,
+                    y: i32
                 };
 
                 const WORKGROUP_SIZE = 32u;
                 @group(0) @binding(0) var<storage, read> pointsBuffer: array<Point>;
-                @group(0) @binding(1) var<storage, read_write> partialSums: array<u32>; // my typing might be wrong here
+                @group(0) @binding(1) var<storage, read_write> partialSums: array<i32>;
 
                 @compute @workgroup_size(WORKGROUP_SIZE) fn sum(
                     @builtin(global_invocation_id) id: vec3<u32>
@@ -120,14 +125,14 @@ export async function isCounterClockWiseGPU(points): boolean {
                             nextPoint = pointsBuffer[i + 1u];
                         }
 
-                            var x1 = currentPoint.x;
-                            var y1 = currentPoint.y;
-                            var x2 = nextPoint.x;
-                            var y2 = nextPoint.y;
+                        var x1 = currentPoint.x;
+                        var y1 = currentPoint.y;
+                        var x2 = nextPoint.x;
+                        var y2 = nextPoint.y;
 
-                            var intermediateSum = x1*y2 - x2*y1;
-                            // now we want to store this sum in an array
-                            partialSums[i] = intermediateSum;
+                        var intermediateSum = x1*y2 - x2*y1;
+                        // now we want to store this sum in an array
+                        partialSums[i] = intermediateSum;
                     }
                 }
                 `
@@ -138,7 +143,7 @@ export async function isCounterClockWiseGPU(points): boolean {
                     {
                         binding: 0,
                         visibility: GPUShaderStage.COMPUTE,
-                        buffer: { type: "storage"},
+                        buffer: { type: "read-only-storage"},
                     },
                     {
                         binding: 1,
@@ -153,7 +158,11 @@ export async function isCounterClockWiseGPU(points): boolean {
                     {
                         binding: 0,
                         visibility: GPUShaderStage.COMPUTE,
-                        buffer: { type: "storage"}                   
+                        buffer: { type: "read-only-storage"}                   
+                    }, {
+                        binding: 1,
+                        visibility: GPUShaderStage.COMPUTE,
+                        buffer: { type: "storage"}
                     }
                 ]
             });
@@ -213,20 +222,63 @@ export async function isCounterClockWiseGPU(points): boolean {
                 }
             });
 
-            const commandEncoder = device.createCommandEncoder();
-            let passEncoder = commandEncoder.beginComputePass();
+            // First compute pass: calculate partial sums
+            const workgroupSize = 32;
+            const numWorkgroups = Math.ceil(points.length / workgroupSize);
+
+            const partialSumsCommandEncoder = device.createCommandEncoder();
+            let passEncoder = partialSumsCommandEncoder.beginComputePass();
             passEncoder.setPipeline(partialSumsPipeline);
             passEncoder.setBindGroup(0, partialSumsBindGroup);
-            passEncoder.dispatchWorkgroups(64);
+            passEncoder.dispatchWorkgroups(numWorkgroups);
             passEncoder.end();
-            passEncoder = commandEncoder.beginComputePass();
+            device.queue.submit([partialSumsCommandEncoder.finish()]);
+
+            // Second compute pass: sum all partial sums
+            const isCCWNumWorkgroups = Math.ceil(1 / workgroupSize); // Only need 1 thread, but minimum is 1 workgroup
+            const isCCWCommandEncoder = device.createCommandEncoder();
+            passEncoder = isCCWCommandEncoder.beginComputePass();
             passEncoder.setPipeline(isCCWPipeline);
             passEncoder.setBindGroup(0, isCCWBindGroup);
-            passEncoder.dispatchWorkgroups(64);
+            passEncoder.dispatchWorkgroups(isCCWNumWorkgroups);
             passEncoder.end();
+            device.queue.submit([isCCWCommandEncoder.finish()]);
 
+            // Create a staging buffer to read the result
+            const stagingBuffer = device.createBuffer({
+                label: `isCounterClockWiseGPU - staging buffer`,
+                usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+                size: BYTE_SIZE
+            });
 
-            device.queue.submit([commandEncoder.finish()]);
+            // Copy the result from outputBuffer to stagingBuffer
+            const readCommandEncoder = device.createCommandEncoder();
+            readCommandEncoder.copyBufferToBuffer(
+                outputBuffer,
+                0,
+                stagingBuffer,
+                0,
+                BYTE_SIZE
+            );
+            device.queue.submit([readCommandEncoder.finish()]);
+
+            // Map the staging buffer and read the result
+            await stagingBuffer.mapAsync(GPUMapMode.READ);
+            const mappedRange = stagingBuffer.getMappedRange();
+            const result = new Int32Array(mappedRange)[0]; // Read as signed integer
+            stagingBuffer.unmap();
+
+            // Clean up buffers
+            pointsBuffer.destroy();
+            partialSumsBuffer.destroy();
+            outputBuffer.destroy();
+            stagingBuffer.destroy();
+
+            // Return true if counter-clockwise (positive sum), false if clockwise (negative sum)
+            if (result === 0) {
+                throw new Error("collinear or degenerate polygon");
+            }
+            return result > 0;
         } catch (e) {
             throw e;
         }
