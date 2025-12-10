@@ -1,6 +1,6 @@
 import {getGPUDevice} from "./lib";
 import { gpuTesselate } from "./gpu-tesselate";
-import { isCounterClockWise } from "./signed-area";
+import { isCounterClockWise, isCounterClockWiseGPU } from "./signed-area";
 // Minimal STEP → mesh parser for the square face example
 type Vec3 = [number, number, number];
 
@@ -142,9 +142,7 @@ export async function parseStepToMesh(stepText: string): Mesh {
       positions[i * 3 + 2] = p[2];
     });
 
-    if (!isCounterClockWise(uniquePoints))  {
-      uniquePoints.reverse();
-    }
+    await isCounterClockWiseGPU(uniquePoints);
 
     const indices = await gpuTesselate(uniquePoints);
 

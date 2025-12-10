@@ -15,9 +15,9 @@ async function handleFile(file: File) {
   const mesh = await parseBrowserFileToMesh(file);
   const parseEnd = performance.now();
   // const canvas = document.getElementById("canvas") as HTMLCanvasElement;
-  const threeMesh = createThreeMeshFromTesselation(mesh);
+  // const threeMesh = createThreeMeshFromTesselation(mesh);
   
-  render(threeMesh);
+  // render(threeMesh);
 
   console.log(
     `[Profile] STEP parse (custom parser): ${(parseEnd - parseStart).toFixed(
