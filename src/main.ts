@@ -1,5 +1,6 @@
 import { parseBrowserFileToMesh } from "./step-parser";
-import { createThreeMeshFromTesselation, render } from "./threejs-render";
+
+import { runPointInTriangleTests } from "./point-in-triangle.test";
 
 // /import { render } from "./gpu-render";
 
@@ -14,6 +15,7 @@ async function handleFile(file: File) {
   const parseStart = performance.now();
   const mesh = await parseBrowserFileToMesh(file);
   const parseEnd = performance.now();
+
   // const canvas = document.getElementById("canvas") as HTMLCanvasElement;
   // const threeMesh = createThreeMeshFromTesselation(mesh);
   
@@ -52,3 +54,7 @@ if (fileInput) {
 }
 
 
+
+runPointInTriangleTests().catch((err) => {
+  console.error("Error running point in triangle tests:", err);
+});
