@@ -55,8 +55,10 @@ export async function pointInTriangle(point: number[], triangle: number[][]) {
             size: 4
         });
 
-        // Debug buffer: store a, b, c, p (each Point = 4 floats) + c1, c2, c3 (each f32) = 4*4 + 3 = 19 floats = 76 bytes
-        const debugBufferSize = 76; // 19 floats * 4 bytes
+        // Debug buffer: store a, b, c, p (each Point = 4 floats) + c1, c2, c3 (each f32) + 
+        // For each cross product: v1 (2 floats), v2 (2 floats), v1.x*v2.y, v1.y*v2.x (2 floats)
+        // Total: 16 + 3 + (6*3) = 16 + 3 + 18 = 37 floats = 148 bytes
+        const debugBufferSize = 148; // 37 floats * 4 bytes
         const debugBuffer = device.createBuffer({
             label: `pointInTriangle - debug buffer`,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | GPUBufferUsage.STORAGE,
@@ -101,32 +103,76 @@ export async function pointInTriangle(point: number[], triangle: number[][]) {
                     var c2d = vec2<f32>(c.x, c.y);
                     var p2d = vec2<f32>(p.x, p.y);
 
-                    var c1 = cross2d(b2d - a2d, p2d - a2d);
-                    var c2 = cross2d(c2d - b2d, p2d - b2d);
-                    var c3 = cross2d(a2d - c2d, p2d - c2d);
+                    // Calculate c1: cross(b - a, p - a)
+                    var v1_c1 = b2d - a2d;
+                    var v2_c1 = p2d - a2d;
+                    var term1_c1 = v1_c1.x * v2_c1.y;
+                    var term2_c1 = v1_c1.y * v2_c1.x;
+                    var c1 = term1_c1 - term2_c1;
 
-                    // Debug logging: store a, b, c, p, c1, c2, c3
-                    // Layout: [a.x, a.y, a.z, a.padding, b.x, b.y, b.z, b.padding, c.x, c.y, c.z, c.padding, p.x, p.y, p.z, p.padding, c1, c2, c3]
-                    // Offset: 0 (single invocation)
-                    debugBuffer[0] = a.x;
-                    debugBuffer[1] = a.y;
-                    debugBuffer[2] = a.z;
-                    debugBuffer[3] = 0.0; // padding
-                    debugBuffer[4] = b.x;
-                    debugBuffer[5] = b.y;
-                    debugBuffer[6] = b.z;
-                    debugBuffer[7] = 0.0; // padding
-                    debugBuffer[8] = c.x;
-                    debugBuffer[9] = c.y;
-                    debugBuffer[10] = c.z;
-                    debugBuffer[11] = 0.0; // padding
-                    debugBuffer[12] = p.x;
-                    debugBuffer[13] = p.y;
-                    debugBuffer[14] = p.z;
-                    debugBuffer[15] = 0.0; // padding
-                    debugBuffer[16] = c1;
-                    debugBuffer[17] = c2;
-                    debugBuffer[18] = c3;
+                    // Calculate c2: cross(c - b, p - b)
+                    var v1_c2 = c2d - b2d;
+                    var v2_c2 = p2d - b2d;
+                    var term1_c2 = v1_c2.x * v2_c2.y;
+                    var term2_c2 = v1_c2.y * v2_c2.x;
+                    var c2 = term1_c2 - term2_c2;
+
+                    // Calculate c3: cross(a - c, p - c)
+                    var v1_c3 = a2d - c2d;
+                    var v2_c3 = p2d - c2d;
+                    var term1_c3 = v1_c3.x * v2_c3.y;
+                    var term2_c3 = v1_c3.y * v2_c3.x;
+                    var c3 = term1_c3 - term2_c3;
+
+                    // Debug logging: store a, b, c, p, c1, c2, c3, and intermediate values
+                    // Layout: [a (4), b (4), c (4), p (4), c1, c2, c3,
+                    //          v1_c1 (2), v2_c1 (2), term1_c1, term2_c1,
+                    //          v1_c2 (2), v2_c2 (2), term1_c2, term2_c2,
+                    //          v1_c3 (2), v2_c3 (2), term1_c3, term2_c3]
+                    // Total: 16 + 3 + 6 + 6 + 6 = 37 floats
+                    var offset = 0u;
+                    // Points
+                    debugBuffer[offset] = a.x; offset += 1u;
+                    debugBuffer[offset] = a.y; offset += 1u;
+                    debugBuffer[offset] = a.z; offset += 1u;
+                    debugBuffer[offset] = 0.0; offset += 1u; // padding
+                    debugBuffer[offset] = b.x; offset += 1u;
+                    debugBuffer[offset] = b.y; offset += 1u;
+                    debugBuffer[offset] = b.z; offset += 1u;
+                    debugBuffer[offset] = 0.0; offset += 1u; // padding
+                    debugBuffer[offset] = c.x; offset += 1u;
+                    debugBuffer[offset] = c.y; offset += 1u;
+                    debugBuffer[offset] = c.z; offset += 1u;
+                    debugBuffer[offset] = 0.0; offset += 1u; // padding
+                    debugBuffer[offset] = p.x; offset += 1u;
+                    debugBuffer[offset] = p.y; offset += 1u;
+                    debugBuffer[offset] = p.z; offset += 1u;
+                    debugBuffer[offset] = 0.0; offset += 1u; // padding
+                    // Cross products
+                    debugBuffer[offset] = c1; offset += 1u;
+                    debugBuffer[offset] = c2; offset += 1u;
+                    debugBuffer[offset] = c3; offset += 1u;
+                    // c1 intermediates
+                    debugBuffer[offset] = v1_c1.x; offset += 1u;
+                    debugBuffer[offset] = v1_c1.y; offset += 1u;
+                    debugBuffer[offset] = v2_c1.x; offset += 1u;
+                    debugBuffer[offset] = v2_c1.y; offset += 1u;
+                    debugBuffer[offset] = term1_c1; offset += 1u;
+                    debugBuffer[offset] = term2_c1; offset += 1u;
+                    // c2 intermediates
+                    debugBuffer[offset] = v1_c2.x; offset += 1u;
+                    debugBuffer[offset] = v1_c2.y; offset += 1u;
+                    debugBuffer[offset] = v2_c2.x; offset += 1u;
+                    debugBuffer[offset] = v2_c2.y; offset += 1u;
+                    debugBuffer[offset] = term1_c2; offset += 1u;
+                    debugBuffer[offset] = term2_c2; offset += 1u;
+                    // c3 intermediates
+                    debugBuffer[offset] = v1_c3.x; offset += 1u;
+                    debugBuffer[offset] = v1_c3.y; offset += 1u;
+                    debugBuffer[offset] = v2_c3.x; offset += 1u;
+                    debugBuffer[offset] = v2_c3.y; offset += 1u;
+                    debugBuffer[offset] = term1_c3; offset += 1u;
+                    debugBuffer[offset] = term2_c3; offset += 1u;
 
                     let epsilon = 1e-6;
                     if (c1 > epsilon && c2 > epsilon && c3 > epsilon) {
@@ -239,13 +285,15 @@ export async function pointInTriangle(point: number[], triangle: number[][]) {
 
         // Log debug info
         console.log("=== DEBUG LOGGING ===");
-        const a = { x: debugData[0], y: debugData[1], z: debugData[2] };
-        const b = { x: debugData[4], y: debugData[5], z: debugData[6] };
-        const c = { x: debugData[8], y: debugData[9], z: debugData[10] };
-        const p = { x: debugData[12], y: debugData[13], z: debugData[14] };
-        const c1 = debugData[16];
-        const c2 = debugData[17];
-        const c3 = debugData[18];
+        let idx = 0;
+        const a = { x: debugData[idx++], y: debugData[idx++], z: debugData[idx++], padding: debugData[idx++] };
+        const b = { x: debugData[idx++], y: debugData[idx++], z: debugData[idx++], padding: debugData[idx++] };
+        const c = { x: debugData[idx++], y: debugData[idx++], z: debugData[idx++], padding: debugData[idx++] };
+        const p = { x: debugData[idx++], y: debugData[idx++], z: debugData[idx++], padding: debugData[idx++] };
+        const c1 = debugData[idx++];
+        const c2 = debugData[idx++];
+        const c3 = debugData[idx++];
+        
         console.log(`a=(${a.x}, ${a.y}, ${a.z})`);
         console.log(`b=(${b.x}, ${b.y}, ${b.z})`);
         console.log(`c=(${c.x}, ${c.y}, ${c.z})`);
@@ -253,6 +301,43 @@ export async function pointInTriangle(point: number[], triangle: number[][]) {
         console.log(`c1=${c1}`);
         console.log(`c2=${c2}`);
         console.log(`c3=${c3}`);
+        
+        // c1 intermediates: cross(b - a, p - a)
+        const v1_c1 = { x: debugData[idx++], y: debugData[idx++] };
+        const v2_c1 = { x: debugData[idx++], y: debugData[idx++] };
+        const term1_c1 = debugData[idx++];
+        const term2_c1 = debugData[idx++];
+        console.log(`c1 calculation: cross(b - a, p - a)`);
+        console.log(`  v1_c1 = b - a = (${v1_c1.x}, ${v1_c1.y})`);
+        console.log(`  v2_c1 = p - a = (${v2_c1.x}, ${v2_c1.y})`);
+        console.log(`  term1_c1 = v1_c1.x * v2_c1.y = ${v1_c1.x} * ${v2_c1.y} = ${term1_c1}`);
+        console.log(`  term2_c1 = v1_c1.y * v2_c1.x = ${v1_c1.y} * ${v2_c1.x} = ${term2_c1}`);
+        console.log(`  c1 = term1_c1 - term2_c1 = ${term1_c1} - ${term2_c1} = ${c1}`);
+        
+        // c2 intermediates: cross(c - b, p - b)
+        const v1_c2 = { x: debugData[idx++], y: debugData[idx++] };
+        const v2_c2 = { x: debugData[idx++], y: debugData[idx++] };
+        const term1_c2 = debugData[idx++];
+        const term2_c2 = debugData[idx++];
+        console.log(`c2 calculation: cross(c - b, p - b)`);
+        console.log(`  v1_c2 = c - b = (${v1_c2.x}, ${v1_c2.y})`);
+        console.log(`  v2_c2 = p - b = (${v2_c2.x}, ${v2_c2.y})`);
+        console.log(`  term1_c2 = v1_c2.x * v2_c2.y = ${v1_c2.x} * ${v2_c2.y} = ${term1_c2}`);
+        console.log(`  term2_c2 = v1_c2.y * v2_c2.x = ${v1_c2.y} * ${v2_c2.x} = ${term2_c2}`);
+        console.log(`  c2 = term1_c2 - term2_c2 = ${term1_c2} - ${term2_c2} = ${c2}`);
+        
+        // c3 intermediates: cross(a - c, p - c)
+        const v1_c3 = { x: debugData[idx++], y: debugData[idx++] };
+        const v2_c3 = { x: debugData[idx++], y: debugData[idx++] };
+        const term1_c3 = debugData[idx++];
+        const term2_c3 = debugData[idx++];
+        console.log(`c3 calculation: cross(a - c, p - c)`);
+        console.log(`  v1_c3 = a - c = (${v1_c3.x}, ${v1_c3.y})`);
+        console.log(`  v2_c3 = p - c = (${v2_c3.x}, ${v2_c3.y})`);
+        console.log(`  term1_c3 = v1_c3.x * v2_c3.y = ${v1_c3.x} * ${v2_c3.y} = ${term1_c3}`);
+        console.log(`  term2_c3 = v1_c3.y * v2_c3.x = ${v1_c3.y} * ${v2_c3.x} = ${term2_c3}`);
+        console.log(`  c3 = term1_c3 - term2_c3 = ${term1_c3} - ${term2_c3} = ${c3}`);
+        
         console.log("=== END DEBUG LOGGING ===");
 
         return result;
