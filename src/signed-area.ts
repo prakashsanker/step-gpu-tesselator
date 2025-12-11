@@ -28,6 +28,7 @@ export function isCounterClockWise(points): boolean{
     return false;
 }
 
+
 export async function isCounterClockWiseGPU(points): boolean {
     /*
         What do I need to do?
@@ -269,7 +270,7 @@ export async function isCounterClockWiseGPU(points): boolean {
             stagingBuffer.unmap();
 
             // Clean up buffers
-            pointsBuffer.destroy();
+            // pointsBuffer.destroy(); // We need to reverse the memory 
             partialSumsBuffer.destroy();
             outputBuffer.destroy();
             stagingBuffer.destroy();

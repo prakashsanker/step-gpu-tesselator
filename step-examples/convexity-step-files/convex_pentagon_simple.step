@@ -1,0 +1,65 @@
+ISO-10303-21;
+HEADER;
+  FILE_DESCRIPTION(('Simple convex pentagon face'),'2;1');
+  FILE_NAME('convex_pentagon_simple.stp','20250101',(''),(''),'','ChatGPT','');
+  FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+ENDSEC;
+DATA;
+
+  /* ==== Geometric context: plane z=0 ==== */
+
+  #1 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #2 = DIRECTION('', (0.0, 0.0, 1.0));
+  #3 = DIRECTION('', (1.0, 0.0, 0.0));
+  #4 = AXIS2_PLACEMENT_3D('', #1, #2, #3);
+  #5 = PLANE('', #4);
+
+  /* ==== Convex pentagon vertices (CCW) ==== */
+
+  #10 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));    /* V0 */
+  #11 = CARTESIAN_POINT('', (2.0, 0.0, 0.0));    /* V1 */
+  #12 = CARTESIAN_POINT('', (3.0, 1.0, 0.0));    /* V2 */
+  #13 = CARTESIAN_POINT('', (1.5, 2.0, 0.0));    /* V3 */
+  #14 = CARTESIAN_POINT('', (0.0, 1.0, 0.0));    /* V4 */
+
+  #20 = VERTEX_POINT('', #10);
+  #21 = VERTEX_POINT('', #11);
+  #22 = VERTEX_POINT('', #12);
+  #23 = VERTEX_POINT('', #13);
+  #24 = VERTEX_POINT('', #14);
+
+  /* ==== Edge directions (approximate, not used by your parser) ==== */
+
+  #30 = DIRECTION('', ( 1.0,  0.0, 0.0));              /* V0→V1 */
+  #31 = DIRECTION('', ( 0.7071,  0.7071, 0.0));        /* V1→V2 */
+  #32 = DIRECTION('', (-0.8321,  0.5547, 0.0));        /* V2→V3 */
+  #33 = DIRECTION('', (-0.8321, -0.5547, 0.0));        /* V3→V4 */
+  #34 = DIRECTION('', ( 0.0,   -1.0,    0.0));         /* V4→V0 */
+
+  #40 = LINE('', #10, #30);
+  #41 = LINE('', #11, #31);
+  #42 = LINE('', #12, #32);
+  #43 = LINE('', #13, #33);
+  #44 = LINE('', #14, #34);
+
+  #50 = EDGE_CURVE('', #20, #21, #40, .T.);
+  #51 = EDGE_CURVE('', #21, #22, #41, .T.);
+  #52 = EDGE_CURVE('', #22, #23, #42, .T.);
+  #53 = EDGE_CURVE('', #23, #24, #43, .T.);
+  #54 = EDGE_CURVE('', #24, #20, #44, .T.);
+
+  #60 = ORIENTED_EDGE('', *, *, #50, .T.);
+  #61 = ORIENTED_EDGE('', *, *, #51, .T.);
+  #62 = ORIENTED_EDGE('', *, *, #52, .T.);
+  #63 = ORIENTED_EDGE('', *, *, #53, .T.);
+  #64 = ORIENTED_EDGE('', *, *, #54, .T.);
+
+  #70 = EDGE_LOOP('', (#60, #61, #62, #63, #64));
+  #80 = FACE_OUTER_BOUND('', #70, .T.);
+  #90 = ADVANCED_FACE('', (#80), #5, .T.);
+
+  #100 = CLOSED_SHELL('', (#90));
+  #110 = MANIFOLD_SOLID_BREP('CONVEX_PENTAGON_SIMPLE', #100);
+
+ENDSEC;
+END-ISO-10303-21;
