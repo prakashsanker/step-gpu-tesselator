@@ -6,19 +6,29 @@ export async function classifyPoints(points: number[][]) {
 
         const device = await getGPUDevice();
 
-        const flattenedPoints = new Float32Array(points.flat());
+        // Ensure all points are 3D (x, y, z) - pad with 0 if needed
+        const normalizedPoints = points.map(p => {
+            if (p.length === 2) return [p[0], p[1], 0, 0];
+            if (p.length === 3) return [p[0], p[1], p[2], 0];
+            throw new Error(`Invalid point dimension: ${p.length}`);
+        });
+        
+        const numPoints = normalizedPoints.length;
+        const flattenedPoints = new Float32Array(normalizedPoints.flat());
+        
+        
         const pointsBuffer = device.createBuffer({
             label: `isConvexityCheck - points buffer`,
-            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
+            usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
             size: flattenedPoints.byteLength
         });
+        
         device.queue.writeBuffer(pointsBuffer, 0, flattenedPoints);
 
         const classifiedPoints = device.createBuffer({
-
             label: `isConvexityCheck - classifiedPoints buffer`,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.COPY_SRC | GPUBufferUsage.STORAGE,
-            size: flattenedPoints.byteLength
+            size: points.length * 4
         });
 
 
@@ -28,7 +38,8 @@ export async function classifyPoints(points: number[][]) {
             code: `
                 /* wgsl */
                 struct Point {
-                    position: vec3<f32>
+                    position: vec3<f32>,
+                    padding: f32
                 }
                 const REFLEX = 0u;
                 const CONVEX = 1;
@@ -43,7 +54,7 @@ export async function classifyPoints(points: number[][]) {
                 ) {
                     let i = id.x;
                     let pointsBufferLength = arrayLength(&pointsBuffer);
-                    if (i > pointsBufferLength) {
+                    if (i >= pointsBufferLength) {
                         return;
                     }
 
@@ -121,7 +132,7 @@ export async function classifyPoints(points: number[][]) {
         });
 
         const workgroupSize = 32;
-        const numWorkgroups = Math.ceil(flattenedPoints.length / workgroupSize);
+        const numWorkgroups = Math.ceil(numPoints / workgroupSize);
         const commandEncoder = device.createCommandEncoder();
         const passEncoder = commandEncoder.beginComputePass();
         passEncoder.setPipeline(convexityCheckPipeline);
@@ -133,9 +144,9 @@ export async function classifyPoints(points: number[][]) {
         const readBuffer = device.createBuffer({
             label: `isConvexityCheck - read buffer`,
             usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
-            size: flattenedPoints.byteLength
+            size: points.length * 4
         });
-        commandEncoder.copyBufferToBuffer(classifiedPoints, 0, readBuffer, 0, flattenedPoints.byteLength);
+        commandEncoder.copyBufferToBuffer(classifiedPoints, 0, readBuffer, 0, points.length * 4);
         device.queue.submit([commandEncoder.finish()]);
 
         await readBuffer.mapAsync(GPUMapMode.READ);
@@ -143,7 +154,6 @@ export async function classifyPoints(points: number[][]) {
         const result = new Uint32Array(mappedRange.slice());
         readBuffer.unmap();
 
-        console.log("CONVEXITY CHECK RESULT", result);
         return result;
 
     } catch (e) {

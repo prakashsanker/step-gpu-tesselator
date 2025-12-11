@@ -72,8 +72,6 @@ export async function parseStepToMesh(stepText: string): Mesh {
 
   try {
     const model = parseStep(stepText);
-    console.log("MODEL");
-    console.log(model);
     if (model.faces.size === 0) {
       throw new Error("No ADVANCED_FACE found in STEP file.");
     }
@@ -207,18 +205,14 @@ function parseStep(stepText: string): StepModel {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    console.log("TRIMMED", trimmed);
 
     if (!trimmed.startsWith("#")) continue;
-    console.log("DO WE MAKE IT HERE?")
     const match = trimmed.match(entityRegex);
     if (!match) continue;
-    console.log("DO WE GET A MATCH?");
 
     const id = parseInt(match[1], 10);
     const type = match[2];
     const args = match[3]; // raw argument string inside (...)
-    console.log("TYPE", type);
 
     switch (type) {
       case "CARTESIAN_POINT":
@@ -296,11 +290,6 @@ function parseOrientedEdge(id: number, args: string, model: StepModel) {
   if (!m) throw new Error(`Failed to parse ORIENTED_EDGE args: ${args}`);
   const edgeElementId = parseInt(m[1], 10);
   const orientation = m[2] === ".T.";
-  console.log("PARSE ORIENTED EDGE", id);
-  console.log("args", args);
-  console.log("EDGE ELEMENT ID", edgeElementId);
-
-  console.log("=====");
 
 
   model.orientedEdges.set(id, {
