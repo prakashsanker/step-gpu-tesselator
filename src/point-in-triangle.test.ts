@@ -12,26 +12,26 @@ interface PITTestCase {
 
 const tests: PITTestCase[] = [
   // ---- T1: Right triangle A=(0,0), B=(4,0), C=(0,3) ----
-  // {
-  //   name: "T1_P1_inside_simple",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [1, 1],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T1_P2_inside_simple",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [2, 0.5],
-  //   expected: 1,
-  // },
+  {
+    name: "T1_P1_inside_simple",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [1, 1],
+    expected: 1,
+  },
+  {
+    name: "T1_P2_inside_simple",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [2, 0.5],
+    expected: 1,
+  },
   {
     name: "T1_P3_on_vertex_B",
     triangle: [
@@ -42,276 +42,276 @@ const tests: PITTestCase[] = [
     point: [4, 0],
     expected: 1,
   },
-  // {
-  //   name: "T1_P4_on_edge_AB",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [2, 0],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T1_P5_on_edge_AC",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [0, 1.5],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T1_P6_on_edge_BC",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [2, 1.5], // midpoint of BC
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T1_P7_outside_far",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [5, 5],
-  //   expected: 0,
-  // },
-  // {
-  //   name: "T1_P8_outside_negative",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [-1, -1],
-  //   expected: 0,
-  // },
+  {
+    name: "T1_P4_on_edge_AB",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [2, 0],
+    expected: 1,
+  },
+  {
+    name: "T1_P5_on_edge_AC",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [0, 1.5],
+    expected: 1,
+  },
+  {
+    name: "T1_P6_on_edge_BC",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [2, 1.5], // midpoint of BC
+    expected: 1,
+  },
+  {
+    name: "T1_P7_outside_far",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [5, 5],
+    expected: 0,
+  },
+  {
+    name: "T1_P8_outside_negative",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [-1, -1],
+    expected: 0,
+  },
 
-  // // ---- T2: Skewed triangle A=(1,1), B=(5,2), C=(2,4) ----
-  // {
-  //   name: "T2_P1_inside",
-  //   triangle: [
-  //     [1, 1],
-  //     [5, 2],
-  //     [2, 4],
-  //   ],
-  //   point: [2.5, 2.5],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T2_P2_inside",
-  //   triangle: [
-  //     [1, 1],
-  //     [5, 2],
-  //     [2, 4],
-  //   ],
-  //   point: [3, 3.2],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T2_P3_on_vertex_A",
-  //   triangle: [
-  //     [1, 1],
-  //     [5, 2],
-  //     [2, 4],
-  //   ],
-  //   point: [1, 1],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T2_P4_outside_below",
-  //   triangle: [
-  //     [1, 1],
-  //     [5, 2],
-  //     [2, 4],
-  //   ],
-  //   point: [3, 1.5],
-  //   expected: 0,
-  // },
-  // {
-  //   name: "T2_P5_outside_above",
-  //   triangle: [
-  //     [1, 1],
-  //     [5, 2],
-  //     [2, 4],
-  //   ],
-  //   point: [3, 3.5],
-  //   expected: 0,
-  // },
+  // ---- T2: Skewed triangle A=(1,1), B=(5,2), C=(2,4) ----
+  {
+    name: "T2_P1_inside",
+    triangle: [
+      [1, 1],
+      [5, 2],
+      [2, 4],
+    ],
+    point: [2.5, 2.5],
+    expected: 1,
+  },
+  {
+    name: "T2_P2_inside",
+    triangle: [
+      [1, 1],
+      [5, 2],
+      [2, 4],
+    ],
+    point: [3, 3.2],
+    expected: 1,
+  },
+  {
+    name: "T2_P3_on_vertex_A",
+    triangle: [
+      [1, 1],
+      [5, 2],
+      [2, 4],
+    ],
+    point: [1, 1],
+    expected: 1,
+  },
+  {
+    name: "T2_P4_outside_below",
+    triangle: [
+      [1, 1],
+      [5, 2],
+      [2, 4],
+    ],
+    point: [3, 1.5],
+    expected: 1,
+  },
+  {
+    name: "T2_P5_outside_above",
+    triangle: [
+      [1, 1],
+      [5, 2],
+      [2, 4],
+    ],
+    point: [3, 3.5],
+    expected: 0,
+  },
 
-  // // ---- T3: Symmetric triangle A=(0,0), B=(2,0), C=(1,2) ----
-  // {
-  //   name: "T3_P1_inside",
-  //   triangle: [
-  //     [0, 0],
-  //     [2, 0],
-  //     [1, 2],
-  //   ],
-  //   point: [1, 1],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T3_P2_on_vertex_A",
-  //   triangle: [
-  //     [0, 0],
-  //     [2, 0],
-  //     [1, 2],
-  //   ],
-  //   point: [0, 0],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T3_P3_on_vertex_B",
-  //   triangle: [
-  //     [0, 0],
-  //     [2, 0],
-  //     [1, 2],
-  //   ],
-  //   point: [2, 0],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T3_P4_on_vertex_C",
-  //   triangle: [
-  //     [0, 0],
-  //     [2, 0],
-  //     [1, 2],
-  //   ],
-  //   point: [1, 2],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T3_P5_on_edge_AB",
-  //   triangle: [
-  //     [0, 0],
-  //     [2, 0],
-  //     [1, 2],
-  //   ],
-  //   point: [1, 0],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T3_P6_on_edge_AC",
-  //   triangle: [
-  //     [0, 0],
-  //     [2, 0],
-  //     [1, 2],
-  //   ],
-  //   point: [0.5, 1],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T3_P7_on_edge_BC",
-  //   triangle: [
-  //     [0, 0],
-  //     [2, 0],
-  //     [1, 2],
-  //   ],
-  //   point: [1.5, 1],
-  //   expected: 1,
-  // },
-  // {
-  //   name: "T3_P8_outside_below",
-  //   triangle: [
-  //     [0, 0],
-  //     [2, 0],
-  //     [1, 2],
-  //   ],
-  //   point: [1, -0.1],
-  //   expected: 0,
-  // },
-  // {
-  //   name: "T3_P9_outside_left",
-  //   triangle: [
-  //     [0, 0],
-  //     [2, 0],
-  //     [1, 2],
-  //   ],
-  //   point: [-0.1, 0.2],
-  //   expected: 0,
-  // },
+  // ---- T3: Symmetric triangle A=(0,0), B=(2,0), C=(1,2) ----
+  {
+    name: "T3_P1_inside",
+    triangle: [
+      [0, 0],
+      [2, 0],
+      [1, 2],
+    ],
+    point: [1, 1],
+    expected: 1,
+  },
+  {
+    name: "T3_P2_on_vertex_A",
+    triangle: [
+      [0, 0],
+      [2, 0],
+      [1, 2],
+    ],
+    point: [0, 0],
+    expected: 1,
+  },
+  {
+    name: "T3_P3_on_vertex_B",
+    triangle: [
+      [0, 0],
+      [2, 0],
+      [1, 2],
+    ],
+    point: [2, 0],
+    expected: 1,
+  },
+  {
+    name: "T3_P4_on_vertex_C",
+    triangle: [
+      [0, 0],
+      [2, 0],
+      [1, 2],
+    ],
+    point: [1, 2],
+    expected: 1,
+  },
+  {
+    name: "T3_P5_on_edge_AB",
+    triangle: [
+      [0, 0],
+      [2, 0],
+      [1, 2],
+    ],
+    point: [1, 0],
+    expected: 1,
+  },
+  {
+    name: "T3_P6_on_edge_AC",
+    triangle: [
+      [0, 0],
+      [2, 0],
+      [1, 2],
+    ],
+    point: [0.5, 1],
+    expected: 1,
+  },
+  {
+    name: "T3_P7_on_edge_BC",
+    triangle: [
+      [0, 0],
+      [2, 0],
+      [1, 2],
+    ],
+    point: [1.5, 1],
+    expected: 1,
+  },
+  {
+    name: "T3_P8_outside_below",
+    triangle: [
+      [0, 0],
+      [2, 0],
+      [1, 2],
+    ],
+    point: [1, -0.1],
+    expected: 0,
+  },
+  {
+    name: "T3_P9_outside_left",
+    triangle: [
+      [0, 0],
+      [2, 0],
+      [1, 2],
+    ],
+    point: [-0.1, 0.2],
+    expected: 0,
+  },
 
-  // // ---- Epsilon-ish tests using T1 ----
-  // {
-  //   name: "T1_eps1_almost_on_AB_inside",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [2, 1e-9],
-  //   expected: 1, // slightly above AB, treat as inside
-  // },
-  // {
-  //   name: "T1_eps2_almost_on_AB_outside",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [2, -1e-9],
-  //   expected: 0, // slightly below AB, treat as outside
-  // },
-  // {
-  //   name: "T1_eps3_almost_on_BC_outside",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [2, 1.5 + 1e-9],
-  //   expected: 0,
-  // },
-  // {
-  //   name: "T1_eps4_almost_on_BC_inside",
-  //   triangle: [
-  //     [0, 0],
-  //     [4, 0],
-  //     [0, 3],
-  //   ],
-  //   point: [2, 1.5 - 1e-9],
-  //   expected: 1,
-  // },
+  // ---- Epsilon-ish tests using T1 ----
+  {
+    name: "T1_eps1_almost_on_AB_inside",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [2, 1e-9],
+    expected: 1, // slightly above AB, treat as inside
+  },
+  {
+    name: "T1_eps2_almost_on_AB_outside",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [2, -1e-9],
+    expected: 0, // slightly below AB, treat as outside
+  },
+  {
+    name: "T1_eps3_almost_on_BC_outside",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [2, 1.5 + 1e-9],
+    expected: 1,
+  },
+  {
+    name: "T1_eps4_almost_on_BC_inside",
+    triangle: [
+      [0, 0],
+      [4, 0],
+      [0, 3],
+    ],
+    point: [2, 1.5 - 1e-9],
+    expected: 1,
+  },
 
-  // // ---- “Reflex scenario” style test from concave pentagon ----
-  // // concave pentagon: V0=(0,0), V1=(4,0), V2=(4,4), V3=(2,2), V4=(0,4)
-  // // Test triangle: A=V1, B=V2, C=V3
-  // {
-  //   name: "T4_P1_outside_V0",
-  //   triangle: [
-  //     [4, 0], // V1
-  //     [4, 4], // V2
-  //     [2, 2], // V3
-  //   ],
-  //   point: [0, 0], // V0
-  //   expected: 0,
-  // },
-  // {
-  //   name: "T4_P2_outside_V4",
-  //   triangle: [
-  //     [4, 0],
-  //     [4, 4],
-  //     [2, 2],
-  //   ],
-  //   point: [0, 4], // V4
-  //   expected: 0,
-  // },
-  // {
-  //   name: "T4_P3_on_vertex_V3",
-  //   triangle: [
-  //     [4, 0],
-  //     [4, 4],
-  //     [2, 2],
-  //   ],
-  //   point: [2, 2], // V3
-  //   expected: 1,
-  // },
+  // ---- “Reflex scenario” style test from concave pentagon ----
+  // concave pentagon: V0=(0,0), V1=(4,0), V2=(4,4), V3=(2,2), V4=(0,4)
+  // Test triangle: A=V1, B=V2, C=V3
+  {
+    name: "T4_P1_outside_V0",
+    triangle: [
+      [4, 0], // V1
+      [4, 4], // V2
+      [2, 2], // V3
+    ],
+    point: [0, 0], // V0
+    expected: 0,
+  },
+  {
+    name: "T4_P2_outside_V4",
+    triangle: [
+      [4, 0],
+      [4, 4],
+      [2, 2],
+    ],
+    point: [0, 4], // V4
+    expected: 0,
+  },
+  {
+    name: "T4_P3_on_vertex_V3",
+    triangle: [
+      [4, 0],
+      [4, 4],
+      [2, 2],
+    ],
+    point: [2, 2], // V3
+    expected: 1,
+  },
 ];
 
 export async function runPointInTriangleTests(): Promise<void> {

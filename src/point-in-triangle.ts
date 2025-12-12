@@ -174,8 +174,10 @@ export async function pointInTriangle(point: number[], triangle: number[][]) {
                     debugBuffer[offset] = term1_c3; offset += 1u;
                     debugBuffer[offset] = term2_c3; offset += 1u;
 
-                    let epsilon = 1e-6;
-                    if (c1 > epsilon && c2 > epsilon && c3 > epsilon) {
+                    let epsilon = 1e-12;
+                    // Point is inside if all cross products are >= 0 (allowing for floating point errors)
+                    // This includes points on vertices (where one cross product = 0) and edges
+                    if (c1 >= -epsilon && c2 >= -epsilon && c3 >= -epsilon) {
                         resultBooleanBuffer[0] = 1u;
                     } else {
                         resultBooleanBuffer[0] = 0u;
