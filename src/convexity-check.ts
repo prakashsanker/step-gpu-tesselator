@@ -1,4 +1,4 @@
-import { getGPUDevice } from "./lib";
+import { getGPUDevice, normalizePoints } from "./lib";
 
 // make sure that points is in counter clockwise order
 export async function classifyPoints(points: number[][]) {
@@ -7,11 +7,7 @@ export async function classifyPoints(points: number[][]) {
         const device = await getGPUDevice();
 
         // Ensure all points are 3D (x, y, z) - pad with 0 if needed
-        const normalizedPoints = points.map(p => {
-            if (p.length === 2) return [p[0], p[1], 0, 0];
-            if (p.length === 3) return [p[0], p[1], p[2], 0];
-            throw new Error(`Invalid point dimension: ${p.length}`);
-        });
+        const normalizedPoints = normalizePoints(points);
         
         const numPoints = normalizedPoints.length;
         const flattenedPoints = new Float32Array(normalizedPoints.flat());
