@@ -1,6 +1,5 @@
-import { gpuTesselate } from "./gpu-tesselate";
+import { earClipping } from "./ear-clipping";
 import { isCounterClockWiseGPU } from "./signed-area";
-import { classifyPoints } from "./convexity-check";
 // Minimal STEP → mesh parser for the square face example
 type Vec3 = [number, number, number];
 
@@ -146,10 +145,21 @@ export async function parseStepToMesh(stepText: string): Mesh {
     uniquePoints = uniquePoints.reverse();
    }
 
-   const classifiedPoints = await classifyPoints(uniquePoints);
-
-
-    const indices = await gpuTesselate(uniquePoints);
+    // Use ear clipping algorithm for triangulation
+    const triangles = await earClipping(uniquePoints);
+    
+    console.log("[StepParser] Received triangles from earClipping:", triangles);
+    
+    // Convert triangles array to flat indices array
+    const indicesArray: number[] = [];
+    for (const triangle of triangles) {
+        indicesArray.push(triangle[0], triangle[1], triangle[2]);
+    }
+    const indices = new Uint32Array(indicesArray);
+    
+    console.log("[StepParser] Final indices array:", Array.from(indices));
+    console.log("[StepParser] Indices length:", indices.length);
+    console.log("[StepParser] Expected triangle count:", triangles.length);
 
 
 
