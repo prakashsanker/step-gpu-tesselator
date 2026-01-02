@@ -319,6 +319,219 @@ function applyWindingTo3D(
   return { outer, holes };
 }
 
+// =============================================================================
+// C2.4: Topology Validation
+// =============================================================================
+
+/**
+ * Result of topology validation
+ */
+export interface TopologyValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Check if a point is inside a polygon using ray casting algorithm.
+ * Casts a ray from the point to the right (+X) and counts edge crossings.
+ * Odd crossings = inside, even = outside.
+ */
+function pointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
+  const [px, py] = point;
+  let inside = false;
+  const n = polygon.length;
+
+  for (let i = 0, j = n - 1; i < n; j = i++) {
+    const [xi, yi] = polygon[i];
+    const [xj, yj] = polygon[j];
+
+    // Check if ray crosses this edge
+    const intersects = ((yi > py) !== (yj > py)) &&
+      (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+
+    if (intersects) {
+      inside = !inside;
+    }
+  }
+
+  return inside;
+}
+
+/**
+ * Check if two line segments intersect (proper intersection, not touching endpoints).
+ * Uses the orientation test method.
+ *
+ * @param a1, a2 - First segment endpoints
+ * @param b1, b2 - Second segment endpoints
+ * @returns true if segments properly intersect (cross each other)
+ */
+function segmentsIntersect(a1: Vec2, a2: Vec2, b1: Vec2, b2: Vec2): boolean {
+  // Compute orientation of three points (sign of cross product)
+  function orientation(p: Vec2, q: Vec2, r: Vec2): number {
+    const val = (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1]);
+    if (Math.abs(val) < EPSILON) return 0;  // Collinear
+    return val > 0 ? 1 : -1;  // Clockwise or counter-clockwise
+  }
+
+  // Check if point q lies on segment pr (when collinear)
+  function onSegment(p: Vec2, q: Vec2, r: Vec2): boolean {
+    return q[0] <= Math.max(p[0], r[0]) && q[0] >= Math.min(p[0], r[0]) &&
+           q[1] <= Math.max(p[1], r[1]) && q[1] >= Math.min(p[1], r[1]);
+  }
+
+  const o1 = orientation(a1, a2, b1);
+  const o2 = orientation(a1, a2, b2);
+  const o3 = orientation(b1, b2, a1);
+  const o4 = orientation(b1, b2, a2);
+
+  // General case: segments intersect if orientations differ
+  if (o1 !== o2 && o3 !== o4) {
+    return true;
+  }
+
+  // Special collinear cases
+  if (o1 === 0 && onSegment(a1, b1, a2)) return true;
+  if (o2 === 0 && onSegment(a1, b2, a2)) return true;
+  if (o3 === 0 && onSegment(b1, a1, b2)) return true;
+  if (o4 === 0 && onSegment(b1, a2, b2)) return true;
+
+  return false;
+}
+
+/**
+ * Check if two line segments share a vertex (are adjacent in a polygon).
+ */
+function segmentsShareVertex(a1: Vec2, a2: Vec2, b1: Vec2, b2: Vec2): boolean {
+  const eq = (p: Vec2, q: Vec2) =>
+    Math.abs(p[0] - q[0]) < EPSILON && Math.abs(p[1] - q[1]) < EPSILON;
+  return eq(a1, b1) || eq(a1, b2) || eq(a2, b1) || eq(a2, b2);
+}
+
+/**
+ * Check if a loop is simple (doesn't self-intersect).
+ * Checks all non-adjacent edge pairs for intersection.
+ */
+function isSimpleLoop(loop: Vec2[]): { valid: boolean; error?: string } {
+  const n = loop.length;
+  if (n < 3) {
+    return { valid: false, error: "Loop has fewer than 3 vertices" };
+  }
+
+  // Check all pairs of non-adjacent edges
+  for (let i = 0; i < n; i++) {
+    const a1 = loop[i];
+    const a2 = loop[(i + 1) % n];
+
+    // Start from i+2 to skip adjacent edges
+    for (let j = i + 2; j < n; j++) {
+      // Skip if j+1 wraps around to i (adjacent)
+      if (j === n - 1 && i === 0) continue;
+
+      const b1 = loop[j];
+      const b2 = loop[(j + 1) % n];
+
+      // Skip if segments share a vertex (adjacent edges)
+      if (segmentsShareVertex(a1, a2, b1, b2)) continue;
+
+      if (segmentsIntersect(a1, a2, b1, b2)) {
+        return {
+          valid: false,
+          error: `Self-intersection: edges ${i}-${(i+1)%n} and ${j}-${(j+1)%n}`
+        };
+      }
+    }
+  }
+
+  return { valid: true };
+}
+
+/**
+ * Check if two loops intersect each other.
+ * Tests all edge pairs between the two loops.
+ */
+function loopsIntersect(loop1: Vec2[], loop2: Vec2[], loop1Name: string, loop2Name: string): { intersects: boolean; error?: string } {
+  for (let i = 0; i < loop1.length; i++) {
+    const a1 = loop1[i];
+    const a2 = loop1[(i + 1) % loop1.length];
+
+    for (let j = 0; j < loop2.length; j++) {
+      const b1 = loop2[j];
+      const b2 = loop2[(j + 1) % loop2.length];
+
+      if (segmentsIntersect(a1, a2, b1, b2)) {
+        return {
+          intersects: true,
+          error: `${loop1Name} edge ${i} intersects ${loop2Name} edge ${j}`
+        };
+      }
+    }
+  }
+
+  return { intersects: false };
+}
+
+/**
+ * Validate the topology of a face with holes.
+ *
+ * Checks:
+ * 1. All loops are simple (no self-intersection)
+ * 2. All hole vertices are inside the outer boundary
+ * 3. No loop intersects any other loop (outer↔hole, hole↔hole)
+ *
+ * @param outer2d - Outer boundary in 2D (should be CCW)
+ * @param holes2d - Holes in 2D (should each be CW)
+ * @returns Validation result with any errors found
+ */
+function validateTopology(outer2d: Vec2[], holes2d: Vec2[][]): TopologyValidationResult {
+  const errors: string[] = [];
+
+  // 1. Check outer loop is simple
+  const outerSimple = isSimpleLoop(outer2d);
+  if (!outerSimple.valid) {
+    errors.push(`Outer loop: ${outerSimple.error}`);
+  }
+
+  // 2. Check each hole
+  for (let h = 0; h < holes2d.length; h++) {
+    const hole = holes2d[h];
+
+    // 2a. Check hole is simple
+    const holeSimple = isSimpleLoop(hole);
+    if (!holeSimple.valid) {
+      errors.push(`Hole ${h}: ${holeSimple.error}`);
+    }
+
+    // 2b. Check all hole vertices are inside outer
+    for (let v = 0; v < hole.length; v++) {
+      if (!pointInPolygon(hole[v], outer2d)) {
+        errors.push(`Hole ${h} vertex ${v} is outside outer boundary`);
+        break;  // One error per hole is enough
+      }
+    }
+
+    // 2c. Check hole doesn't intersect outer
+    const outerHoleIntersect = loopsIntersect(outer2d, hole, "outer", `hole ${h}`);
+    if (outerHoleIntersect.intersects) {
+      errors.push(outerHoleIntersect.error!);
+    }
+  }
+
+  // 3. Check holes don't intersect each other
+  for (let i = 0; i < holes2d.length; i++) {
+    for (let j = i + 1; j < holes2d.length; j++) {
+      const holeHoleIntersect = loopsIntersect(holes2d[i], holes2d[j], `hole ${i}`, `hole ${j}`);
+      if (holeHoleIntersect.intersects) {
+        errors.push(holeHoleIntersect.error!);
+      }
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors
+  };
+}
+
 /**
  * Debug function to verify projection sanity.
  * Checks:
@@ -477,6 +690,18 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     normalized.outerReversed,
     normalized.holesReversed
   );
+
+  // C2.4: Validate topology (holes inside outer, no intersections, simple loops)
+  const topology = validateTopology(normalized.outer2d, normalized.holes2d);
+  if (!topology.valid) {
+    console.warn("[StepParser] Topology validation failed:");
+    for (const error of topology.errors) {
+      console.warn(`  - ${error}`);
+    }
+    // For now, continue anyway but warn. Could throw in strict mode.
+  } else {
+    console.log("[StepParser] Topology validation passed");
+  }
 
   // Build positions array from oriented 3D outer boundary (for rendering)
   const positions = new Float32Array(oriented3d.outer.length * 3);
@@ -660,6 +885,38 @@ export function parseStepWinding(stepText: string): WindingTestResult {
     normalizedHoleAreas,
     outerReversed: normalized.outerReversed,
     holesReversed: normalized.holesReversed,
+  };
+}
+
+/**
+ * Parse a STEP file and return topology validation results for testing.
+ */
+export function parseStepTopology(stepText: string): TopologyValidationResult & {
+  outerVertexCount: number;
+  holeCount: number;
+} {
+  const model = parseStep(stepText);
+  if (model.faces.size === 0) {
+    throw new Error("No ADVANCED_FACE found in STEP file.");
+  }
+
+  const face = [...model.faces.values()][0];
+  const { outer, holes } = extractFaceBounds(model, face);
+
+  // Compute basis and project to 2D
+  const basis = computeFaceBasisFromStepFace(model, face, outer);
+  const { outer2d, holes2d } = projectFaceLoopsTo2D({ outer, holes }, basis);
+
+  // Normalize winding
+  const normalized = normalizeWinding({ outer2d, holes2d });
+
+  // Validate topology
+  const result = validateTopology(normalized.outer2d, normalized.holes2d);
+
+  return {
+    ...result,
+    outerVertexCount: normalized.outer2d.length,
+    holeCount: normalized.holes2d.length,
   };
 }
 

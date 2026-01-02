@@ -19,7 +19,7 @@
 
     <script type="module">
         import { earClipping } from '/src/ear-clipping.ts';
-        import { parseStepToMesh, parseStepFaceBounds, parseStepProjection, parseStepWinding } from '/src/step-parser.ts';
+        import { parseStepToMesh, parseStepFaceBounds, parseStepProjection, parseStepWinding, parseStepTopology } from '/src/step-parser.ts';
         import { isCounterClockWiseGPU } from '/src/signed-area.ts';
         import { getGPUDevice } from '/src/lib.ts';
 
@@ -133,6 +133,22 @@
                         holesReversed: result.holesReversed,
                         outerVertexCount: result.normalizedOuter2d.length,
                         holeCount: result.normalizedHoles2d.length,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message, stack: e.stack };
+                }
+            },
+
+            // Parse STEP file and return topology validation results
+            testTopology(stepText) {
+                try {
+                    const result = parseStepTopology(stepText);
+                    return {
+                        success: true,
+                        valid: result.valid,
+                        errors: result.errors,
+                        outerVertexCount: result.outerVertexCount,
+                        holeCount: result.holeCount,
                     };
                 } catch (e) {
                     return { success: false, error: e.message, stack: e.stack };

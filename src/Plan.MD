@@ -44,21 +44,21 @@ origin O, axes u,v, normal n
 project points: (x,y) = (dot(p-O,u), dot(p-O,v))
 Status: ✅ Done
 
-C2.3 Normalize winding
+C2.3 Normalize winding ✅
 
 outer CCW
 
 holes CW (or vice versa consistently)
-Status: 🚧 Next
+Status: ✅ Done
 
-C2.4 Validate topology
+C2.4 Validate topology ✅
 
 hole inside outer
 
 no intersections (outer↔hole, hole↔hole)
 
 loops simple
-Status: ❌ Not started
+Status: ✅ Done
 
 C2.5 Triangulate with holes
 
@@ -68,7 +68,7 @@ C2.5a (Ear clipping path): bridge holes → single loop → ear clip
 
 C2.5b (CDT path): constrained triangulation using outer+hole constraints
 You can render: planar faces with one or many holes (washers, flanges, plates w/ cutouts)
-Status: ❌ Not started
+Status: 🚧 Next
 
 C3 — Curved edges and real STEP geometry (sampling)
 C3.1 Support non-line edges in loops (CIRCLE, ELLIPSE, B-SPLINE, etc.)

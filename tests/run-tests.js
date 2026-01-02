@@ -846,6 +846,229 @@ async function testProjection(page) {
     return { passed, failed };
 }
 
+/**
+ * Test Suite: Winding Normalization (C2.3)
+ */
+async function testWindingNormalization(page) {
+    log('\n[Suite] Winding Normalization', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const tests = [
+        {
+            name: 'Square with CW winding (should reverse outer)',
+            path: 'step-examples/winding/square-cw.step',
+            expectOuterReversed: true,
+            expectHolesReversed: [],
+            expectNormalizedOuterPositive: true,  // After normalization, outer should be CCW (positive area)
+        },
+        {
+            name: 'Square with CCW hole (should reverse hole)',
+            path: 'step-examples/winding/square-with-ccw-hole.step',
+            expectOuterReversed: false,
+            expectHolesReversed: [true],  // Hole should be reversed to CW
+            expectNormalizedOuterPositive: true,
+            expectNormalizedHolesNegative: [true],  // Hole should have negative area after normalization
+        },
+        {
+            name: 'Both wrong (CW outer + CCW hole)',
+            path: 'step-examples/winding/both-wrong.step',
+            expectOuterReversed: true,
+            expectHolesReversed: [true],
+            expectNormalizedOuterPositive: true,
+            expectNormalizedHolesNegative: [true],
+        },
+        {
+            name: 'Correct winding (CCW outer + CW hole)',
+            path: 'step-examples/winding/correct-winding.step',
+            expectOuterReversed: false,
+            expectHolesReversed: [false],  // Already correct, no reversal needed
+            expectNormalizedOuterPositive: true,
+            expectNormalizedHolesNegative: [true],
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            // Load STEP file
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            // Run winding test in browser
+            const result = await page.evaluate((stepText) => {
+                return window.testHarness.testWinding(stepText);
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            // Validate results
+            const issues = [];
+
+            // Check if outer was reversed correctly
+            if (result.outerReversed !== test.expectOuterReversed) {
+                issues.push(`outer reversed: expected ${test.expectOuterReversed}, got ${result.outerReversed}`);
+            }
+
+            // Check if holes were reversed correctly
+            for (let i = 0; i < test.expectHolesReversed.length; i++) {
+                if (result.holesReversed[i] !== test.expectHolesReversed[i]) {
+                    issues.push(`hole[${i}] reversed: expected ${test.expectHolesReversed[i]}, got ${result.holesReversed[i]}`);
+                }
+            }
+
+            // Check normalized outer area is positive (CCW)
+            if (test.expectNormalizedOuterPositive && result.normalizedOuterArea <= 0) {
+                issues.push(`normalized outer area should be positive (CCW), got ${result.normalizedOuterArea.toFixed(4)}`);
+            }
+
+            // Check normalized hole areas are negative (CW)
+            if (test.expectNormalizedHolesNegative) {
+                for (let i = 0; i < test.expectNormalizedHolesNegative.length; i++) {
+                    if (test.expectNormalizedHolesNegative[i] && result.normalizedHoleAreas[i] >= 0) {
+                        issues.push(`normalized hole[${i}] area should be negative (CW), got ${result.normalizedHoleAreas[i].toFixed(4)}`);
+                    }
+                }
+            }
+
+            if (issues.length === 0) {
+                const reversals = [];
+                if (result.outerReversed) reversals.push('outer');
+                for (let i = 0; i < result.holesReversed.length; i++) {
+                    if (result.holesReversed[i]) reversals.push(`hole${i}`);
+                }
+                const reversalInfo = reversals.length > 0 ? `reversed: [${reversals.join(', ')}]` : 'no reversals needed';
+                logTest(test.name, true, reversalInfo);
+                passed++;
+            } else {
+                logTest(test.name, false, issues.join('; '));
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
+/**
+ * Test Suite: Topology Validation (C2.4)
+ */
+async function testTopologyValidation(page) {
+    log('\n[Suite] Topology Validation', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const tests = [
+        {
+            name: 'Valid: square with centered hole',
+            path: 'step-examples/topology/valid-square-with-hole.step',
+            expectValid: true,
+        },
+        {
+            name: 'Valid: simple square (no holes)',
+            path: 'step-examples/basics/ccw-square.step',
+            expectValid: true,
+        },
+        {
+            name: 'Valid: existing square with hole',
+            path: 'step-examples/basics/square-with-triangle-hole.step',
+            expectValid: true,
+        },
+        {
+            name: 'Invalid: hole outside outer boundary',
+            path: 'step-examples/topology/hole-outside-outer.step',
+            expectValid: false,
+            expectErrorContains: 'outside outer boundary',
+        },
+        {
+            name: 'Invalid: holes intersect each other',
+            path: 'step-examples/topology/holes-intersect.step',
+            expectValid: false,
+            expectErrorContains: 'intersects',
+        },
+        {
+            name: 'Invalid: self-intersecting outer loop',
+            path: 'step-examples/topology/self-intersecting-outer.step',
+            expectValid: false,
+            expectErrorContains: 'Self-intersection',
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            // Load STEP file
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            // Run topology test in browser
+            const result = await page.evaluate((stepText) => {
+                return window.testHarness.testTopology(stepText);
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            // Validate results
+            const issues = [];
+
+            // Check validity matches expectation
+            if (result.valid !== test.expectValid) {
+                issues.push(`expected valid=${test.expectValid}, got ${result.valid}`);
+                if (result.errors.length > 0) {
+                    issues.push(`errors: ${result.errors.join('; ')}`);
+                }
+            }
+
+            // For invalid cases, check error message contains expected text
+            if (!test.expectValid && test.expectErrorContains) {
+                const hasExpectedError = result.errors.some(e =>
+                    e.toLowerCase().includes(test.expectErrorContains.toLowerCase())
+                );
+                if (!hasExpectedError) {
+                    issues.push(`expected error containing "${test.expectErrorContains}", got: ${result.errors.join('; ')}`);
+                }
+            }
+
+            if (issues.length === 0) {
+                const info = test.expectValid
+                    ? 'topology OK'
+                    : `detected: ${result.errors[0]}`;
+                logTest(test.name, true, info);
+                passed++;
+            } else {
+                logTest(test.name, false, issues.join('; '));
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
 // ============================================================================
 // MAIN
 // ============================================================================
@@ -909,6 +1132,8 @@ async function main() {
             testStepFiles,
             testFaceBoundsParsing,
             testProjection,
+            testWindingNormalization,
+            testTopologyValidation,
         ];
 
         for (const suite of suites) {
