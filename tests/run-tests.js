@@ -618,6 +618,234 @@ async function testTriangleValidity(page) {
     return { passed, failed };
 }
 
+/**
+ * Test Suite: Face Bounds Parsing (outer boundary + holes)
+ */
+async function testFaceBoundsParsing(page) {
+    log('\n[Suite] Face Bounds Parsing', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const stepFiles = [
+        {
+            name: 'Simple square (no holes)',
+            path: 'step-examples/basics/ccw-square.step',
+            expectedOuterVertices: 4,
+            expectedHoleCount: 0,
+            expectedHoleVertices: [],
+        },
+        {
+            name: 'Triangle (no holes)',
+            path: 'step-examples/basics/triangle.step',
+            expectedOuterVertices: 3,
+            expectedHoleCount: 0,
+            expectedHoleVertices: [],
+        },
+        {
+            name: 'Square with triangular hole',
+            path: 'step-examples/basics/square-with-triangle-hole.step',
+            expectedOuterVertices: 4,
+            expectedHoleCount: 1,
+            expectedHoleVertices: [3],
+        },
+        {
+            name: 'Square with two triangular holes',
+            path: 'step-examples/basics/square-with-two-holes.step',
+            expectedOuterVertices: 4,
+            expectedHoleCount: 2,
+            expectedHoleVertices: [3, 3],
+        },
+    ];
+
+    for (const test of stepFiles) {
+        try {
+            // Load STEP file
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            // Parse face bounds in browser
+            const result = await page.evaluate((stepText) => {
+                return window.testHarness.parseFaceBounds(stepText);
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            const outerOk = result.outerVertexCount === test.expectedOuterVertices;
+            const holeCountOk = result.holeCount === test.expectedHoleCount;
+            const holeVerticesOk = test.expectedHoleVertices.every(
+                (expected, i) => result.holeVertexCounts[i] === expected
+            );
+
+            if (outerOk && holeCountOk && holeVerticesOk) {
+                const holeInfo = result.holeCount > 0
+                    ? `, ${result.holeCount} hole(s) with [${result.holeVertexCounts.join(', ')}] vertices`
+                    : ', no holes';
+                logTest(test.name, true, `outer: ${result.outerVertexCount} vertices${holeInfo}`);
+                passed++;
+            } else {
+                const issues = [];
+                if (!outerOk) issues.push(`expected ${test.expectedOuterVertices} outer vertices, got ${result.outerVertexCount}`);
+                if (!holeCountOk) issues.push(`expected ${test.expectedHoleCount} holes, got ${result.holeCount}`);
+                if (!holeVerticesOk) issues.push(`hole vertex counts mismatch: expected [${test.expectedHoleVertices}], got [${result.holeVertexCounts}]`);
+                logTest(test.name, false, issues.join('; '));
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
+/**
+ * Test Suite: 3D to 2D Projection
+ */
+async function testProjection(page) {
+    log('\n[Suite] 3D to 2D Projection', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const tests = [
+        {
+            name: 'Flat square on XY plane (z=0)',
+            path: 'step-examples/basics/ccw-square.step',
+            expectedVertices: 4,
+            expectUsedStepPlane: true,
+            expectPlanar: true,
+            expectNonZeroArea: true,
+        },
+        {
+            name: 'Tilted square (45° around Y axis)',
+            path: 'step-examples/projection/tilted-square-45deg.step',
+            expectedVertices: 4,
+            expectUsedStepPlane: true,
+            expectPlanar: true,
+            expectNonZeroArea: true,
+        },
+        {
+            name: 'Vertical wall on XZ plane',
+            path: 'step-examples/projection/vertical-wall-xz.step',
+            expectedVertices: 4,
+            expectUsedStepPlane: true,
+            expectPlanar: true,
+            expectNonZeroArea: true,
+        },
+        {
+            name: 'Tilted hexagon (45° around X axis)',
+            path: 'step-examples/projection/tilted-hexagon.step',
+            expectedVertices: 6,
+            expectUsedStepPlane: true,
+            expectPlanar: true,
+            expectNonZeroArea: true,
+        },
+        {
+            name: 'Tilted triangle (no PLANE - geometric fallback)',
+            path: 'step-examples/projection/tilted-triangle-no-plane.step',
+            expectedVertices: 3,
+            expectUsedStepPlane: false,  // Should use geometric fallback
+            expectPlanar: true,
+            expectNonZeroArea: true,
+        },
+        {
+            name: 'Square with hole (projection preserves hole)',
+            path: 'step-examples/basics/square-with-triangle-hole.step',
+            expectedVertices: 4,
+            expectedHoles: 1,
+            expectUsedStepPlane: true,
+            expectPlanar: true,
+            expectNonZeroArea: true,
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            // Load STEP file
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            // Run projection test in browser
+            const result = await page.evaluate((stepText) => {
+                return window.testHarness.testProjection(stepText);
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            // Validate results
+            const issues = [];
+
+            // Check vertex count
+            if (result.outerVertexCount !== test.expectedVertices) {
+                issues.push(`expected ${test.expectedVertices} vertices, got ${result.outerVertexCount}`);
+            }
+
+            // Check hole count if specified
+            if (test.expectedHoles !== undefined && result.holeCount !== test.expectedHoles) {
+                issues.push(`expected ${test.expectedHoles} holes, got ${result.holeCount}`);
+            }
+
+            // Check if used STEP plane data
+            if (result.usedStepPlane !== test.expectUsedStepPlane) {
+                issues.push(`expected usedStepPlane=${test.expectUsedStepPlane}, got ${result.usedStepPlane}`);
+            }
+
+            // Check planarity (maxZDeviation should be near 0)
+            const planarityThreshold = 1e-6;
+            const isPlanar = result.maxZDeviation < planarityThreshold;
+            if (test.expectPlanar && !isPlanar) {
+                issues.push(`not planar: maxZ=${result.maxZDeviation.toExponential(2)}`);
+            }
+
+            // Check non-zero signed area
+            const areaThreshold = 1e-10;
+            const hasArea = Math.abs(result.signedArea2d) > areaThreshold;
+            if (test.expectNonZeroArea && !hasArea) {
+                issues.push(`zero area: ${result.signedArea2d.toExponential(2)}`);
+            }
+
+            // Check that 2D points match 3D point count
+            if (result.outer2d.length !== result.outer3d.length) {
+                issues.push(`2D/3D count mismatch: ${result.outer2d.length} vs ${result.outer3d.length}`);
+            }
+
+            if (issues.length === 0) {
+                const planeInfo = result.usedStepPlane ? 'STEP plane' : 'geometric';
+                logTest(test.name, true, `${result.outerVertexCount}v, area=${result.signedArea2d.toFixed(2)}, ${planeInfo}`);
+                passed++;
+            } else {
+                logTest(test.name, false, issues.join('; '));
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
 // ============================================================================
 // MAIN
 // ============================================================================
@@ -679,6 +907,8 @@ async function main() {
             testWindingOrder,
             testTriangleValidity,
             testStepFiles,
+            testFaceBoundsParsing,
+            testProjection,
         ];
 
         for (const suite of suites) {

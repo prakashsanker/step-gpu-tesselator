@@ -19,7 +19,7 @@
 
     <script type="module">
         import { earClipping } from '/src/ear-clipping.ts';
-        import { parseStepToMesh } from '/src/step-parser.ts';
+        import { parseStepToMesh, parseStepFaceBounds, parseStepProjection, parseStepWinding } from '/src/step-parser.ts';
         import { isCounterClockWiseGPU } from '/src/signed-area.ts';
         import { getGPUDevice } from '/src/lib.ts';
 
@@ -27,6 +27,8 @@
         window.testHarness = {
             earClipping,
             parseStepToMesh,
+            parseStepFaceBounds,
+            parseStepProjection,
             isCounterClockWiseGPU,
             getGPUDevice,
 
@@ -75,6 +77,65 @@
                     return { success: true, isCCW };
                 } catch (e) {
                     return { success: false, error: e.message };
+                }
+            },
+
+            // Parse STEP file and return face bounds (outer + holes)
+            parseFaceBounds(stepText) {
+                try {
+                    const bounds = parseStepFaceBounds(stepText);
+                    return {
+                        success: true,
+                        outer: bounds.outer,
+                        holes: bounds.holes,
+                        outerVertexCount: bounds.outer.length,
+                        holeCount: bounds.holes.length,
+                        holeVertexCounts: bounds.holes.map(h => h.length)
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message, stack: e.stack };
+                }
+            },
+
+            // Parse STEP file and return projection results
+            testProjection(stepText) {
+                try {
+                    const result = parseStepProjection(stepText);
+                    return {
+                        success: true,
+                        basis: result.basis,
+                        outer3d: result.outer3d,
+                        outer2d: result.outer2d,
+                        holes3d: result.holes3d,
+                        holes2d: result.holes2d,
+                        signedArea2d: result.signedArea2d,
+                        maxZDeviation: result.maxZDeviation,
+                        usedStepPlane: result.usedStepPlane,
+                        outerVertexCount: result.outer3d.length,
+                        holeCount: result.holes3d.length,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message, stack: e.stack };
+                }
+            },
+
+            // Parse STEP file and return winding normalization results
+            testWinding(stepText) {
+                try {
+                    const result = parseStepWinding(stepText);
+                    return {
+                        success: true,
+                        rawOuterArea: result.rawOuterArea,
+                        rawHoleAreas: result.rawHoleAreas,
+                        normalizedOuterArea: result.normalizedOuterArea,
+                        normalizedHoleAreas: result.normalizedHoleAreas,
+                        outerReversed: result.outerReversed,
+                        holesReversed: result.holesReversed,
+                        outerVertexCount: result.normalizedOuter2d.length,
+                        holeCount: result.normalizedHoles2d.length,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message, stack: e.stack };
                 }
             },
 

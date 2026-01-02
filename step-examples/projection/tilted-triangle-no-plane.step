@@ -1,0 +1,45 @@
+ISO-10303-21;
+HEADER;
+  FILE_DESCRIPTION(('Triangle without PLANE entity - tests geometric fallback'),'2;1');
+  FILE_NAME('tilted_triangle_no_plane.stp','20250101',(''),(''),'','','');
+  FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+ENDSEC;
+DATA;
+
+  /* ==== NO PLANE/AXIS2_PLACEMENT_3D - forces geometric basis computation ==== */
+
+  /* ==== Triangle vertices tilted in 3D ==== */
+  /* A(0,0,0), B(2,0,1), C(1,1.5,0.5) */
+
+  #10 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #11 = CARTESIAN_POINT('', (2.0, 0.0, 1.0));
+  #12 = CARTESIAN_POINT('', (1.0, 1.5, 0.5));
+
+  #20 = VERTEX_POINT('', #10);
+  #21 = VERTEX_POINT('', #11);
+  #22 = VERTEX_POINT('', #12);
+
+  /* Dummy direction for lines */
+  #3 = DIRECTION('', (1.0, 0.0, 0.0));
+  #100 = VECTOR('', #3, 1.0);
+
+  #40 = LINE('', #10, #100);
+  #41 = LINE('', #11, #100);
+  #42 = LINE('', #12, #100);
+
+  #30 = EDGE_CURVE('', #20, #21, #40, .T.);
+  #31 = EDGE_CURVE('', #21, #22, #41, .T.);
+  #32 = EDGE_CURVE('', #22, #20, #42, .T.);
+
+  #50 = ORIENTED_EDGE('', *, *, #30, .T.);
+  #51 = ORIENTED_EDGE('', *, *, #31, .T.);
+  #52 = ORIENTED_EDGE('', *, *, #32, .T.);
+
+  #60 = EDGE_LOOP('', (#50, #51, #52));
+  #70 = FACE_OUTER_BOUND('', #60, .T.);
+
+  /* surfaceId #5 doesn't exist - will trigger geometric fallback */
+  #80 = ADVANCED_FACE('', (#70), #5, .T.);
+
+ENDSEC;
+END-ISO-10303-21;
