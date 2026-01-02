@@ -42,18 +42,18 @@ export async function isCounterClockWiseGPU(points): boolean {
 
             // Extract only x and y coordinates from points (points may be 3D [x, y, z] or 2D [x, y])
             // Flatten to: [x1, y1, x2, y2, ...]
-            // This matches WGSL struct layout: array<Point> where Point { x: i32, y: i32 }
+            // This matches WGSL struct layout: array<Point> where Point { x: f32, y: f32 }
             const xyPoints = points.map(p => [p[0], p[1]]);
             const flattenedPoints = xyPoints.flat();
-            const intPointsArray = new Int32Array(flattenedPoints);
+            const floatPointsArray = new Float32Array(flattenedPoints);
             
             const pointsBuffer = device.createBuffer({
                 label: `isCounterClockWiseGPU - points buffer`,
                 usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.STORAGE,
-                size: intPointsArray.byteLength
+                size: floatPointsArray.byteLength
             });
 
-            device.queue.writeBuffer(pointsBuffer, 0, intPointsArray);
+            device.queue.writeBuffer(pointsBuffer, 0, floatPointsArray);
 
             const partialSumsBuffer = device.createBuffer({
                 label: `isCounterClockWiseGPU - partialSums buffer`,
@@ -72,8 +72,8 @@ export async function isCounterClockWiseGPU(points): boolean {
                 code: `
                     /* wgsl */
 
-                    @group(0) @binding(0) var<storage, read> partialSums: array<i32>;
-                    @group(0) @binding(1) var<storage, read_write> output: i32;
+                    @group(0) @binding(0) var<storage, read> partialSums: array<f32>;
+                    @group(0) @binding(1) var<storage, read_write> output: f32;
                     @compute @workgroup_size(32) fn sum(
                         @builtin(global_invocation_id) id: vec3<u32>
                     ) {
@@ -84,9 +84,9 @@ export async function isCounterClockWiseGPU(points): boolean {
                         }
 
                         // now we want to do the sum as a for loop
-                        var sum: i32 = 0;
-                        for (var i: u32 = 0; i < partialSumsLength; i = i + 1) {
-                            sum = partialSums[i] + sum;
+                        var sum: f32 = 0.0;
+                        for (var j: u32 = 0; j < partialSumsLength; j = j + 1) {
+                            sum = partialSums[j] + sum;
                         }
 
                         output = sum;

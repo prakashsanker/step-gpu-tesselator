@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Ear Clipping Tests</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #eee; }
+        .pass { color: #4ade80; }
+        .fail { color: #f87171; }
+        .pending { color: #fbbf24; }
+        #log { white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>WebGPU Ear Clipping Test Harness</h1>
+    <div id="gpu-status">Checking WebGPU support...</div>
+    <div id="log"></div>
+
+    <script type="module">
+        import { earClipping } from '/src/ear-clipping.ts';
+        import { parseStepToMesh } from '/src/step-parser.ts';
+        import { isCounterClockWiseGPU } from '/src/signed-area.ts';
+        import { getGPUDevice } from '/src/lib.ts';
+
+        // Expose functions to window for Puppeteer access
+        window.testHarness = {
+            earClipping,
+            parseStepToMesh,
+            isCounterClockWiseGPU,
+            getGPUDevice,
+
+            // Helper to check if WebGPU is available
+            async checkWebGPU() {
+                try {
+                    const device = await getGPUDevice();
+                    return { available: true, info: device.limits };
+                } catch (e) {
+                    return { available: false, error: e.message };
+                }
+            },
+
+            // Run ear clipping on a polygon and return triangles
+            async runEarClipping(points) {
+                try {
+                    const triangles = await earClipping(points);
+                    return { success: true, triangles };
+                } catch (e) {
+                    return { success: false, error: e.message, stack: e.stack };
+                }
+            },
+
+            // Parse STEP file and return mesh
+            async parseStep(stepText) {
+                try {
+                    const mesh = await parseStepToMesh(stepText);
+                    return {
+                        success: true,
+                        mesh: {
+                            positions: Array.from(mesh.positions),
+                            indices: Array.from(mesh.indices),
+                            vertexCount: mesh.positions.length / 3,
+                            triangleCount: mesh.indices.length / 3
+                        }
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message, stack: e.stack };
+                }
+            },
+
+            // Check winding order
+            async checkWinding(points) {
+                try {
+                    const isCCW = await isCounterClockWiseGPU(points);
+                    return { success: true, isCCW };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            // Validate triangulation result
+            validateTriangulation(points, triangles) {
+                const errors = [];
+                const numVertices = points.length;
+                const expectedTriangles = numVertices - 2;
+
+                // Check triangle count
+                if (triangles.length !== expectedTriangles) {
+                    errors.push(`Expected ${expectedTriangles} triangles, got ${triangles.length}`);
+                }
+
+                // Check all indices are valid
+                for (let i = 0; i < triangles.length; i++) {
+                    const tri = triangles[i];
+                    for (let j = 0; j < 3; j++) {
+                        if (tri[j] < 0 || tri[j] >= numVertices) {
+                            errors.push(`Triangle ${i} has invalid index ${tri[j]} (max: ${numVertices - 1})`);
+                        }
+                    }
+                    // Check for degenerate triangles (same vertex twice)
+                    if (tri[0] === tri[1] || tri[1] === tri[2] || tri[0] === tri[2]) {
+                        errors.push(`Triangle ${i} is degenerate: [${tri}]`);
+                    }
+                }
+
+                // Check total area matches polygon area (approximately)
+                const polygonArea = Math.abs(computeSignedArea(points));
+                let triangleAreaSum = 0;
+                for (const tri of triangles) {
+                    const a = points[tri[0]];
+                    const b = points[tri[1]];
+                    const c = points[tri[2]];
+                    triangleAreaSum += Math.abs(triangleArea(a, b, c));
+                }
+
+                const areaDiff = Math.abs(polygonArea - triangleAreaSum);
+                if (areaDiff > 1e-6) {
+                    errors.push(`Area mismatch: polygon=${polygonArea.toFixed(6)}, triangles=${triangleAreaSum.toFixed(6)}, diff=${areaDiff.toFixed(6)}`);
+                }
+
+                return {
+                    valid: errors.length === 0,
+                    errors,
+                    polygonArea,
+                    triangleAreaSum
+                };
+            }
+        };
+
+        // Helper: compute signed area of polygon (for CCW check)
+        function computeSignedArea(points) {
+            let sum = 0;
+            for (let i = 0; i < points.length; i++) {
+                const curr = points[i];
+                const next = points[(i + 1) % points.length];
+                sum += curr[0] * next[1] - next[0] * curr[1];
+            }
+            return sum / 2;
+        }
+
+        // Helper: compute area of triangle
+        function triangleArea(a, b, c) {
+            return ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
+        }
+
+        // Log function for visual feedback
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const span = document.createElement('span');
+            span.className = type;
+            span.textContent = message + '\n';
+            logDiv.appendChild(span);
+        }
+
+        // Initialize
+        async function init() {
+            const statusDiv = document.getElementById('gpu-status');
+            const result = await window.testHarness.checkWebGPU();
+            if (result.available) {
+                statusDiv.innerHTML = '<span class="pass">WebGPU available</span>';
+                log('WebGPU initialized successfully', 'pass');
+            } else {
+                statusDiv.innerHTML = '<span class="fail">WebGPU not available: ' + result.error + '</span>';
+                log('WebGPU not available: ' + result.error, 'fail');
+            }
+
+            // Signal that harness is ready
+            window.testHarnessReady = true;
+        }
+
+        init();
+    </script>
+</body>
+</html>
