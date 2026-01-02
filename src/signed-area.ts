@@ -99,17 +99,17 @@ export async function isCounterClockWiseGPU(points): boolean {
                 /* wgsl */
 
                 struct Point {
-                    x: i32,
-                    y: i32
+                    x: f32,
+                    y: f32
                 };
 
                 const WORKGROUP_SIZE = 32u;
                 @group(0) @binding(0) var<storage, read> pointsBuffer: array<Point>;
-                @group(0) @binding(1) var<storage, read_write> partialSums: array<i32>;
+                @group(0) @binding(1) var<storage, read_write> partialSums: array<f32>;
 
                 @compute @workgroup_size(WORKGROUP_SIZE) fn sum(
                     @builtin(global_invocation_id) id: vec3<u32>
-                
+
                 ) {
                     let pointsBufferLength = arrayLength(&pointsBuffer);
                     if (id.x > pointsBufferLength) {
@@ -266,7 +266,7 @@ export async function isCounterClockWiseGPU(points): boolean {
             // Map the staging buffer and read the result
             await stagingBuffer.mapAsync(GPUMapMode.READ);
             const mappedRange = stagingBuffer.getMappedRange();
-            const result = new Int32Array(mappedRange)[0]; // Read as signed integer
+            const result = new Float32Array(mappedRange)[0]; // Read as float
             stagingBuffer.unmap();
 
             // Clean up buffers
@@ -276,7 +276,9 @@ export async function isCounterClockWiseGPU(points): boolean {
             stagingBuffer.destroy();
 
             // Return true if counter-clockwise (positive sum), false if clockwise (negative sum)
-            if (result === 0) {
+            // Use epsilon for floating-point comparison
+            const epsilon = 1e-10;
+            if (Math.abs(result) < epsilon) {
                 throw new Error("collinear or degenerate polygon");
             }
             return result > 0;

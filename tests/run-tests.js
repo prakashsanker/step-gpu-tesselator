@@ -389,27 +389,24 @@ async function testStepFiles(page) {
             expectedVertices: 4,
             expectedTriangles: 2,
         },
-        // NOTE: Hexagon fails due to bug in signed-area.ts:48 using Int32Array
-        // for float coordinates. Coordinates like 0.866 get truncated to 0.
-        // {
-        //     name: 'Convex Hexagon',
-        //     path: 'step-examples/basics/hexagon.step',
-        //     expectedVertices: 6,
-        //     expectedTriangles: 4,
-        // },
+        {
+            name: 'Convex Hexagon',
+            path: 'step-examples/basics/hexagon.step',
+            expectedVertices: 6,
+            expectedTriangles: 4,
+        },
         {
             name: 'Convex Heptagon',
             path: 'step-examples/basics/convex-heptagon.step',
             expectedVertices: 7,
             expectedTriangles: 5,
         },
-        // NOTE: Octagon fails due to same Int32Array bug in signed-area.ts
-        // {
-        //     name: 'Regular Octagon',
-        //     path: 'step-examples/basics/octagon.step',
-        //     expectedVertices: 8,
-        //     expectedTriangles: 6,
-        // },
+        {
+            name: 'Regular Octagon',
+            path: 'step-examples/basics/octagon.step',
+            expectedVertices: 8,
+            expectedTriangles: 6,
+        },
         {
             name: 'CCW Concave Pentagon',
             path: 'step-examples/basics/ccw-pentagon-concave.step',
