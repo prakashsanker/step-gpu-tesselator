@@ -28,7 +28,8 @@
     <div id="log"></div>
 
     <script type="module">
-        import { parseStepToMesh, parseStepToMeshSingleDispatch } from '../src/step-parser.ts';
+        import { parseStepToMesh, parseStepToMeshSingleDispatch, parseStepToMeshOptimized, parseStepToMeshBatched } from '../src/step-parser.ts';
+        import { parseStepProfiled } from '../src/step-parser-profiled.ts';
         import { getGPUDevice } from '../src/lib.ts';
         import occtimportjs from 'occt-import-js';
 
@@ -128,6 +129,88 @@
                         triangulationTime: result.triangulationTime || 0,
                         vertexCount: result.positions.length / 3,
                         triangleCount: result.indices.length / 3,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            /**
+             * Run GPU-based triangulation (optimized - parallel workgroup)
+             */
+            async runGPUOptimized(stepBase64) {
+                try {
+                    const stepText = atob(stepBase64);
+
+                    // Parse STEP and triangulate with optimized version
+                    const result = await parseStepToMeshOptimized(stepText);
+
+                    if (!result || !result.positions) {
+                        return { success: false, error: 'No mesh returned' };
+                    }
+
+                    return {
+                        success: true,
+                        totalTime: result.totalTime || 0,
+                        parseTime: result.parseTime || 0,
+                        triangulationTime: result.triangulationTime || 0,
+                        vertexCount: result.positions.length / 3,
+                        triangleCount: result.indices.length / 3,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            /**
+             * Run GPU-based triangulation (batched - single dispatch for all faces)
+             */
+            async runGPUBatched(stepBase64) {
+                try {
+                    const stepText = atob(stepBase64);
+
+                    // Parse STEP and triangulate with batched version
+                    const result = await parseStepToMeshBatched(stepText);
+
+                    if (!result || !result.positions) {
+                        return { success: false, error: 'No mesh returned' };
+                    }
+
+                    return {
+                        success: true,
+                        totalTime: result.totalTime || 0,
+                        parseTime: result.parseTime || 0,
+                        triangulationTime: result.triangulationTime || 0,
+                        vertexCount: result.positions.length / 3,
+                        triangleCount: result.indices.length / 3,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            /**
+             * Run GPU-based triangulation (hybrid - GPU batched + CPU fallback for large polygons)
+             */
+            async runGPUHybrid(stepBase64) {
+                try {
+                    const stepText = atob(stepBase64);
+
+                    // Parse STEP and triangulate with hybrid version
+                    const result = await parseStepProfiled(stepText);
+
+                    if (!result || !result.positions) {
+                        return { success: false, error: 'No mesh returned' };
+                    }
+
+                    return {
+                        success: true,
+                        totalTime: result.timing.total || 0,
+                        parseTime: result.timing.stepParsing || 0,
+                        triangulationTime: result.timing.gpuTriangulation || 0,
+                        vertexCount: result.positions.length / 3,
+                        triangleCount: result.triangleCount,
+                        timing: result.timing,
                     };
                 } catch (e) {
                     return { success: false, error: e.message };

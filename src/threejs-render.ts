@@ -22,8 +22,14 @@ export function createThreeMeshFromTesselation(mesh: Mesh): THREE.Mesh {
 
     geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
 
+    // C8.3: Use color from STYLED_ITEM if available
+    let materialColor: THREE.Color | number = 0x6699ff; // Default: bright blue
+    if (mesh.color) {
+        materialColor = new THREE.Color(mesh.color.r, mesh.color.g, mesh.color.b);
+    }
+
     const material = new THREE.MeshStandardMaterial({
-        color: 0x6699ff,  // Bright blue - better visibility
+        color: materialColor,
         metalness: 0.2,
         roughness: 0.5,
         side: THREE.DoubleSide, // helpful for thin faces

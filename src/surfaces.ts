@@ -86,7 +86,15 @@ export interface CylindricalSurface {
  * P = location + radius * cos(u) * X + radius * sin(u) * Y + v * Z
  */
 export function evaluateCylinder(surface: CylindricalSurface, u: number, v: number): Vec3 {
+    if (!surface.placement) {
+        console.warn("[evaluateCylinder] Missing placement");
+        return [0, 0, 0];
+    }
     const { location, axis, refDirection } = surface.placement;
+    if (!location || !axis || !refDirection) {
+        console.warn("[evaluateCylinder] Missing placement properties");
+        return [0, 0, 0];
+    }
     const yDir = computeYDirection(surface.placement);
     const r = surface.radius;
 
@@ -285,6 +293,111 @@ export function normalTorus(surface: ToroidalSurface, u: number, v: number): Vec
 }
 
 // ============================================================================
+// B_SPLINE_SURFACE (C5)
+// ============================================================================
+
+export interface BSplineSurface {
+    type: "B_SPLINE_SURFACE";
+    controlPoints: Vec3[][];  // 2D array [v][u] of 3D points
+    uDegree: number;
+    vDegree: number;
+    uKnots: number[];
+    vKnots: number[];
+    weights?: number[][];     // For rational B-splines (NURBS)
+}
+
+/**
+ * De Boor's algorithm for B-spline curve evaluation at parameter t
+ * @param points - Control points
+ * @param knots - Knot vector
+ * @param degree - Spline degree
+ * @param t - Parameter value
+ */
+function deBoor1D(points: Vec3[], knots: number[], degree: number, t: number): Vec3 {
+    const n = points.length - 1;  // Number of control points - 1
+
+    // Clamp t to valid range
+    const tMin = knots[degree];
+    const tMax = knots[n + 1];
+    t = Math.max(tMin, Math.min(tMax, t));
+
+    // Find the knot span index k where knots[k] <= t < knots[k+1]
+    let k = degree;
+    for (let i = degree; i <= n; i++) {
+        if (t >= knots[i] && t < knots[i + 1]) {
+            k = i;
+            break;
+        }
+    }
+    // Handle t == tMax case
+    if (t >= tMax) k = n;
+
+    // Copy relevant control points
+    const d: Vec3[] = [];
+    for (let j = 0; j <= degree; j++) {
+        const idx = Math.max(0, Math.min(n, k - degree + j));
+        d.push([...points[idx]]);
+    }
+
+    // De Boor recursion
+    for (let r = 1; r <= degree; r++) {
+        for (let j = degree; j >= r; j--) {
+            const i = k - degree + j;
+            const denominator = knots[i + degree - r + 1] - knots[i];
+            const alpha = denominator > 1e-10 ? (t - knots[i]) / denominator : 0;
+
+            d[j][0] = (1 - alpha) * d[j - 1][0] + alpha * d[j][0];
+            d[j][1] = (1 - alpha) * d[j - 1][1] + alpha * d[j][1];
+            d[j][2] = (1 - alpha) * d[j - 1][2] + alpha * d[j][2];
+        }
+    }
+
+    return d[degree];
+}
+
+/**
+ * Evaluate B-spline surface at (u, v)
+ */
+export function evaluateBSplineSurface(surface: BSplineSurface, u: number, v: number): Vec3 {
+    const { controlPoints, uDegree, vDegree, uKnots, vKnots } = surface;
+
+    // First evaluate in v direction to get a curve of control points
+    const vCurvePoints: Vec3[] = [];
+    for (let i = 0; i < controlPoints[0].length; i++) {
+        // Extract column i (all v-rows at u-index i)
+        const columnPoints: Vec3[] = controlPoints.map(row => row[i]);
+        vCurvePoints.push(deBoor1D(columnPoints, vKnots, vDegree, v));
+    }
+
+    // Then evaluate in u direction
+    return deBoor1D(vCurvePoints, uKnots, uDegree, u);
+}
+
+/**
+ * Approximate B-spline surface normal using finite differences
+ */
+export function normalBSplineSurface(surface: BSplineSurface, u: number, v: number): Vec3 {
+    const eps = 0.001;
+
+    const p = evaluateBSplineSurface(surface, u, v);
+    const pu = evaluateBSplineSurface(surface, u + eps, v);
+    const pv = evaluateBSplineSurface(surface, u, v + eps);
+
+    // Tangent vectors
+    const du: Vec3 = [(pu[0] - p[0]) / eps, (pu[1] - p[1]) / eps, (pu[2] - p[2]) / eps];
+    const dv: Vec3 = [(pv[0] - p[0]) / eps, (pv[1] - p[1]) / eps, (pv[2] - p[2]) / eps];
+
+    // Normal = du × dv
+    const normal: Vec3 = [
+        du[1] * dv[2] - du[2] * dv[1],
+        du[2] * dv[0] - du[0] * dv[2],
+        du[0] * dv[1] - du[1] * dv[0]
+    ];
+
+    return normalize(normal);
+}
+
+// ============================================================================
 // UNIFIED INTERFACE
 // ============================================================================
 
@@ -293,12 +406,17 @@ export type Surface =
     | CylindricalSurface
     | SphericalSurface
     | ConicalSurface
-    | ToroidalSurface;
+    | ToroidalSurface
+    | BSplineSurface;
 
 /**
  * Evaluate any surface at (u, v) -> [x, y, z]
  */
 export function evaluateSurface(surface: Surface, u: number, v: number): Vec3 {
+    if (!surface || !surface.type) {
+        console.warn("[evaluateSurface] Invalid surface:", surface);
+        return [0, 0, 0];
+    }
     switch (surface.type) {
         case "PLANE":
             return evaluatePlane(surface, u, v);
@@ -310,6 +428,11 @@ export function evaluateSurface(surface: Surface, u: number, v: number): Vec3 {
             return evaluateCone(surface, u, v);
         case "TOROIDAL_SURFACE":
             return evaluateTorus(surface, u, v);
+        case "B_SPLINE_SURFACE":
+            return evaluateBSplineSurface(surface, u, v);
+        default:
+            console.warn("[evaluateSurface] Unknown surface type:", (surface as { type: string }).type);
+            return [0, 0, 0];
     }
 }
 
@@ -317,6 +440,9 @@ export function evaluateSurface(surface: Surface, u: number, v: number): Vec3 {
  * Get surface normal at (u, v) -> [nx, ny, nz]
  */
 export function surfaceNormal(surface: Surface, u: number, v: number): Vec3 {
+    if (!surface || !surface.type) {
+        return [0, 0, 1];
+    }
     switch (surface.type) {
         case "PLANE":
             return normalPlane(surface, u, v);
@@ -328,6 +454,10 @@ export function surfaceNormal(surface: Surface, u: number, v: number): Vec3 {
             return normalCone(surface, u, v);
         case "TOROIDAL_SURFACE":
             return normalTorus(surface, u, v);
+        case "B_SPLINE_SURFACE":
+            return normalBSplineSurface(surface, u, v);
+        default:
+            return [0, 0, 1];
     }
 }
 

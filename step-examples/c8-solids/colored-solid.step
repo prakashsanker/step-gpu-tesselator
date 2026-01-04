@@ -1,0 +1,224 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Colored cube for C8 testing - includes STYLED_ITEM color chain'), '2;1');
+FILE_NAME('colored-solid.step', '2024-01-04T00:00:00', (''), (''), '', '', '');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+
+DATA;
+/* Red colored 10x10x10 cube centered at origin */
+
+/* Vertices - 8 corners of the cube */
+#1=CARTESIAN_POINT('v0',(-5.,-5.,-5.));
+#2=CARTESIAN_POINT('v1',(5.,-5.,-5.));
+#3=CARTESIAN_POINT('v2',(5.,5.,-5.));
+#4=CARTESIAN_POINT('v3',(-5.,5.,-5.));
+#5=CARTESIAN_POINT('v4',(-5.,-5.,5.));
+#6=CARTESIAN_POINT('v5',(5.,-5.,5.));
+#7=CARTESIAN_POINT('v6',(5.,5.,5.));
+#8=CARTESIAN_POINT('v7',(-5.,5.,5.));
+
+#11=VERTEX_POINT('',#1);
+#12=VERTEX_POINT('',#2);
+#13=VERTEX_POINT('',#3);
+#14=VERTEX_POINT('',#4);
+#15=VERTEX_POINT('',#5);
+#16=VERTEX_POINT('',#6);
+#17=VERTEX_POINT('',#7);
+#18=VERTEX_POINT('',#8);
+
+/* Directions for planes */
+#20=DIRECTION('',(-1.,0.,0.));
+#21=DIRECTION('',(1.,0.,0.));
+#22=DIRECTION('',(0.,-1.,0.));
+#23=DIRECTION('',(0.,1.,0.));
+#24=DIRECTION('',(0.,0.,-1.));
+#25=DIRECTION('',(0.,0.,1.));
+#26=DIRECTION('',(1.,0.,0.));
+#27=DIRECTION('',(0.,1.,0.));
+
+/* Edge lines - 12 edges of the cube */
+/* Bottom face edges */
+#30=CARTESIAN_POINT('',(-5.,-5.,-5.));
+#31=DIRECTION('',(1.,0.,0.));
+#32=VECTOR('',#31,10.);
+#33=LINE('',#30,#32);
+#34=EDGE_CURVE('',#11,#12,#33,.T.);
+
+#35=CARTESIAN_POINT('',(5.,-5.,-5.));
+#36=DIRECTION('',(0.,1.,0.));
+#37=VECTOR('',#36,10.);
+#38=LINE('',#35,#37);
+#39=EDGE_CURVE('',#12,#13,#38,.T.);
+
+#40=CARTESIAN_POINT('',(5.,5.,-5.));
+#41=DIRECTION('',(-1.,0.,0.));
+#42=VECTOR('',#41,10.);
+#43=LINE('',#40,#42);
+#44=EDGE_CURVE('',#13,#14,#43,.T.);
+
+#45=CARTESIAN_POINT('',(-5.,5.,-5.));
+#46=DIRECTION('',(0.,-1.,0.));
+#47=VECTOR('',#46,10.);
+#48=LINE('',#45,#47);
+#49=EDGE_CURVE('',#14,#11,#48,.T.);
+
+/* Top face edges */
+#50=CARTESIAN_POINT('',(-5.,-5.,5.));
+#51=DIRECTION('',(1.,0.,0.));
+#52=VECTOR('',#51,10.);
+#53=LINE('',#50,#52);
+#54=EDGE_CURVE('',#15,#16,#53,.T.);
+
+#55=CARTESIAN_POINT('',(5.,-5.,5.));
+#56=DIRECTION('',(0.,1.,0.));
+#57=VECTOR('',#56,10.);
+#58=LINE('',#55,#57);
+#59=EDGE_CURVE('',#16,#17,#58,.T.);
+
+#60=CARTESIAN_POINT('',(5.,5.,5.));
+#61=DIRECTION('',(-1.,0.,0.));
+#62=VECTOR('',#61,10.);
+#63=LINE('',#60,#62);
+#64=EDGE_CURVE('',#17,#18,#63,.T.);
+
+#65=CARTESIAN_POINT('',(-5.,5.,5.));
+#66=DIRECTION('',(0.,-1.,0.));
+#67=VECTOR('',#66,10.);
+#68=LINE('',#65,#67);
+#69=EDGE_CURVE('',#18,#15,#68,.T.);
+
+/* Vertical edges */
+#70=CARTESIAN_POINT('',(-5.,-5.,-5.));
+#71=DIRECTION('',(0.,0.,1.));
+#72=VECTOR('',#71,10.);
+#73=LINE('',#70,#72);
+#74=EDGE_CURVE('',#11,#15,#73,.T.);
+
+#75=CARTESIAN_POINT('',(5.,-5.,-5.));
+#76=DIRECTION('',(0.,0.,1.));
+#77=VECTOR('',#76,10.);
+#78=LINE('',#75,#77);
+#79=EDGE_CURVE('',#12,#16,#78,.T.);
+
+#80=CARTESIAN_POINT('',(5.,5.,-5.));
+#81=DIRECTION('',(0.,0.,1.));
+#82=VECTOR('',#81,10.);
+#83=LINE('',#80,#82);
+#84=EDGE_CURVE('',#13,#17,#83,.T.);
+
+#85=CARTESIAN_POINT('',(-5.,5.,-5.));
+#86=DIRECTION('',(0.,0.,1.));
+#87=VECTOR('',#86,10.);
+#88=LINE('',#85,#87);
+#89=EDGE_CURVE('',#14,#18,#88,.T.);
+
+/* Planes for the 6 faces */
+#100=CARTESIAN_POINT('',(0.,0.,-5.));
+#101=AXIS2_PLACEMENT_3D('',#100,#24,#26);
+#102=PLANE('',#101);
+
+#103=CARTESIAN_POINT('',(0.,0.,5.));
+#104=AXIS2_PLACEMENT_3D('',#103,#25,#26);
+#105=PLANE('',#104);
+
+#106=CARTESIAN_POINT('',(-5.,0.,0.));
+#107=AXIS2_PLACEMENT_3D('',#106,#20,#27);
+#108=PLANE('',#107);
+
+#109=CARTESIAN_POINT('',(5.,0.,0.));
+#110=AXIS2_PLACEMENT_3D('',#109,#21,#27);
+#111=PLANE('',#110);
+
+#112=CARTESIAN_POINT('',(0.,-5.,0.));
+#113=AXIS2_PLACEMENT_3D('',#112,#22,#26);
+#114=PLANE('',#113);
+
+#115=CARTESIAN_POINT('',(0.,5.,0.));
+#116=AXIS2_PLACEMENT_3D('',#115,#23,#26);
+#117=PLANE('',#116);
+
+/* Bottom face (z=-5) */
+#200=ORIENTED_EDGE('',*,*,#34,.T.);
+#201=ORIENTED_EDGE('',*,*,#39,.T.);
+#202=ORIENTED_EDGE('',*,*,#44,.T.);
+#203=ORIENTED_EDGE('',*,*,#49,.T.);
+#204=EDGE_LOOP('',(#200,#201,#202,#203));
+#205=FACE_OUTER_BOUND('',#204,.T.);
+#206=ADVANCED_FACE('',(#205),#102,.F.);
+
+/* Top face (z=5) */
+#210=ORIENTED_EDGE('',*,*,#54,.T.);
+#211=ORIENTED_EDGE('',*,*,#59,.T.);
+#212=ORIENTED_EDGE('',*,*,#64,.T.);
+#213=ORIENTED_EDGE('',*,*,#69,.T.);
+#214=EDGE_LOOP('',(#210,#211,#212,#213));
+#215=FACE_OUTER_BOUND('',#214,.T.);
+#216=ADVANCED_FACE('',(#215),#105,.T.);
+
+/* Left face (x=-5) */
+#220=ORIENTED_EDGE('',*,*,#49,.F.);
+#221=ORIENTED_EDGE('',*,*,#89,.T.);
+#222=ORIENTED_EDGE('',*,*,#69,.F.);
+#223=ORIENTED_EDGE('',*,*,#74,.F.);
+#224=EDGE_LOOP('',(#220,#221,#222,#223));
+#225=FACE_OUTER_BOUND('',#224,.T.);
+#226=ADVANCED_FACE('',(#225),#108,.T.);
+
+/* Right face (x=5) */
+#230=ORIENTED_EDGE('',*,*,#39,.F.);
+#231=ORIENTED_EDGE('',*,*,#79,.T.);
+#232=ORIENTED_EDGE('',*,*,#59,.F.);
+#233=ORIENTED_EDGE('',*,*,#84,.F.);
+#234=EDGE_LOOP('',(#230,#231,#232,#233));
+#235=FACE_OUTER_BOUND('',#234,.T.);
+#236=ADVANCED_FACE('',(#235),#111,.T.);
+
+/* Front face (y=-5) */
+#240=ORIENTED_EDGE('',*,*,#34,.F.);
+#241=ORIENTED_EDGE('',*,*,#74,.T.);
+#242=ORIENTED_EDGE('',*,*,#54,.F.);
+#243=ORIENTED_EDGE('',*,*,#79,.F.);
+#244=EDGE_LOOP('',(#240,#241,#242,#243));
+#245=FACE_OUTER_BOUND('',#244,.T.);
+#246=ADVANCED_FACE('',(#245),#114,.T.);
+
+/* Back face (y=5) */
+#250=ORIENTED_EDGE('',*,*,#44,.F.);
+#251=ORIENTED_EDGE('',*,*,#84,.T.);
+#252=ORIENTED_EDGE('',*,*,#64,.F.);
+#253=ORIENTED_EDGE('',*,*,#89,.F.);
+#254=EDGE_LOOP('',(#250,#251,#252,#253));
+#255=FACE_OUTER_BOUND('',#254,.T.);
+#256=ADVANCED_FACE('',(#255),#117,.T.);
+
+/* C8: Closed shell containing all 6 faces */
+#300=CLOSED_SHELL('colored_cube_shell',(#206,#216,#226,#236,#246,#256));
+
+/* C8: Manifold solid brep */
+#301=MANIFOLD_SOLID_BREP('ColoredCube',#300);
+
+/* C8.3: Color chain - Red color (RGB 0.9, 0.2, 0.2) */
+#500=COLOUR_RGB('Red',0.9,0.2,0.2);
+#501=FILL_AREA_STYLE_COLOUR('',#500);
+#502=FILL_AREA_STYLE('',(#501));
+#503=SURFACE_STYLE_FILL_AREA(#502);
+#504=SURFACE_SIDE_STYLE('',(#503));
+#505=SURFACE_STYLE_USAGE(.BOTH.,#504);
+#506=PRESENTATION_STYLE_ASSIGNMENT((#505));
+#507=STYLED_ITEM('RedStyle',(#506),#301);
+
+/* Representation context */
+#400=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#401,#402)) REPRESENTATION_CONTEXT('','3D'));
+#401=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));
+#402=(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.));
+
+/* Shape representation */
+#410=CARTESIAN_POINT('',(0.,0.,0.));
+#411=DIRECTION('',(0.,0.,1.));
+#412=DIRECTION('',(1.,0.,0.));
+#413=AXIS2_PLACEMENT_3D('',#410,#411,#412);
+#414=ADVANCED_BREP_SHAPE_REPRESENTATION('ColoredCube',(#301,#413),#400);
+
+ENDSEC;
+END-ISO-10303-21;

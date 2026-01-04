@@ -637,15 +637,27 @@ function evaluateUVMesh(
     const normals = new Float32Array(numVertices * 3);
     const uvs = new Float32Array(numVertices * 2);
 
+    let nanCount = 0;
+
     // Evaluate each vertex
     for (let i = 0; i < numVertices; i++) {
         const [u, v] = uvVertices[i];
 
         // Get 3D position
         const pos = evaluateSurface(surface, u, v);
-        positions[i * 3 + 0] = pos[0];
-        positions[i * 3 + 1] = pos[1];
-        positions[i * 3 + 2] = pos[2];
+
+        // Check for NaN/invalid positions
+        if (!pos || isNaN(pos[0]) || isNaN(pos[1]) || isNaN(pos[2])) {
+            nanCount++;
+            // Use a fallback position at origin
+            positions[i * 3 + 0] = 0;
+            positions[i * 3 + 1] = 0;
+            positions[i * 3 + 2] = 0;
+        } else {
+            positions[i * 3 + 0] = pos[0];
+            positions[i * 3 + 1] = pos[1];
+            positions[i * 3 + 2] = pos[2];
+        }
 
         // Get normal
         const norm = surfaceNormal(surface, u, v);
@@ -656,6 +668,10 @@ function evaluateUVMesh(
         // Store UVs
         uvs[i * 2 + 0] = u;
         uvs[i * 2 + 1] = v;
+    }
+
+    if (nanCount > 0) {
+        console.warn(`[evaluateUVMesh] ${nanCount}/${numVertices} vertices had NaN positions`);
     }
 
     // Build index buffer

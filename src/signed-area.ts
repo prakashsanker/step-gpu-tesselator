@@ -1,7 +1,9 @@
 import { BYTE_SIZE } from "./gpu-tesselate";
 import { getGPUDevice } from "./lib";
 
-export function isCounterClockWise(points): boolean{
+type Point = [number, number] | [number, number, number];
+
+export function isCounterClockWise(points: Point[]): boolean {
     let sum = 0;
     for (let i = 0; i < points.length; i++) {
         const currentPoint = points[i];
@@ -29,7 +31,7 @@ export function isCounterClockWise(points): boolean{
 }
 
 
-export async function isCounterClockWiseGPU(points): boolean {
+export async function isCounterClockWiseGPU(points: Point[]): Promise<boolean> {
     /*
         What do I need to do?
 
@@ -43,7 +45,7 @@ export async function isCounterClockWiseGPU(points): boolean {
             // Extract only x and y coordinates from points (points may be 3D [x, y, z] or 2D [x, y])
             // Flatten to: [x1, y1, x2, y2, ...]
             // This matches WGSL struct layout: array<Point> where Point { x: f32, y: f32 }
-            const xyPoints = points.map(p => [p[0], p[1]]);
+            const xyPoints = points.map((p: Point) => [p[0], p[1]]);
             const flattenedPoints = xyPoints.flat();
             const floatPointsArray = new Float32Array(flattenedPoints);
             

@@ -459,6 +459,15 @@ export async function constrainedDelaunayTriangulation(
         return [];
     }
 
+    // Debug: check ear clipping output for degenerate triangles
+    const degenerateTris = initialTriangles.filter(t =>
+        t[0] === t[1] || t[1] === t[2] || t[0] === t[2]
+    );
+    if (degenerateTris.length > 0) {
+        console.warn(`[CDT] Ear clipping produced ${degenerateTris.length} degenerate triangles:`);
+        degenerateTris.slice(0, 5).forEach(t => console.warn(`  [${t.join(',')}]`));
+    }
+
     // If Delaunay optimization is disabled, return ear clipping result directly
     if (!applyDelaunay) {
         return initialTriangles as [number, number, number][];
@@ -474,6 +483,15 @@ export async function constrainedDelaunayTriangulation(
         constraintEdges,
         50  // Max iterations
     );
+
+    // Debug: check edge flip output for degenerate triangles
+    const degenerateAfterFlip = delaunayTriangles.filter(t =>
+        t[0] === t[1] || t[1] === t[2] || t[0] === t[2]
+    );
+    if (degenerateAfterFlip.length > 0) {
+        console.warn(`[CDT] Edge flipping produced ${degenerateAfterFlip.length} degenerate triangles:`);
+        degenerateAfterFlip.slice(0, 5).forEach(t => console.warn(`  [${t.join(',')}]`));
+    }
 
     return delaunayTriangles;
 }

@@ -1,0 +1,110 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Tall pipe section (270 deg) with small porthole'),'2;1');
+FILE_NAME('pipe-with-porthole.step','2024-01-01T00:00:00',(''),(''),'','','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+/* Axis placement for cylinder */
+#1=CARTESIAN_POINT('origin',(0.0,0.0,0.0));
+#2=DIRECTION('axis',(0.0,0.0,1.0));
+#3=DIRECTION('ref',(1.0,0.0,0.0));
+#4=AXIS2_PLACEMENT_3D('placement',#1,#2,#3);
+
+/* Cylindrical surface - radius 30, tall */
+#10=CYLINDRICAL_SURFACE('cylinder',#4,30.0);
+
+/* Outer boundary - 3/4 cylinder from angle -45 to 225 degrees (270 deg span), height 0 to 150 */
+/* Start: angle -45 -> (21.2, -21.2, 0) */
+/* End: angle 225 -> (-21.2, -21.2, 0) */
+#20=CARTESIAN_POINT('p1',(21.21320,-21.21320,0.0));
+#21=CARTESIAN_POINT('p2',(-21.21320,-21.21320,0.0));
+#22=VERTEX_POINT('v1',#20);
+#23=VERTEX_POINT('v2',#21);
+
+/* Bottom arc from angle -45 to 225 (going CCW through 0, 90, 180) */
+#24=CIRCLE('bottom_arc',#4,30.0);
+#25=EDGE_CURVE('bottom',#22,#23,#24,.T.);
+#26=ORIENTED_EDGE('',*,*,#25,.T.);
+
+/* Right edge going up at angle 225 */
+#30=CARTESIAN_POINT('p3',(-21.21320,-21.21320,150.0));
+#31=VERTEX_POINT('v3',#30);
+#33=VECTOR('right_dir',#2,150.0);
+#34=LINE('right_line',#21,#33);
+#35=EDGE_CURVE('right',#23,#31,#34,.T.);
+#36=ORIENTED_EDGE('',*,*,#35,.T.);
+
+/* Top arc at z=150 */
+#40=CARTESIAN_POINT('p4',(21.21320,-21.21320,150.0));
+#41=VERTEX_POINT('v4',#40);
+#42=CARTESIAN_POINT('top_origin',(0.0,0.0,150.0));
+#45=AXIS2_PLACEMENT_3D('top_placement',#42,#2,#3);
+#46=CIRCLE('top_arc',#45,30.0);
+#47=EDGE_CURVE('top',#31,#41,#46,.T.);
+#48=ORIENTED_EDGE('',*,*,#47,.T.);
+
+/* Left edge going down at angle -45 */
+#50=VECTOR('left_dir',#2,150.0);
+#51=LINE('left_line',#20,#50);
+#52=EDGE_CURVE('left',#41,#22,#51,.T.);
+#53=ORIENTED_EDGE('',*,*,#52,.T.);
+
+/* Outer edge loop */
+#60=EDGE_LOOP('outer_loop',(#26,#36,#48,#53));
+#61=FACE_OUTER_BOUND('outer_bound',#60,.T.);
+
+/* ========== PORTHOLE: small square at angle 80-100 deg, height 70-90 ========== */
+/* angle 80deg: cos=0.174, sin=0.985 -> x=5.2, y=29.5 */
+/* angle 100deg: cos=-0.174, sin=0.985 -> x=-5.2, y=29.5 */
+#70=CARTESIAN_POINT('h1',(5.20945,29.54423,70.0));
+#71=CARTESIAN_POINT('h2',(-5.20945,29.54423,70.0));
+#72=CARTESIAN_POINT('h3',(-5.20945,29.54423,90.0));
+#73=CARTESIAN_POINT('h4',(5.20945,29.54423,90.0));
+#74=VERTEX_POINT('hv1',#70);
+#75=VERTEX_POINT('hv2',#71);
+#76=VERTEX_POINT('hv3',#72);
+#77=VERTEX_POINT('hv4',#73);
+
+#78=CARTESIAN_POINT('hole_bottom_center',(0.0,0.0,70.0));
+#79=AXIS2_PLACEMENT_3D('hole_bottom_place',#78,#2,#3);
+#80=CIRCLE('hole_bottom_arc',#79,30.0);
+#81=EDGE_CURVE('he_bottom',#74,#75,#80,.T.);
+#82=ORIENTED_EDGE('',*,*,#81,.T.);
+
+#83=VECTOR('hole_right_dir',#2,20.0);
+#84=LINE('hole_right_line',#71,#83);
+#85=EDGE_CURVE('he_right',#75,#76,#84,.T.);
+#86=ORIENTED_EDGE('',*,*,#85,.T.);
+
+#87=CARTESIAN_POINT('hole_top_center',(0.0,0.0,90.0));
+#88=AXIS2_PLACEMENT_3D('hole_top_place',#87,#2,#3);
+#89=CIRCLE('hole_top_arc',#88,30.0);
+#90=EDGE_CURVE('he_top',#76,#77,#89,.T.);
+#91=ORIENTED_EDGE('',*,*,#90,.T.);
+
+#92=VECTOR('hole_left_dir',#2,20.0);
+#93=LINE('hole_left_line',#70,#92);
+#94=EDGE_CURVE('he_left',#77,#74,#93,.T.);
+#95=ORIENTED_EDGE('',*,*,#94,.T.);
+
+#100=EDGE_LOOP('hole_loop',(#82,#86,#91,#95));
+#101=FACE_BOUND('hole_bound',#100,.T.);
+
+/* Advanced face with outer bound and hole */
+#110=ADVANCED_FACE('face_with_porthole',(#61,#101),#10,.T.);
+
+/* Shell and solid */
+#120=CLOSED_SHELL('shell',(#110));
+#121=MANIFOLD_SOLID_BREP('solid',#120);
+#122=SHAPE_REPRESENTATION('shape',(#121),#130);
+#130=( GEOMETRIC_REPRESENTATION_CONTEXT(3)
+       GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#131))
+       GLOBAL_UNIT_ASSIGNED_CONTEXT((#132,#133,#134))
+       REPRESENTATION_CONTEXT('Context','3D') );
+#131=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#132,'');
+#132=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));
+#133=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));
+#134=(NAMED_UNIT(*)SOLID_ANGLE_UNIT()SI_UNIT($,.STERADIAN.));
+ENDSEC;
+END-ISO-10303-21;

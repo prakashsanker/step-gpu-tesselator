@@ -1,0 +1,59 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <script src="/node_modules/occt-import-js/dist/occt-import-js.js"></script>
+</head>
+<body>
+  <script>
+    let occt = null;
+
+    window.occtHarness = {
+      async init() {
+        if (!occt) {
+          const start = performance.now();
+          occt = await occtimportjs();
+          return performance.now() - start;
+        }
+        return 0;
+      },
+
+      async parseStep(base64Data) {
+        try {
+          const initTime = await this.init();
+
+          // Convert base64 to Uint8Array
+          const binaryString = atob(base64Data);
+          const bytes = new Uint8Array(binaryString.length);
+          for (let i = 0; i < binaryString.length; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+
+          const parseStart = performance.now();
+          const result = occt.ReadStepFile(bytes, null);
+          const parseTime = performance.now() - parseStart;
+
+          let totalVertices = 0;
+          let totalTriangles = 0;
+          for (const mesh of result.meshes) {
+            totalVertices += mesh.attributes.position.array.length / 3;
+            totalTriangles += mesh.index.array.length / 3;
+          }
+
+          return {
+            success: true,
+            vertices: totalVertices,
+            triangles: totalTriangles,
+            meshCount: result.meshes.length,
+            initTime,
+            parseTime,
+            totalTime: initTime + parseTime,
+          };
+        } catch (e) {
+          return { success: false, error: e.message || String(e) };
+        }
+      }
+    };
+  </script>
+</body>
+</html>

@@ -1,0 +1,164 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Simple tetrahedron - minimal C8 solid with 4 triangular faces'), '2;1');
+FILE_NAME('tetrahedron.step', '2024-01-04T00:00:00', (''), (''), '', '', '');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+
+DATA;
+/* Regular tetrahedron with edge length ~14.14 (vertices at corners of 10x10x10 bounding cube) */
+/* Vertices: (0,0,0), (10,10,0), (10,0,10), (0,10,10) */
+
+/* Cartesian points for vertices */
+#1=CARTESIAN_POINT('v0',(0.,0.,0.));
+#2=CARTESIAN_POINT('v1',(10.,10.,0.));
+#3=CARTESIAN_POINT('v2',(10.,0.,10.));
+#4=CARTESIAN_POINT('v3',(0.,10.,10.));
+
+#11=VERTEX_POINT('',#1);
+#12=VERTEX_POINT('',#2);
+#13=VERTEX_POINT('',#3);
+#14=VERTEX_POINT('',#4);
+
+/* Directions for edges */
+#20=DIRECTION('',(0.707107,0.707107,0.));
+#21=DIRECTION('',(0.707107,-0.707107,0.707107));
+#22=DIRECTION('',(-0.707107,0.707107,0.707107));
+#23=DIRECTION('',(0.,-0.707107,0.707107));
+#24=DIRECTION('',(-0.707107,0.,0.707107));
+#25=DIRECTION('',(0.,0.707107,-0.707107));
+
+/* Edge lines - 6 edges of the tetrahedron */
+/* Edge v0-v1 */
+#30=CARTESIAN_POINT('',(0.,0.,0.));
+#31=DIRECTION('',(0.707107,0.707107,0.));
+#32=VECTOR('',#31,14.142136);
+#33=LINE('',#30,#32);
+#34=EDGE_CURVE('',#11,#12,#33,.T.);
+
+/* Edge v0-v2 */
+#35=CARTESIAN_POINT('',(0.,0.,0.));
+#36=DIRECTION('',(0.707107,0.,0.707107));
+#37=VECTOR('',#36,14.142136);
+#38=LINE('',#35,#37);
+#39=EDGE_CURVE('',#11,#13,#38,.T.);
+
+/* Edge v0-v3 */
+#40=CARTESIAN_POINT('',(0.,0.,0.));
+#41=DIRECTION('',(0.,0.707107,0.707107));
+#42=VECTOR('',#41,14.142136);
+#43=LINE('',#40,#42);
+#44=EDGE_CURVE('',#11,#14,#43,.T.);
+
+/* Edge v1-v2 */
+#45=CARTESIAN_POINT('',(10.,10.,0.));
+#46=DIRECTION('',(0.,-0.707107,0.707107));
+#47=VECTOR('',#46,14.142136);
+#48=LINE('',#45,#47);
+#49=EDGE_CURVE('',#12,#13,#48,.T.);
+
+/* Edge v1-v3 */
+#50=CARTESIAN_POINT('',(10.,10.,0.));
+#51=DIRECTION('',(-0.707107,0.,0.707107));
+#52=VECTOR('',#51,14.142136);
+#53=LINE('',#50,#52);
+#54=EDGE_CURVE('',#12,#14,#53,.T.);
+
+/* Edge v2-v3 */
+#55=CARTESIAN_POINT('',(10.,0.,10.));
+#56=DIRECTION('',(-0.707107,0.707107,0.));
+#57=VECTOR('',#56,14.142136);
+#58=LINE('',#55,#57);
+#59=EDGE_CURVE('',#13,#14,#58,.T.);
+
+/* Plane normals and placement for 4 faces */
+/* Face 0: v0-v1-v2 (normal pointing inward/outward) */
+#100=CARTESIAN_POINT('',(6.666667,3.333333,3.333333));
+#101=DIRECTION('',(0.577350,-0.577350,-0.577350));
+#102=DIRECTION('',(0.707107,0.707107,0.));
+#103=AXIS2_PLACEMENT_3D('',#100,#101,#102);
+#104=PLANE('',#103);
+
+/* Face 1: v0-v2-v3 */
+#105=CARTESIAN_POINT('',(3.333333,3.333333,6.666667));
+#106=DIRECTION('',(-0.577350,-0.577350,0.577350));
+#107=DIRECTION('',(0.707107,0.,0.707107));
+#108=AXIS2_PLACEMENT_3D('',#105,#106,#107);
+#109=PLANE('',#108);
+
+/* Face 2: v0-v3-v1 */
+#110=CARTESIAN_POINT('',(3.333333,6.666667,3.333333));
+#111=DIRECTION('',(-0.577350,0.577350,-0.577350));
+#112=DIRECTION('',(0.,0.707107,0.707107));
+#113=AXIS2_PLACEMENT_3D('',#110,#111,#112);
+#114=PLANE('',#113);
+
+/* Face 3: v1-v3-v2 */
+#115=CARTESIAN_POINT('',(6.666667,6.666667,6.666667));
+#116=DIRECTION('',(0.577350,0.577350,0.577350));
+#117=DIRECTION('',(-0.707107,0.,0.707107));
+#118=AXIS2_PLACEMENT_3D('',#115,#116,#117);
+#119=PLANE('',#118);
+
+/* Face 0: v0-v1-v2 */
+#200=ORIENTED_EDGE('',*,*,#34,.T.);
+#201=ORIENTED_EDGE('',*,*,#49,.T.);
+#202=ORIENTED_EDGE('',*,*,#39,.F.);
+#203=EDGE_LOOP('',(#200,#201,#202));
+#204=FACE_OUTER_BOUND('',#203,.T.);
+#205=ADVANCED_FACE('',(#204),#104,.T.);
+
+/* Face 1: v0-v2-v3 */
+#210=ORIENTED_EDGE('',*,*,#39,.T.);
+#211=ORIENTED_EDGE('',*,*,#59,.T.);
+#212=ORIENTED_EDGE('',*,*,#44,.F.);
+#213=EDGE_LOOP('',(#210,#211,#212));
+#214=FACE_OUTER_BOUND('',#213,.T.);
+#215=ADVANCED_FACE('',(#214),#109,.T.);
+
+/* Face 2: v0-v3-v1 */
+#220=ORIENTED_EDGE('',*,*,#44,.T.);
+#221=ORIENTED_EDGE('',*,*,#54,.F.);
+#222=ORIENTED_EDGE('',*,*,#34,.F.);
+#223=EDGE_LOOP('',(#220,#221,#222));
+#224=FACE_OUTER_BOUND('',#223,.T.);
+#225=ADVANCED_FACE('',(#224),#114,.T.);
+
+/* Face 3: v1-v3-v2 */
+#230=ORIENTED_EDGE('',*,*,#54,.T.);
+#231=ORIENTED_EDGE('',*,*,#59,.F.);
+#232=ORIENTED_EDGE('',*,*,#49,.F.);
+#233=EDGE_LOOP('',(#230,#231,#232));
+#234=FACE_OUTER_BOUND('',#233,.T.);
+#235=ADVANCED_FACE('',(#234),#119,.T.);
+
+/* C8: Closed shell containing all 4 faces */
+#300=CLOSED_SHELL('tetrahedron_shell',(#205,#215,#225,#235));
+
+/* C8: Manifold solid brep */
+#301=MANIFOLD_SOLID_BREP('Tetrahedron',#300);
+
+/* C8.3: Color chain - Green color (RGB 0.2, 0.8, 0.3) */
+#500=COLOUR_RGB('Green',0.2,0.8,0.3);
+#501=FILL_AREA_STYLE_COLOUR('',#500);
+#502=FILL_AREA_STYLE('',(#501));
+#503=SURFACE_STYLE_FILL_AREA(#502);
+#504=SURFACE_SIDE_STYLE('',(#503));
+#505=SURFACE_STYLE_USAGE(.BOTH.,#504);
+#506=PRESENTATION_STYLE_ASSIGNMENT((#505));
+#507=STYLED_ITEM('GreenStyle',(#506),#301);
+
+/* Representation context */
+#400=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#401,#402)) REPRESENTATION_CONTEXT('','3D'));
+#401=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));
+#402=(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.));
+
+/* Shape representation */
+#410=CARTESIAN_POINT('',(0.,0.,0.));
+#411=DIRECTION('',(0.,0.,1.));
+#412=DIRECTION('',(1.,0.,0.));
+#413=AXIS2_PLACEMENT_3D('',#410,#411,#412);
+#414=ADVANCED_BREP_SHAPE_REPRESENTATION('Tetrahedron',(#301,#413),#400);
+
+ENDSEC;
+END-ISO-10303-21;

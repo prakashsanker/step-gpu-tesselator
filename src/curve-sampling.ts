@@ -558,11 +558,27 @@ export async function sampleCurvesGPU(
       const normal = curve.normal;
       const refDir = curve.refDirection;
 
-      let startAngle = pointToAngle(startPoint, center, normal, refDir);
-      let endAngle = pointToAngle(endPoint, center, normal, refDir);
+      // Check if this is a full circle (start == end point)
+      const dx = endPoint[0] - startPoint[0];
+      const dy = endPoint[1] - startPoint[1];
+      const dz = endPoint[2] - startPoint[2];
+      const isFullCircle = (dx*dx + dy*dy + dz*dz) < 1e-10;
 
-      [startAngle, endAngle] = normalizeAngleDiff(startAngle, endAngle, rev);
-      const numSamples = calculateArcSamples(startAngle, endAngle, options);
+      let startAngle: number;
+      let endAngle: number;
+      let numSamples: number;
+
+      if (isFullCircle) {
+        // Full circle: use 0 to 2π
+        startAngle = 0;
+        endAngle = Math.PI * 2;
+        numSamples = Math.max(options.minSamples ?? 8, 16);
+      } else {
+        startAngle = pointToAngle(startPoint, center, normal, refDir);
+        endAngle = pointToAngle(endPoint, center, normal, refDir);
+        [startAngle, endAngle] = normalizeAngleDiff(startAngle, endAngle, rev);
+        numSamples = calculateArcSamples(startAngle, endAngle, options);
+      }
 
       conicCurves.push({
         curve,

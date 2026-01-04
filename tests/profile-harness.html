@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Detailed Profiler</title>
+</head>
+<body>
+    <div id="status">Loading...</div>
+
+    <script type="module">
+        import occtimportjs from 'occt-import-js';
+        import { getGPUDevice } from '../src/lib.ts';
+        import { parseStepProfiled } from '../src/step-parser-profiled.ts';
+
+        let occt = null;
+
+        async function initialize() {
+            try {
+                // Initialize OCCT
+                occt = await occtimportjs({
+                    locateFile: (file) => {
+                        if (file.endsWith('.wasm')) {
+                            return '/occt-import-js.wasm';
+                        }
+                        return file;
+                    }
+                });
+
+                // Initialize GPU
+                await getGPUDevice();
+
+                document.getElementById('status').textContent = 'Ready';
+                window.profileReady = true;
+            } catch (e) {
+                document.getElementById('status').textContent = `Error: ${e.message}`;
+                console.error(e);
+            }
+        }
+
+        // Detailed GPU profiling using the profiled parser
+        window.profileGPU = async function(stepText) {
+            try {
+                const result = await parseStepProfiled(stepText);
+
+                return {
+                    success: true,
+                    totalTime: result.timing.total,
+                    parseTime: result.timing.stepParsing,
+                    extractionTime: result.timing.faceExtraction,
+                    projectionTime: result.timing.projection,
+                    bridgingTime: result.timing.bridging,
+                    triangulationTime: result.timing.gpuTriangulation,
+                    assemblyTime: result.timing.meshAssembly,
+                    faceCount: result.faceCount,
+                    triangleCount: result.triangleCount,
+                };
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        };
+
+        // OCCT profiling
+        window.profileOCCT = async function(stepBase64) {
+            try {
+                const binaryString = atob(stepBase64);
+                const bytes = new Uint8Array(binaryString.length);
+                for (let i = 0; i < binaryString.length; i++) {
+                    bytes[i] = binaryString.charCodeAt(i);
+                }
+
+                const start = performance.now();
+                const result = occt.ReadStepFile(bytes, null);
+                const end = performance.now();
+
+                if (!result.success || !result.meshes || result.meshes.length === 0) {
+                    return { success: false, error: 'OCCT returned no meshes' };
+                }
+
+                let totalTriangles = 0;
+                for (const mesh of result.meshes) {
+                    if (mesh.index) {
+                        totalTriangles += mesh.index.array.length / 3;
+                    }
+                }
+
+                return {
+                    success: true,
+                    totalTime: end - start,
+                    meshCount: result.meshes.length,
+                    triangleCount: totalTriangles,
+                };
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        };
+
+        initialize();
+    </script>
+</body>
+</html>

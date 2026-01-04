@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Ear Clipping Benchmark</title>
+</head>
+<body>
+    <h1>Ear Clipping Benchmark Harness</h1>
+    <p>This page exposes ear clipping algorithms for benchmarking via Puppeteer.</p>
+
+    <script type="module">
+        import { earClipping } from '../src/ear-clipping.ts';
+        import { earClippingSingleDispatch } from '../src/ear-clipping-single-dispatch.ts';
+        import { earClippingParallel } from '../src/ear-clipping-parallel.ts';
+        import { earClippingOptimized } from '../src/ear-clipping-optimized.ts';
+
+        // Expose benchmark functions
+        window.benchmarkHarness = {
+            earClipping: async (points) => {
+                // Convert to Vec3 format
+                const pts = points.map(p => [p[0], p[1], 0]);
+                return await earClipping(pts);
+            },
+
+            earClippingSingleDispatch: async (points) => {
+                const pts = points.map(p => [p[0], p[1], 0]);
+                return await earClippingSingleDispatch(pts);
+            },
+
+            earClippingParallel: async (points) => {
+                const pts = points.map(p => [p[0], p[1], 0]);
+                return await earClippingParallel(pts);
+            },
+
+            earClippingOptimized: async (points) => {
+                const pts = points.map(p => [p[0], p[1], 0]);
+                return await earClippingOptimized(pts);
+            },
+        };
+
+        window.benchmarkReady = true;
+        console.log('Benchmark harness ready');
+    </script>
+</body>
+</html>

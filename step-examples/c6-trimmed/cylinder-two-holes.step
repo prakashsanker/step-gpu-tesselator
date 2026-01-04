@@ -1,0 +1,147 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Half cylinder with two rectangular holes'),'2;1');
+FILE_NAME('cylinder-two-holes.step','2024-01-01T00:00:00',(''),(''),'','','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+/* Axis placement for cylinder */
+#1=CARTESIAN_POINT('origin',(0.0,0.0,0.0));
+#2=DIRECTION('axis',(0.0,0.0,1.0));
+#3=DIRECTION('ref',(1.0,0.0,0.0));
+#4=AXIS2_PLACEMENT_3D('placement',#1,#2,#3);
+
+/* Cylindrical surface - radius 50 */
+#10=CYLINDRICAL_SURFACE('cylinder',#4,50.0);
+
+/* Outer boundary - half cylinder from angle 0 to 180 degrees, height 0 to 100 */
+#20=CARTESIAN_POINT('p1',(50.0,0.0,0.0));
+#21=CARTESIAN_POINT('p2',(-50.0,0.0,0.0));
+#22=VERTEX_POINT('v1',#20);
+#23=VERTEX_POINT('v2',#21);
+
+/* Circle for bottom arc */
+#24=CIRCLE('bottom_arc',#4,50.0);
+#25=EDGE_CURVE('bottom',#22,#23,#24,.T.);
+#26=ORIENTED_EDGE('',*,*,#25,.T.);
+
+/* Right edge going up at angle 180 (x=-50) */
+#30=CARTESIAN_POINT('p3',(-50.0,0.0,100.0));
+#31=VERTEX_POINT('v3',#30);
+#33=VECTOR('right_dir',#2,100.0);
+#34=LINE('right_line',#21,#33);
+#35=EDGE_CURVE('right',#23,#31,#34,.T.);
+#36=ORIENTED_EDGE('',*,*,#35,.T.);
+
+/* Top edge at z=100, from angle 180 to 0 */
+#40=CARTESIAN_POINT('p4',(50.0,0.0,100.0));
+#41=VERTEX_POINT('v4',#40);
+#42=CARTESIAN_POINT('top_origin',(0.0,0.0,100.0));
+#43=DIRECTION('top_axis',(0.0,0.0,1.0));
+#44=DIRECTION('top_ref',(1.0,0.0,0.0));
+#45=AXIS2_PLACEMENT_3D('top_placement',#42,#43,#44);
+#46=CIRCLE('top_arc',#45,50.0);
+#47=EDGE_CURVE('top',#31,#41,#46,.T.);
+#48=ORIENTED_EDGE('',*,*,#47,.T.);
+
+/* Left edge going down at angle 0 (x=50) */
+#50=VECTOR('left_dir',#2,100.0);
+#51=LINE('left_line',#20,#50);
+#52=EDGE_CURVE('left',#41,#22,#51,.T.);
+#53=ORIENTED_EDGE('',*,*,#52,.T.);
+
+/* Outer edge loop */
+#60=EDGE_LOOP('outer_loop',(#26,#36,#48,#53));
+#61=FACE_OUTER_BOUND('outer_bound',#60,.T.);
+
+/* ========== HOLE 1: Left side at angle 30-60 deg, height 20-45 ========== */
+/* angle 30deg: cos=0.866, sin=0.5 -> x=43.3, y=25 */
+/* angle 60deg: cos=0.5, sin=0.866 -> x=25, y=43.3 */
+#70=CARTESIAN_POINT('h1_1',(43.30127,25.0,20.0));
+#71=CARTESIAN_POINT('h1_2',(25.0,43.30127,20.0));
+#72=CARTESIAN_POINT('h1_3',(25.0,43.30127,45.0));
+#73=CARTESIAN_POINT('h1_4',(43.30127,25.0,45.0));
+#74=VERTEX_POINT('hv1_1',#70);
+#75=VERTEX_POINT('hv1_2',#71);
+#76=VERTEX_POINT('hv1_3',#72);
+#77=VERTEX_POINT('hv1_4',#73);
+
+#78=CARTESIAN_POINT('hole1_bottom_center',(0.0,0.0,20.0));
+#79=AXIS2_PLACEMENT_3D('hole1_bottom_place',#78,#2,#3);
+#80=CIRCLE('hole1_bottom_arc',#79,50.0);
+#81=EDGE_CURVE('h1e_bottom',#74,#75,#80,.T.);
+#82=ORIENTED_EDGE('',*,*,#81,.T.);
+
+#83=VECTOR('hole1_right_dir',#2,25.0);
+#84=LINE('hole1_right_line',#71,#83);
+#85=EDGE_CURVE('h1e_right',#75,#76,#84,.T.);
+#86=ORIENTED_EDGE('',*,*,#85,.T.);
+
+#87=CARTESIAN_POINT('hole1_top_center',(0.0,0.0,45.0));
+#88=AXIS2_PLACEMENT_3D('hole1_top_place',#87,#2,#3);
+#89=CIRCLE('hole1_top_arc',#88,50.0);
+#90=EDGE_CURVE('h1e_top',#76,#77,#89,.T.);
+#91=ORIENTED_EDGE('',*,*,#90,.T.);
+
+#92=VECTOR('hole1_left_dir',#2,25.0);
+#93=LINE('hole1_left_line',#70,#92);
+#94=EDGE_CURVE('h1e_left',#77,#74,#93,.T.);
+#95=ORIENTED_EDGE('',*,*,#94,.T.);
+
+#100=EDGE_LOOP('hole1_loop',(#82,#86,#91,#95));
+#101=FACE_BOUND('hole1_bound',#100,.T.);
+
+/* ========== HOLE 2: Right side at angle 120-150 deg, height 55-80 ========== */
+/* angle 120deg: cos=-0.5, sin=0.866 -> x=-25, y=43.3 */
+/* angle 150deg: cos=-0.866, sin=0.5 -> x=-43.3, y=25 */
+#170=CARTESIAN_POINT('h2_1',(-25.0,43.30127,55.0));
+#171=CARTESIAN_POINT('h2_2',(-43.30127,25.0,55.0));
+#172=CARTESIAN_POINT('h2_3',(-43.30127,25.0,80.0));
+#173=CARTESIAN_POINT('h2_4',(-25.0,43.30127,80.0));
+#174=VERTEX_POINT('hv2_1',#170);
+#175=VERTEX_POINT('hv2_2',#171);
+#176=VERTEX_POINT('hv2_3',#172);
+#177=VERTEX_POINT('hv2_4',#173);
+
+#178=CARTESIAN_POINT('hole2_bottom_center',(0.0,0.0,55.0));
+#179=AXIS2_PLACEMENT_3D('hole2_bottom_place',#178,#2,#3);
+#180=CIRCLE('hole2_bottom_arc',#179,50.0);
+#181=EDGE_CURVE('h2e_bottom',#174,#175,#180,.T.);
+#182=ORIENTED_EDGE('',*,*,#181,.T.);
+
+#183=VECTOR('hole2_right_dir',#2,25.0);
+#184=LINE('hole2_right_line',#171,#183);
+#185=EDGE_CURVE('h2e_right',#175,#176,#184,.T.);
+#186=ORIENTED_EDGE('',*,*,#185,.T.);
+
+#187=CARTESIAN_POINT('hole2_top_center',(0.0,0.0,80.0));
+#188=AXIS2_PLACEMENT_3D('hole2_top_place',#187,#2,#3);
+#189=CIRCLE('hole2_top_arc',#188,50.0);
+#190=EDGE_CURVE('h2e_top',#176,#177,#189,.T.);
+#191=ORIENTED_EDGE('',*,*,#190,.T.);
+
+#192=VECTOR('hole2_left_dir',#2,25.0);
+#193=LINE('hole2_left_line',#170,#192);
+#194=EDGE_CURVE('h2e_left',#177,#174,#193,.T.);
+#195=ORIENTED_EDGE('',*,*,#194,.T.);
+
+#200=EDGE_LOOP('hole2_loop',(#182,#186,#191,#195));
+#201=FACE_BOUND('hole2_bound',#200,.T.);
+
+/* Advanced face with outer bound and two holes */
+#110=ADVANCED_FACE('face_with_holes',(#61,#101,#201),#10,.T.);
+
+/* Shell and solid */
+#120=CLOSED_SHELL('shell',(#110));
+#121=MANIFOLD_SOLID_BREP('solid',#120);
+#122=SHAPE_REPRESENTATION('shape',(#121),#130);
+#130=( GEOMETRIC_REPRESENTATION_CONTEXT(3)
+       GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#131))
+       GLOBAL_UNIT_ASSIGNED_CONTEXT((#132,#133,#134))
+       REPRESENTATION_CONTEXT('Context','3D') );
+#131=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#132,'');
+#132=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));
+#133=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));
+#134=(NAMED_UNIT(*)SOLID_ANGLE_UNIT()SI_UNIT($,.STERADIAN.));
+ENDSEC;
+END-ISO-10303-21;

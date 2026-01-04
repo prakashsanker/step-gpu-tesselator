@@ -11,7 +11,9 @@ import {
   tessellateBSplineSurface,
   tessellateTrimmedSurface,
 } from "./surface-tessellation";
+import { evaluateBSplineSurface, type BSplineSurface as BSplineSurfaceType } from "./surfaces";
 import { computeSmoothNormals } from "./mesh-quality";
+import { computeSmoothNormalsGPU } from "./smooth-normals-gpu";
 
 // Minimal STEP → mesh parser for the square face example
 type Vec3 = [number, number, number];
@@ -96,6 +98,110 @@ function vec2Dot(a: Vec2, b: Vec2): number {
 
 function vec2Len(v: Vec2): number {
   return Math.sqrt(v[0] * v[0] + v[1] * v[1]);
+}
+
+// =============================================================================
+// C6b: B-Spline Curve Evaluation (De Boor's Algorithm)
+// =============================================================================
+
+/**
+ * Evaluate a B-spline curve at parameter t using De Boor's algorithm.
+ * @param controlPoints - Array of 3D control points
+ * @param knots - Full knot vector (with multiplicities expanded)
+ * @param degree - Curve degree
+ * @param t - Parameter value
+ */
+function evaluateBSplineCurve(
+  controlPoints: Vec3[],
+  knots: number[],
+  degree: number,
+  t: number
+): Vec3 {
+  const n = controlPoints.length - 1;
+
+  // Clamp t to valid range
+  const tMin = knots[degree];
+  const tMax = knots[n + 1];
+  t = Math.max(tMin, Math.min(tMax - 1e-10, t));
+
+  // Find the knot span index k where knots[k] <= t < knots[k+1]
+  let k = degree;
+  for (let i = degree; i <= n; i++) {
+    if (t >= knots[i] && t < knots[i + 1]) {
+      k = i;
+      break;
+    }
+  }
+  // Handle edge case at tMax
+  if (t >= tMax - 1e-10) {
+    k = n;
+  }
+
+  // De Boor's algorithm: work with control points P[k-degree] ... P[k]
+  // Copy the relevant control points
+  const d: Vec3[] = [];
+  for (let i = 0; i <= degree; i++) {
+    const idx = k - degree + i;
+    if (idx >= 0 && idx <= n) {
+      d.push([...controlPoints[idx]]);
+    } else {
+      d.push([0, 0, 0]);
+    }
+  }
+
+  // Apply the triangular scheme
+  for (let r = 1; r <= degree; r++) {
+    for (let j = degree; j >= r; j--) {
+      const i = k - degree + j;
+      const denom = knots[i + degree - r + 1] - knots[i];
+      if (Math.abs(denom) < 1e-10) {
+        continue; // Skip degenerate case
+      }
+      const alpha = (t - knots[i]) / denom;
+      d[j][0] = (1 - alpha) * d[j - 1][0] + alpha * d[j][0];
+      d[j][1] = (1 - alpha) * d[j - 1][1] + alpha * d[j][1];
+      d[j][2] = (1 - alpha) * d[j - 1][2] + alpha * d[j][2];
+    }
+  }
+
+  return d[degree];
+}
+
+/**
+ * Sample a B-spline curve at uniform parameter intervals.
+ * @param controlPoints - Array of 3D control points
+ * @param knotMultiplicities - Knot multiplicities
+ * @param knotValues - Knot values (before expansion)
+ * @param degree - Curve degree
+ * @param numSamples - Number of samples to generate
+ */
+function sampleBSplineCurve(
+  controlPoints: Vec3[],
+  knotMultiplicities: number[],
+  knotValues: number[],
+  degree: number,
+  numSamples: number
+): Vec3[] {
+  // Build full knot vector from multiplicities
+  const knots: number[] = [];
+  for (let i = 0; i < knotValues.length; i++) {
+    const multiplicity = knotMultiplicities[i] || 1;
+    for (let j = 0; j < multiplicity; j++) {
+      knots.push(knotValues[i]);
+    }
+  }
+
+  // Valid parameter range
+  const tMin = knots[degree];
+  const tMax = knots[controlPoints.length];
+
+  const samples: Vec3[] = [];
+  for (let i = 0; i < numSamples; i++) {
+    const t = tMin + (i / (numSamples - 1)) * (tMax - tMin);
+    samples.push(evaluateBSplineCurve(controlPoints, knots, degree, t));
+  }
+
+  return samples;
 }
 
 /** Compute signed area of a 2D polygon (positive = CCW) */
@@ -896,7 +1002,7 @@ function findBridgeTargetVertex(
     return 0;
   }
 
-  const { edgeStartIndex, intersectionX, edgeParameter } = rayHit;
+  const { edgeStartIndex, intersectionX } = rayHit;
 
   // STEP 2: Get the edge endpoints
   const edgeStart = outerPolygon[edgeStartIndex];
@@ -920,7 +1026,6 @@ function findBridgeTargetVertex(
   const skipIndices = new Set([candidateIndex]);
   // Also skip the adjacent edges
   const prevIndex = (candidateIndex - 1 + outerPolygon.length) % outerPolygon.length;
-  const nextIndex = (candidateIndex + 1) % outerPolygon.length;
   skipIndices.add(prevIndex);
 
   if (isVisible(holeVertex, candidateVertex, outerPolygon, skipIndices)) {
@@ -1133,8 +1238,7 @@ function bridgeAllHoles(outer: Vec2[], holes: Vec2[][]): Vec2[] {
   let currentPolygon = outer;
 
   for (let i = 0; i < holesWithRightmostX.length; i++) {
-    const { hole, index } = holesWithRightmostX[i];
-
+    const { hole } = holesWithRightmostX[i];
     currentPolygon = mergeHoleIntoOuter(currentPolygon, hole);
   }
 
@@ -1184,10 +1288,26 @@ export interface Mesh {
   positions: Float32Array;
   indices: Uint32Array;
   normals?: Float32Array;     // Vertex normals for smooth shading (C7.3)
+  color?: ResolvedColor;      // Material color from STYLED_ITEM (C8.3)
   // Timing information for benchmarking
   parseTime?: number;         // Time spent parsing STEP file (ms)
   triangulationTime?: number; // Time spent in GPU triangulation (ms)
   totalTime?: number;         // Total time from start to finish (ms)
+}
+
+/** Resolved color for rendering (C8.3) */
+export interface ResolvedColor {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/** Solid with color information (C8) */
+export interface SolidWithColor {
+  solidId: number;
+  name: string;
+  faceIds: number[];
+  color?: ResolvedColor;
 }
 
 // --- Internal STEP structures we care about ---
@@ -1362,6 +1482,122 @@ interface DefinitionalRepresentation {
   curveIds: number[];     // References to 2D LINE, CIRCLE, etc.
 }
 
+// =============================================================================
+// C8: Full Solids / Assemblies
+// =============================================================================
+
+/** CLOSED_SHELL: Collection of faces forming a closed solid boundary */
+interface ClosedShell {
+  id: number;
+  name: string;
+  faceIds: number[];
+}
+
+/** MANIFOLD_SOLID_BREP: Solid body containing a closed shell */
+interface ManifoldSolidBrep {
+  id: number;
+  name: string;
+  shellId: number;
+}
+
+/** COLOUR_RGB: RGB color values (0-1 range) */
+interface ColourRgb {
+  id: number;
+  name: string;
+  r: number;
+  g: number;
+  b: number;
+}
+
+/** FILL_AREA_STYLE_COLOUR: Links a color to a fill area */
+interface FillAreaStyleColour {
+  id: number;
+  name: string;
+  colourId: number;
+}
+
+/** FILL_AREA_STYLE: Collection of fill area style colours */
+interface FillAreaStyle {
+  id: number;
+  name: string;
+  fillStyleIds: number[];
+}
+
+/** SURFACE_STYLE_FILL_AREA: Links fill area style to surface style */
+interface SurfaceStyleFillArea {
+  id: number;
+  fillAreaStyleId: number;
+}
+
+/** SURFACE_SIDE_STYLE: Collection of surface styles */
+interface SurfaceSideStyle {
+  id: number;
+  name: string;
+  styleIds: number[];
+}
+
+/** SURFACE_STYLE_USAGE: Links surface style to a side */
+interface SurfaceStyleUsage {
+  id: number;
+  side: string;
+  styleId: number;
+}
+
+/** PRESENTATION_STYLE_ASSIGNMENT: Collection of presentation styles */
+interface PresentationStyleAssignment {
+  id: number;
+  styleIds: number[];
+}
+
+/** STYLED_ITEM: Assigns styles to a geometric item */
+interface StyledItem {
+  id: number;
+  name: string;
+  styleIds: number[];
+  itemId: number;
+}
+
+/** SHAPE_REPRESENTATION: Top-level geometry container */
+interface ShapeRepresentation {
+  id: number;
+  name: string;
+  itemIds: number[];
+  contextId: number;
+}
+
+/** REPRESENTATION_RELATIONSHIP: Links two representations */
+interface RepresentationRelationship {
+  id: number;
+  name: string;
+  description: string;
+  rep1Id: number;
+  rep2Id: number;
+}
+
+/** ITEM_DEFINED_TRANSFORMATION: Transform between representations */
+interface ItemDefinedTransformation {
+  id: number;
+  name: string;
+  description: string;
+  transformItem1Id: number;
+  transformItem2Id: number;
+}
+
+/** Resolved color for rendering */
+export interface ResolvedColor {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/** Solid with color information */
+export interface SolidWithColor {
+  solidId: number;
+  name: string;
+  faceIds: number[];
+  color?: ResolvedColor;
+}
+
 /** Resolved curve geometry ready for sampling */
 type CurveType = 'LINE' | 'CIRCLE' | 'ELLIPSE' | 'B_SPLINE';
 
@@ -1428,6 +1664,20 @@ interface StepModel {
   // C4: PCURVE support
   pcurves: Map<number, PCurve>;
   definitionalRepresentations: Map<number, DefinitionalRepresentation>;
+  // C8: Full solids / assemblies
+  closedShells: Map<number, ClosedShell>;
+  manifoldSolidBreps: Map<number, ManifoldSolidBrep>;
+  styledItems: Map<number, StyledItem>;
+  colourRgbs: Map<number, ColourRgb>;
+  fillAreaStyleColours: Map<number, FillAreaStyleColour>;
+  fillAreaStyles: Map<number, FillAreaStyle>;
+  surfaceStyleFillAreas: Map<number, SurfaceStyleFillArea>;
+  surfaceSideStyles: Map<number, SurfaceSideStyle>;
+  surfaceStyleUsages: Map<number, SurfaceStyleUsage>;
+  presentationStyleAssignments: Map<number, PresentationStyleAssignment>;
+  shapeRepresentations: Map<number, ShapeRepresentation>;
+  representationRelationships: Map<number, RepresentationRelationship>;
+  itemDefinedTransformations: Map<number, ItemDefinedTransformation>;
 }
 
 // --- Public API: parse STEP text into a Mesh (one face) ---
@@ -1618,11 +1868,14 @@ async function tryTessellateCurvedSurface(
     return meshToVerticesAndTriangles(mesh);
   }
 
-  // C5: Check for B-spline surface
+  // C5/C6b: Check for B-spline surface (with trimmed boundary support)
   const bspline = model.bSplineSurfaces.get(surfaceId);
   if (bspline) {
     // Resolve control point IDs to actual 3D coordinates
-    const controlPoints: Vec3[][] = [];
+    // STEP B-spline control points are stored as [u_index][v_index]
+    // But our evaluateBSplineSurface expects [v_index][u_index]
+    // So we need to transpose the control point array
+    const rawControlPoints: Vec3[][] = [];
     for (const row of bspline.controlPointIds) {
       const cpRow: Vec3[] = [];
       for (const cpId of row) {
@@ -1632,10 +1885,23 @@ async function tryTessellateCurvedSurface(
         }
         cpRow.push(point.coords);
       }
-      controlPoints.push(cpRow);
+      rawControlPoints.push(cpRow);
+    }
+
+    // Transpose: rawControlPoints[u][v] -> controlPoints[v][u]
+    const numU = rawControlPoints.length;
+    const numV = rawControlPoints[0]?.length || 0;
+    const controlPoints: Vec3[][] = [];
+    for (let v = 0; v < numV; v++) {
+      const row: Vec3[] = [];
+      for (let u = 0; u < numU; u++) {
+        row.push(rawControlPoints[u][v]);
+      }
+      controlPoints.push(row);
     }
 
     // Build full knot vectors from multiplicities
+
     const uKnots: number[] = [];
     for (let i = 0; i < bspline.uKnots.length; i++) {
       const multiplicity = bspline.uKnotMultiplicities[i] || 1;
@@ -1653,18 +1919,23 @@ async function tryTessellateCurvedSurface(
     }
 
 
-    const mesh = await tessellateBSplineSurface(
-      {
-        type: "B_SPLINE_SURFACE",
-        controlPoints,
-        uDegree: bspline.uDegree,
-        vDegree: bspline.vDegree,
-        uKnots,
-        vKnots,
-        weights: bspline.weights,
-      },
-      16, 16
-    );
+    // Build the surface object for evaluation
+    const surfaceObj: BSplineSurfaceType = {
+      type: "B_SPLINE_SURFACE",
+      controlPoints,
+      uDegree: bspline.uDegree,
+      vDegree: bspline.vDegree,
+      uKnots,
+      vKnots,
+      weights: bspline.weights,
+    };
+
+    // C6b: Trimmed B-spline surface tessellation is disabled due to surface inversion issues.
+    // The Newton-Raphson method in pointToBSplineSurfaceUV doesn't converge properly,
+    // producing UV coordinates that map to 3D points 40+ units away from the original.
+    // For now, use full rectangular tessellation which doesn't require surface inversion.
+    // TODO: Fix surface inversion or use PCURVE data directly for UV boundaries.
+    const mesh = await tessellateBSplineSurface(surfaceObj, 16, 16);
     return meshToVerticesAndTriangles(mesh);
   }
 
@@ -1888,6 +2159,114 @@ function pointToTorusUV(
 }
 
 /**
+ * C6b: Convert a 3D point to UV coordinates on a B-spline surface
+ * Uses Newton-Raphson iteration to invert the surface parameterization
+ */
+function pointToBSplineSurfaceUV(
+  point: Vec3,
+  surface: BSplineSurfaceType,
+  initialGuess?: Vec2
+): Vec2 {
+  const maxIterations = 20;
+  const tolerance = 1e-8;
+  const eps = 1e-6;
+
+  const { uKnots, vKnots, uDegree, vDegree, controlPoints } = surface;
+
+  // Debug: check if surface data is valid
+  if (!uKnots || uKnots.length === 0 || !vKnots || vKnots.length === 0) {
+    console.error(`[pointToBSplineSurfaceUV] Invalid knots: uKnots=${uKnots?.length}, vKnots=${vKnots?.length}`);
+    return [0.5, 0.5];
+  }
+  if (!controlPoints || controlPoints.length === 0 || !controlPoints[0] || controlPoints[0].length === 0) {
+    console.error(`[pointToBSplineSurfaceUV] Invalid control points: ${controlPoints?.length} rows`);
+    return [0.5, 0.5];
+  }
+
+  // For B-spline, valid parameter range is [knots[degree], knots[numControlPoints]]
+  // controlPoints is organized as [v_row][u_col], so:
+  // - numU = controlPoints[0].length (columns)
+  // - numV = controlPoints.length (rows)
+  const numU = controlPoints[0].length;
+  const numV = controlPoints.length;
+
+  // The valid parameter range is [knots[degree], knots[n+1]] where n = numControlPoints - 1
+  // which equals [knots[degree], knots[numControlPoints]]
+  // But we need enough knots: knots.length must be >= numControlPoints + degree + 1
+  const uMin = uKnots[uDegree];
+  const uMax = uKnots.length > numU ? uKnots[numU] : uKnots[uKnots.length - 1];
+  const vMin = vKnots[vDegree];
+  const vMax = vKnots.length > numV ? vKnots[numV] : vKnots[vKnots.length - 1];
+
+  // Debug: check if UV range is valid
+  if (isNaN(uMin) || isNaN(uMax) || isNaN(vMin) || isNaN(vMax) ||
+      uMin === undefined || uMax === undefined || vMin === undefined || vMax === undefined) {
+    console.error(`[pointToBSplineSurfaceUV] Invalid UV range: u=[${uMin}, ${uMax}], v=[${vMin}, ${vMax}]`);
+    console.error(`  uDegree=${uDegree}, vDegree=${vDegree}`);
+    console.error(`  cpRows=${controlPoints.length}, cpCols=${controlPoints[0].length}`);
+    console.error(`  uKnots.length=${uKnots.length}, vKnots.length=${vKnots.length}`);
+    console.error(`  uKnots[${uDegree}]=${uKnots[uDegree]}, uKnots[${controlPoints[0].length}]=${uKnots[controlPoints[0].length]}`);
+    return [0.5, 0.5];
+  }
+
+  let u = initialGuess ? initialGuess[0] : (uMin + uMax) / 2;
+  let v = initialGuess ? initialGuess[1] : (vMin + vMax) / 2;
+
+  for (let iter = 0; iter < maxIterations; iter++) {
+    u = Math.max(uMin, Math.min(uMax - eps, u));
+    v = Math.max(vMin, Math.min(vMax - eps, v));
+
+    const p = evaluateBSplineSurface(surface, u, v);
+    const dx = point[0] - p[0];
+    const dy = point[1] - p[1];
+    const dz = point[2] - p[2];
+    const residual = dx * dx + dy * dy + dz * dz;
+
+    if (residual < tolerance) break;
+
+    const pu = evaluateBSplineSurface(surface, u + eps, v);
+    const pv = evaluateBSplineSurface(surface, u, v + eps);
+
+    const Su: Vec3 = [(pu[0] - p[0]) / eps, (pu[1] - p[1]) / eps, (pu[2] - p[2]) / eps];
+    const Sv: Vec3 = [(pv[0] - p[0]) / eps, (pv[1] - p[1]) / eps, (pv[2] - p[2]) / eps];
+
+    const r: Vec3 = [dx, dy, dz];
+    const a11 = vec3Dot(Su, Su);
+    const a12 = vec3Dot(Su, Sv);
+    const a22 = vec3Dot(Sv, Sv);
+    const b1 = vec3Dot(Su, r);
+    const b2 = vec3Dot(Sv, r);
+
+    const det = a11 * a22 - a12 * a12;
+    if (Math.abs(det) < 1e-12) {
+      u += (Math.random() - 0.5) * 0.1 * (uMax - uMin);
+      v += (Math.random() - 0.5) * 0.1 * (vMax - vMin);
+      continue;
+    }
+
+    const du = (b1 * a22 - b2 * a12) / det;
+    const dv = (a11 * b2 - a12 * b1) / det;
+
+    u += du * 0.8;
+    v += dv * 0.8;
+  }
+
+  // Final check: verify convergence
+  const finalP = evaluateBSplineSurface(surface, u, v);
+  const finalDist = Math.sqrt(
+    (point[0] - finalP[0]) ** 2 +
+    (point[1] - finalP[1]) ** 2 +
+    (point[2] - finalP[2]) ** 2
+  );
+  if (finalDist > 0.1) {
+    // Poor convergence - log warning
+    console.warn(`[pointToBSplineSurfaceUV] Poor convergence: dist=${finalDist.toFixed(4)} for point [${point.map(x=>x.toFixed(2)).join(',')}] -> UV [${u.toFixed(4)}, ${v.toFixed(4)}]`);
+  }
+
+  return [Math.max(uMin, Math.min(uMax, u)), Math.max(vMin, Math.min(vMax, v))];
+}
+
+/**
  * C6: Extract ordered UV boundary polygon from a face's edge loops
  * This properly maintains edge order for trimmed surface triangulation
  */
@@ -2011,6 +2390,40 @@ function extractUVBoundaryLoop(
             const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
             const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
             uvPoints.push(pointToUV([x, y, z]));
+          }
+          continue;
+        }
+      }
+
+      // C6b: Check for B-spline curve
+      const bspline = model.bsplines.get(edgeCurve.curveId);
+      if (bspline) {
+        // Resolve control points to 3D coordinates
+        const controlPoints: Vec3[] = [];
+        for (const cpId of bspline.controlPointIds) {
+          const pt = model.points.get(cpId);
+          if (pt) {
+            controlPoints.push(pt.coords);
+          }
+        }
+
+        if (controlPoints.length >= 2) {
+          // Sample the B-spline curve
+          const samples = sampleBSplineCurve(
+            controlPoints,
+            bspline.knotMultiplicities,
+            bspline.knots,
+            bspline.degree,
+            samplesPerEdge
+          );
+
+          // Reverse if edge orientation is flipped
+          if (!edgeOrientation) {
+            samples.reverse();
+          }
+
+          for (const pt of samples) {
+            uvPoints.push(pointToUV(pt));
           }
           continue;
         }
@@ -2141,6 +2554,40 @@ function extractUVBoundaryLoopsSeparate(
             const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
             const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
             loopPoints.push(pointToUV([x, y, z]));
+          }
+          continue;
+        }
+      }
+
+      // C6b: Check for B-spline curve
+      const bspline = model.bsplines.get(edgeCurve.curveId);
+      if (bspline) {
+        // Resolve control points to 3D coordinates
+        const controlPoints: Vec3[] = [];
+        for (const cpId of bspline.controlPointIds) {
+          const pt = model.points.get(cpId);
+          if (pt) {
+            controlPoints.push(pt.coords);
+          }
+        }
+
+        if (controlPoints.length >= 2) {
+          // Sample the B-spline curve
+          const samples = sampleBSplineCurve(
+            controlPoints,
+            bspline.knotMultiplicities,
+            bspline.knots,
+            bspline.degree,
+            samplesPerEdge
+          );
+
+          // Reverse if edge orientation is flipped
+          if (!edgeOrientation) {
+            samples.reverse();
+          }
+
+          for (const pt of samples) {
+            loopPoints.push(pointToUV(pt));
           }
           continue;
         }
@@ -2608,8 +3055,8 @@ async function processSingleFace(
 }
 
 export async function parseStepToMesh(stepText: string): Promise<Mesh> {
-  // Optimized version with Web Workers for CPU-intensive face processing
-  // and hybrid GPU/CPU triangulation. Supports planar and curved surfaces.
+  // Optimized version with parallel face processing and hybrid GPU/CPU triangulation.
+  // Supports both planar and curved surfaces (cylinders, spheres, cones, tori).
 
   const totalStart = performance.now();
   const parseStart = performance.now();
@@ -2619,92 +3066,216 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     throw new Error("No ADVANCED_FACE found in STEP file.");
   }
 
-  const faces = [...model.faces.values()];
+  // C8: Use CLOSED_SHELL face ordering when available for consistent rendering
+  let faces: AdvancedFace[];
+  let solidColor: ResolvedColor | undefined;
+
+  // Check if we have solid structure (MANIFOLD_SOLID_BREP -> CLOSED_SHELL)
+  if (model.manifoldSolidBreps.size > 0) {
+    const solids = extractSolidsWithColors(model);
+    if (solids.length > 0) {
+      // Use the first solid's face ordering and color
+      const firstSolid = solids[0];
+      faces = firstSolid.faceIds
+        .map(id => model.faces.get(id))
+        .filter((f): f is AdvancedFace => f !== undefined);
+      solidColor = firstSolid.color;
+    } else {
+      faces = [...model.faces.values()];
+    }
+  } else if (model.closedShells.size > 0) {
+    // Fallback: use CLOSED_SHELL directly
+    const shells = [...model.closedShells.values()];
+    const firstShell = shells[0];
+    faces = firstShell.faceIds
+      .map(id => model.faces.get(id))
+      .filter((f): f is AdvancedFace => f !== undefined);
+    // Try to get color for the shell
+    solidColor = resolveColorForItem(model, firstShell.id);
+  } else {
+    // Legacy: use all faces from model
+    faces = [...model.faces.values()];
+  }
   const parseEnd = performance.now();
 
   const triangulationStart = performance.now();
 
-  // Phase 1: Identify curved vs planar faces and extract bounds (main thread - needs model)
-  interface CurvedFaceData {
-    curvedResult: { vertices: Vec3[]; triangles: [number, number, number][] };
-  }
-
-  const curvedFaces: CurvedFaceData[] = [];
-  const planarFaceData: FaceData[] = [];
-
-  // Process each face to identify type and extract bounds
-  await Promise.all(faces.map(async (face, faceIndex) => {
+  // Helper function to process a single face (runs in parallel)
+  async function processFaceOptimized(face: AdvancedFace): Promise<{
+    polygon2d: Vec2[];
+    vertices3d: Vec3[];
+    isCurved: boolean;
+    curvedResult?: { vertices: Vec3[]; triangles: [number, number, number][] };
+  } | null> {
     try {
-      // Check for curved surfaces first (needs model access)
+      // Check for curved surfaces first (cylinders, spheres, cones, tori)
       const curvedResult = await tryTessellateCurvedSurface(model, face);
       if (curvedResult) {
-        curvedFaces.push({ curvedResult });
-        return;
+        return {
+          polygon2d: [],
+          vertices3d: [],
+          isCurved: true,
+          curvedResult,
+        };
       }
 
-      // Planar face - extract bounds (needs model access)
+      // Planar face - extract bounds and process
       const bounds = await extractFaceBoundsWithCurves(model, face);
       const { outer, holes } = bounds;
 
-      // Compute basis (needs model access)
+      // Project to 2D and normalize winding
       const basis = computeFaceBasisFromStepFace(model, face, outer);
+      const projected = projectFaceLoopsTo2D({ outer, holes }, basis);
+      const normalized = normalizeWinding(projected);
+      const oriented3d = applyWindingTo3D({ outer, holes }, normalized.outerReversed, normalized.holesReversed);
+      validateTopology(normalized.outer2d, normalized.holes2d);
 
-      // Queue for worker processing
-      planarFaceData.push({
-        faceIndex,
-        outer,
-        holes,
-        basis,
-      });
+      // Bridge holes
+      const merged = bridgeAllHoles(normalized.outer2d, normalized.holes2d);
+
+      // Create 2D → 3D lookup
+      const outer2dTo3d = new Map<string, Vec3>();
+      for (let i = 0; i < normalized.outer2d.length; i++) {
+        const key = `${normalized.outer2d[i][0].toFixed(9)},${normalized.outer2d[i][1].toFixed(9)}`;
+        outer2dTo3d.set(key, oriented3d.outer[i]);
+      }
+
+      const holes2dTo3d: Map<string, Vec3>[] = [];
+      for (let h = 0; h < normalized.holes2d.length; h++) {
+        const holeMap = new Map<string, Vec3>();
+        for (let i = 0; i < normalized.holes2d[h].length; i++) {
+          const key = `${normalized.holes2d[h][i][0].toFixed(9)},${normalized.holes2d[h][i][1].toFixed(9)}`;
+          holeMap.set(key, oriented3d.holes[h][i]);
+        }
+        holes2dTo3d.push(holeMap);
+      }
+
+      // Filter duplicates
+      const filtered2d: Vec2[] = [];
+      for (let i = 0; i < merged.length; i++) {
+        const curr = merged[i];
+        const prev = filtered2d.length > 0 ? filtered2d[filtered2d.length - 1] : merged[merged.length - 1];
+        const dx = curr[0] - prev[0];
+        const dy = curr[1] - prev[1];
+        if (dx * dx + dy * dy > 1e-12) {
+          filtered2d.push(curr);
+        }
+      }
+
+      if (filtered2d.length > 1) {
+        const first = filtered2d[0];
+        const last = filtered2d[filtered2d.length - 1];
+        const dx = first[0] - last[0];
+        const dy = first[1] - last[1];
+        if (dx * dx + dy * dy < 1e-12) {
+          filtered2d.pop();
+        }
+      }
+
+      // Build 3D vertices
+      const vertices3d: Vec3[] = [];
+      for (const pt2d of filtered2d) {
+        const key = `${pt2d[0].toFixed(9)},${pt2d[1].toFixed(9)}`;
+        let pt3d = outer2dTo3d.get(key);
+        if (!pt3d) {
+          for (const holeMap of holes2dTo3d) {
+            pt3d = holeMap.get(key);
+            if (pt3d) break;
+          }
+        }
+        if (!pt3d) {
+          pt3d = [pt2d[0], pt2d[1], 0];
+        }
+        vertices3d.push(pt3d);
+      }
+
+      if (filtered2d.length >= 3) {
+        // Validate that 2D and 3D vertex counts match
+        if (filtered2d.length !== vertices3d.length) {
+          console.error(`[processFaceOptimized] Vertex count mismatch: 2D=${filtered2d.length}, 3D=${vertices3d.length}`);
+          return null;
+        }
+        return { polygon2d: filtered2d, vertices3d, isCurved: false };
+      }
+      return null;
     } catch {
-      // Skip failed faces
+      return null; // Skip failed faces
     }
-  }));
+  }
 
-  // Phase 2: Process planar faces using Web Workers (CPU-intensive work)
-  // Workers handle: projection, winding normalization, hole bridging, duplicate filtering
-  const processedFaces = await processFacesParallel(planarFaceData);
+  // Process all faces in parallel
+  const results = await Promise.all(faces.map(processFaceOptimized));
+  const preparedFaces = results.filter((f): f is NonNullable<typeof f> => f !== null);
 
-  // Filter successful results
-  const validPlanarFaces = processedFaces.filter(f => f.success && f.polygon2d && f.vertices3d);
+  // Separate curved and planar faces
+  const planarFaces = preparedFaces.filter(f => !f.isCurved);
+  const curvedFaces = preparedFaces.filter(f => f.isCurved);
 
-  // Phase 3: Triangulate planar polygons using hybrid GPU/CPU approach
-  const allPolygons: Vec2[][] = validPlanarFaces.map(f => f.polygon2d!);
+  // Triangulate planar polygons using hybrid GPU/CPU approach
+  const allPolygons: Vec2[][] = planarFaces.map(f => f.polygon2d);
   const hybridResult = await triangulateHybrid(allPolygons);
 
-  // Map triangulation results back
+  // Map triangulation results back to planar faces
   const planarTriangles: Map<number, number[][]> = new Map();
-  for (let i = 0; i < validPlanarFaces.length; i++) {
+  for (let i = 0; i < planarFaces.length; i++) {
     planarTriangles.set(i, hybridResult.triangles[i]);
   }
 
-  // Phase 4: Assemble final mesh
+  // Assemble final mesh
   const allVertices: Vec3[] = [];
   const allIndices: number[] = [];
   let vertexOffset = 0;
 
   // Add curved faces (already have triangles from surface tessellation)
-  for (const face of curvedFaces) {
-    for (const v of face.curvedResult.vertices) {
-      allVertices.push(v);
+  for (let fi = 0; fi < curvedFaces.length; fi++) {
+    const face = curvedFaces[fi];
+    if (face.curvedResult) {
+      const numVerts = face.curvedResult.vertices.length;
+      const numTris = face.curvedResult.triangles.length;
+
+      // Validate face mesh before adding
+      let faceMaxIndex = 0;
+      for (const tri of face.curvedResult.triangles) {
+        faceMaxIndex = Math.max(faceMaxIndex, tri[0], tri[1], tri[2]);
+      }
+      if (faceMaxIndex >= numVerts) {
+        console.error(`[CURVED FACE ${fi}] Invalid indices! maxIndex=${faceMaxIndex}, numVerts=${numVerts}`);
+        continue; // Skip this face
+      }
+
+      for (const v of face.curvedResult.vertices) {
+        allVertices.push(v);
+      }
+      for (const tri of face.curvedResult.triangles) {
+        allIndices.push(
+          tri[0] + vertexOffset,
+          tri[1] + vertexOffset,
+          tri[2] + vertexOffset
+        );
+      }
+      vertexOffset += numVerts;
     }
-    for (const tri of face.curvedResult.triangles) {
-      allIndices.push(
-        tri[0] + vertexOffset,
-        tri[1] + vertexOffset,
-        tri[2] + vertexOffset
-      );
-    }
-    vertexOffset += face.curvedResult.vertices.length;
   }
 
   // Add planar faces (triangulated by hybrid approach)
-  for (let i = 0; i < validPlanarFaces.length; i++) {
-    const face = validPlanarFaces[i];
+  for (let i = 0; i < planarFaces.length; i++) {
+    const face = planarFaces[i];
     const triangles = planarTriangles.get(i);
 
     if (triangles && triangles.length > 0) {
-      for (const v of face.vertices3d!) {
+      const numVerts = face.vertices3d.length;
+
+      // Validate face mesh before adding
+      let faceMaxIndex = 0;
+      for (const tri of triangles) {
+        faceMaxIndex = Math.max(faceMaxIndex, tri[0], tri[1], tri[2]);
+      }
+      if (faceMaxIndex >= numVerts) {
+        console.error(`[PLANAR FACE ${i}] Invalid indices! maxIndex=${faceMaxIndex}, numVerts=${numVerts}`);
+        continue; // Skip this face
+      }
+
+      for (const v of face.vertices3d) {
         allVertices.push(v);
       }
       for (const tri of triangles) {
@@ -2714,7 +3285,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
           tri[2] + vertexOffset
         );
       }
-      vertexOffset += face.vertices3d!.length;
+      vertexOffset += numVerts;
     }
   }
 
@@ -2730,12 +3301,12 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
   const indices = new Uint32Array(allIndices);
 
-  // C7.3: Compute smooth vertex normals
+  // C7.3: Compute smooth vertex normals (GPU-accelerated)
   const trianglesForNormals: [number, number, number][] = [];
   for (let i = 0; i < allIndices.length; i += 3) {
     trianglesForNormals.push([allIndices[i], allIndices[i + 1], allIndices[i + 2]]);
   }
-  const smoothNormals = computeSmoothNormals(allVertices, trianglesForNormals);
+  const smoothNormals = await computeSmoothNormalsGPU(allVertices, trianglesForNormals);
   const normals = new Float32Array(smoothNormals.length * 3);
   smoothNormals.forEach((n, i) => {
     normals[i * 3 + 0] = n[0];
@@ -2745,12 +3316,30 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
   const totalEnd = performance.now();
 
+  // Validate mesh indices before returning
+  const numVertices = allVertices.length;
+  let maxIndex = 0;
+  let invalidCount = 0;
+  for (let i = 0; i < allIndices.length; i++) {
+    const idx = allIndices[i];
+    if (idx >= numVertices) {
+      invalidCount++;
+      if (invalidCount <= 5) {
+        console.error(`[MESH VALIDATION] Invalid index ${idx} at position ${i}, numVertices=${numVertices}`);
+      }
+    }
+    maxIndex = Math.max(maxIndex, idx);
+  }
+  if (invalidCount > 0) {
+    console.error(`[MESH VALIDATION] ${invalidCount} invalid indices found! maxIndex=${maxIndex}, numVertices=${numVertices}`);
+  }
+
   // Calculate timing
   const parseTime = parseEnd - parseStart;
   const triangulationTime = triangulationEnd - triangulationStart;
   const totalTime = totalEnd - totalStart;
 
-  return { positions, indices, normals, parseTime, triangulationTime, totalTime };
+  return { positions, indices, normals, color: solidColor, parseTime, triangulationTime, totalTime };
 }
 
 /**
@@ -3559,6 +4148,20 @@ function parseStep(stepText: string): StepModel {
     // C4: PCURVE support
     pcurves: new Map(),
     definitionalRepresentations: new Map(),
+    // C8: Full solids / assemblies
+    closedShells: new Map(),
+    manifoldSolidBreps: new Map(),
+    styledItems: new Map(),
+    colourRgbs: new Map(),
+    fillAreaStyleColours: new Map(),
+    fillAreaStyles: new Map(),
+    surfaceStyleFillAreas: new Map(),
+    surfaceSideStyles: new Map(),
+    surfaceStyleUsages: new Map(),
+    presentationStyleAssignments: new Map(),
+    shapeRepresentations: new Map(),
+    representationRelationships: new Map(),
+    itemDefinedTransformations: new Map(),
   };
 
   // Remove comments (/* ... */, / ... */, and -- ... end-of-line)
@@ -3566,13 +4169,46 @@ function parseStep(stepText: string): StepModel {
   text = text.replace(/\/[^*][\s\S]*?\*\//g, "");          // block comments / ... */ (single slash)
   text = text.replace(/--.*$/gm, "");                       // line comments
 
-  // Split into lines and process entity lines starting with '#'
-  const lines = text.split(/\r?\n/);
+  // Join multi-line entities: STEP entities can span multiple lines, ending with semicolon
+  // Normalize by removing newlines and collapsing multiple spaces
+  const rawLines = text.split(/\r?\n/);
+  const entities: string[] = [];
+  let currentEntity = "";
 
-  const entityRegex = /^#(\d+)\s*=\s*([A-Z0-9_]+)\s*\((.*)\);?$/;
-
-  for (const line of lines) {
+  for (const line of rawLines) {
     const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    if (trimmed.startsWith("#")) {
+      // Start of a new entity - save previous if exists
+      if (currentEntity) {
+        entities.push(currentEntity);
+      }
+      currentEntity = trimmed;
+    } else if (currentEntity) {
+      // Continuation of current entity
+      currentEntity += " " + trimmed;
+    }
+
+    // Check if current entity is complete (ends with semicolon)
+    if (currentEntity && currentEntity.endsWith(";")) {
+      entities.push(currentEntity);
+      currentEntity = "";
+    }
+  }
+  // Add any remaining entity
+  if (currentEntity) {
+    entities.push(currentEntity);
+  }
+
+  // Regex updated to handle:
+  // - Spaces around '=' sign
+  // - Spaces between entity type and opening paren: CARTESIAN_POINT ( 'NONE', ...)
+  // - Spaces before semicolon: ...) ) ;
+  const entityRegex = /^#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(\s*(.*)\s*\)\s*;?\s*$/;
+
+  for (const entity of entities) {
+    const trimmed = entity.trim();
 
     if (!trimmed.startsWith("#")) continue;
     const match = trimmed.match(entityRegex);
@@ -3646,6 +4282,10 @@ function parseStep(stepText: string): StepModel {
       case "ELLIPSE":
         parseEllipse(id, args, model);
         break;
+      // C6b: B-spline curves (for trimmed B-spline surfaces)
+      case "B_SPLINE_CURVE_WITH_KNOTS":
+        parseBSplineCurve(id, args, model);
+        break;
       case "SURFACE_CURVE":
         parseSurfaceCurve(id, args, model);
         break;
@@ -3655,6 +4295,41 @@ function parseStep(stepText: string): StepModel {
         break;
       case "DEFINITIONAL_REPRESENTATION":
         parseDefinitionalRepresentation(id, args, model);
+        break;
+      // C8: Full solids / assemblies
+      case "CLOSED_SHELL":
+        parseClosedShell(id, args, model);
+        break;
+      case "MANIFOLD_SOLID_BREP":
+        parseManifoldSolidBrep(id, args, model);
+        break;
+      case "COLOUR_RGB":
+        parseColourRgb(id, args, model);
+        break;
+      case "FILL_AREA_STYLE_COLOUR":
+        parseFillAreaStyleColour(id, args, model);
+        break;
+      case "FILL_AREA_STYLE":
+        parseFillAreaStyle(id, args, model);
+        break;
+      case "SURFACE_STYLE_FILL_AREA":
+        parseSurfaceStyleFillArea(id, args, model);
+        break;
+      case "SURFACE_SIDE_STYLE":
+        parseSurfaceSideStyle(id, args, model);
+        break;
+      case "SURFACE_STYLE_USAGE":
+        parseSurfaceStyleUsage(id, args, model);
+        break;
+      case "PRESENTATION_STYLE_ASSIGNMENT":
+        parsePresentationStyleAssignment(id, args, model);
+        break;
+      case "STYLED_ITEM":
+        parseStyledItem(id, args, model);
+        break;
+      case "ADVANCED_BREP_SHAPE_REPRESENTATION":
+      case "SHAPE_REPRESENTATION":
+        parseShapeRepresentation(id, args, model);
         break;
       // We ignore other entity types for now
     }
@@ -4032,6 +4707,64 @@ function parseEllipse(id: number, args: string, model: StepModel) {
   model.ellipses.set(id, { id, placementId, majorRadius, minorRadius });
 }
 
+// =============================================================================
+// C6b: B-Spline Curve Parsing (for trimmed B-spline surfaces)
+// =============================================================================
+
+function parseBSplineCurve(id: number, args: string, model: StepModel) {
+  // B_SPLINE_CURVE_WITH_KNOTS('name', degree,
+  //   (#cp1, #cp2, ...),      -- control points
+  //   .form.,                  -- curve form
+  //   .closed.,               -- closed curve flag
+  //   .self_intersect.,       -- self-intersect flag
+  //   (mult1, mult2, ...),    -- knot multiplicities
+  //   (knot1, knot2, ...),    -- knot values
+  //   .knot_type.)            -- knot specification
+
+  // Extract degree
+  const degreeMatch = args.match(/'[^']*'\s*,\s*(\d+)/);
+  if (!degreeMatch) {
+    return; // Skip if can't parse
+  }
+  const degree = parseInt(degreeMatch[1], 10);
+
+  // Extract control point IDs
+  const cpListMatch = args.match(/,\s*\(\s*(#\d+(?:\s*,\s*#\d+)*)\s*\)/);
+  if (!cpListMatch) {
+    return;
+  }
+  const cpMatches = cpListMatch[1].match(/#(\d+)/g);
+  if (!cpMatches) {
+    return;
+  }
+  const controlPointIds = cpMatches.map(m => parseInt(m.substring(1), 10));
+
+  // Extract knot multiplicities - find second parenthesized list of numbers
+  const afterCPs = args.substring(args.indexOf(cpListMatch[0]) + cpListMatch[0].length);
+  const multMatch = afterCPs.match(/\(\s*([\d\s,]+)\s*\)/);
+  if (!multMatch) {
+    return;
+  }
+  const knotMultiplicities = multMatch[1].split(',').map(s => parseInt(s.trim(), 10));
+
+  // Extract knot values - find the list of floats after multiplicities
+  const afterMults = afterCPs.substring(afterCPs.indexOf(multMatch[0]) + multMatch[0].length);
+  const knotsMatch = afterMults.match(/\(\s*([-0-9.Ee+\s,]+)\s*\)/);
+  if (!knotsMatch) {
+    return;
+  }
+  const knots = knotsMatch[1].split(',').map(s => parseFloat(s.trim()));
+
+  model.bsplines.set(id, {
+    id,
+    degree,
+    controlPointIds,
+    knotMultiplicities,
+    knots,
+    closed: false,  // TODO: Detect from STEP data
+  });
+}
+
 function parseSurfaceCurve(id: number, args: string, model: StepModel) {
   // SURFACE_CURVE('', #3d_curve, (#pcurve1, #pcurve2), .PCURVE_S1.)
   // Example: SURFACE_CURVE('', #223, (#228, #239), .PCURVE_S1.)
@@ -4092,6 +4825,284 @@ function parseDefinitionalRepresentation(id: number, args: string, model: StepMo
   }
 
   model.definitionalRepresentations.set(id, { id, curveIds });
+}
+
+// =============================================================================
+// C8: Full Solids / Assemblies Parsing
+// =============================================================================
+
+function parseClosedShell(id: number, args: string, model: StepModel) {
+  // CLOSED_SHELL ( 'NONE', ( #1417, #3481, #2185, ... ) )
+  const nameMatch = args.match(/^'([^']*)'/);
+  const name = nameMatch ? nameMatch[1] : '';
+
+  const faceListMatch = args.match(/\(\s*(#\d+(?:\s*,\s*#\d+)*)\s*\)\s*\)?\s*$/);
+  const faceIds: number[] = [];
+  if (faceListMatch) {
+    const faceMatches = faceListMatch[1].match(/#(\d+)/g);
+    if (faceMatches) {
+      for (const match of faceMatches) {
+        faceIds.push(parseInt(match.substring(1), 10));
+      }
+    }
+  }
+
+  model.closedShells.set(id, { id, name, faceIds });
+}
+
+function parseManifoldSolidBrep(id: number, args: string, model: StepModel) {
+  // MANIFOLD_SOLID_BREP ( 'Fillet3', #903 )
+  const match = args.match(/^'([^']*)'\s*,\s*#(\d+)/);
+  if (!match) return;
+
+  const name = match[1];
+  const shellId = parseInt(match[2], 10);
+
+  model.manifoldSolidBreps.set(id, { id, name, shellId });
+}
+
+function parseColourRgb(id: number, args: string, model: StepModel) {
+  // COLOUR_RGB ( '',0.792, 0.820, 0.933 )
+  const match = args.match(/^'([^']*)'\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)/);
+  if (!match) return;
+
+  const name = match[1];
+  const r = parseFloat(match[2]);
+  const g = parseFloat(match[3]);
+  const b = parseFloat(match[4]);
+
+  model.colourRgbs.set(id, { id, name, r, g, b });
+}
+
+function parseFillAreaStyleColour(id: number, args: string, model: StepModel) {
+  // FILL_AREA_STYLE_COLOUR ( '', #1833 )
+  const match = args.match(/^'([^']*)'\s*,\s*#(\d+)/);
+  if (!match) return;
+
+  const name = match[1];
+  const colourId = parseInt(match[2], 10);
+
+  model.fillAreaStyleColours.set(id, { id, name, colourId });
+}
+
+function parseFillAreaStyle(id: number, args: string, model: StepModel) {
+  // FILL_AREA_STYLE ('',( #3957 ) )
+  const nameMatch = args.match(/^'([^']*)'/);
+  const name = nameMatch ? nameMatch[1] : '';
+
+  const styleListMatch = args.match(/\(\s*(#\d+(?:\s*,\s*#\d+)*)\s*\)/);
+  const fillStyleIds: number[] = [];
+  if (styleListMatch) {
+    const styleMatches = styleListMatch[1].match(/#(\d+)/g);
+    if (styleMatches) {
+      for (const match of styleMatches) {
+        fillStyleIds.push(parseInt(match.substring(1), 10));
+      }
+    }
+  }
+
+  model.fillAreaStyles.set(id, { id, name, fillStyleIds });
+}
+
+function parseSurfaceStyleFillArea(id: number, args: string, model: StepModel) {
+  // SURFACE_STYLE_FILL_AREA ( #2251 )
+  const match = args.match(/#(\d+)/);
+  if (!match) return;
+
+  const fillAreaStyleId = parseInt(match[1], 10);
+
+  model.surfaceStyleFillAreas.set(id, { id, fillAreaStyleId });
+}
+
+function parseSurfaceSideStyle(id: number, args: string, model: StepModel) {
+  // SURFACE_SIDE_STYLE ('',( #3519 ) )
+  const nameMatch = args.match(/^'([^']*)'/);
+  const name = nameMatch ? nameMatch[1] : '';
+
+  const styleListMatch = args.match(/\(\s*(#\d+(?:\s*,\s*#\d+)*)\s*\)/);
+  const styleIds: number[] = [];
+  if (styleListMatch) {
+    const styleMatches = styleListMatch[1].match(/#(\d+)/g);
+    if (styleMatches) {
+      for (const match of styleMatches) {
+        styleIds.push(parseInt(match.substring(1), 10));
+      }
+    }
+  }
+
+  model.surfaceSideStyles.set(id, { id, name, styleIds });
+}
+
+function parseSurfaceStyleUsage(id: number, args: string, model: StepModel) {
+  // SURFACE_STYLE_USAGE ( .BOTH. , #667 )
+  const match = args.match(/(\.[A-Z_]+\.)\s*,\s*#(\d+)/);
+  if (!match) return;
+
+  const side = match[1];
+  const styleId = parseInt(match[2], 10);
+
+  model.surfaceStyleUsages.set(id, { id, side, styleId });
+}
+
+function parsePresentationStyleAssignment(id: number, args: string, model: StepModel) {
+  // PRESENTATION_STYLE_ASSIGNMENT (( #1623 ) )
+  const styleListMatch = args.match(/\(\s*(#\d+(?:\s*,\s*#\d+)*)\s*\)/);
+  const styleIds: number[] = [];
+  if (styleListMatch) {
+    const styleMatches = styleListMatch[1].match(/#(\d+)/g);
+    if (styleMatches) {
+      for (const match of styleMatches) {
+        styleIds.push(parseInt(match.substring(1), 10));
+      }
+    }
+  }
+
+  model.presentationStyleAssignments.set(id, { id, styleIds });
+}
+
+function parseStyledItem(id: number, args: string, model: StepModel) {
+  // STYLED_ITEM ( 'NONE', ( #2892 ), #3700 )
+  const nameMatch = args.match(/^'([^']*)'/);
+  const name = nameMatch ? nameMatch[1] : '';
+
+  // Match style list (may have multiple styles)
+  const styleListMatch = args.match(/\(\s*(#\d+(?:\s*,\s*#\d+)*)\s*\)/);
+  const styleIds: number[] = [];
+  if (styleListMatch) {
+    const styleMatches = styleListMatch[1].match(/#(\d+)/g);
+    if (styleMatches) {
+      for (const match of styleMatches) {
+        styleIds.push(parseInt(match.substring(1), 10));
+      }
+    }
+  }
+
+  // Match the item reference (last #id in the args)
+  const itemMatch = args.match(/#(\d+)\s*\)?\s*$/);
+  if (!itemMatch) return;
+  const itemId = parseInt(itemMatch[1], 10);
+
+  model.styledItems.set(id, { id, name, styleIds, itemId });
+}
+
+function parseShapeRepresentation(id: number, args: string, model: StepModel) {
+  // ADVANCED_BREP_SHAPE_REPRESENTATION ( 'VM-001', ( #3700, #448 ), #2830 )
+  const nameMatch = args.match(/^'([^']*)'/);
+  const name = nameMatch ? nameMatch[1] : '';
+
+  // Match item list
+  const itemListMatch = args.match(/\(\s*(#\d+(?:\s*,\s*#\d+)*)\s*\)/);
+  const itemIds: number[] = [];
+  if (itemListMatch) {
+    const itemMatches = itemListMatch[1].match(/#(\d+)/g);
+    if (itemMatches) {
+      for (const match of itemMatches) {
+        itemIds.push(parseInt(match.substring(1), 10));
+      }
+    }
+  }
+
+  // Match the context reference (last #id in the args)
+  const contextMatch = args.match(/#(\d+)\s*\)?\s*$/);
+  const contextId = contextMatch ? parseInt(contextMatch[1], 10) : 0;
+
+  model.shapeRepresentations.set(id, { id, name, itemIds, contextId });
+}
+
+// =============================================================================
+// C8: Color Resolution (follow STYLED_ITEM -> color chain)
+// =============================================================================
+
+/**
+ * Resolve the color for a styled item by following the STEP style chain.
+ */
+function resolveColorForItem(model: StepModel, itemId: number): ResolvedColor | undefined {
+  for (const styledItem of model.styledItems.values()) {
+    if (styledItem.itemId === itemId) {
+      return resolveColorFromStyledItem(model, styledItem);
+    }
+  }
+  return undefined;
+}
+
+function resolveColorFromStyledItem(model: StepModel, styledItem: StyledItem): ResolvedColor | undefined {
+  for (const styleId of styledItem.styleIds) {
+    const psa = model.presentationStyleAssignments.get(styleId);
+    if (psa) {
+      const color = resolveColorFromPSA(model, psa);
+      if (color) return color;
+    }
+  }
+  return undefined;
+}
+
+function resolveColorFromPSA(model: StepModel, psa: PresentationStyleAssignment): ResolvedColor | undefined {
+  for (const styleId of psa.styleIds) {
+    const ssu = model.surfaceStyleUsages.get(styleId);
+    if (ssu) {
+      const sss = model.surfaceSideStyles.get(ssu.styleId);
+      if (sss) {
+        for (const fillStyleId of sss.styleIds) {
+          const ssfa = model.surfaceStyleFillAreas.get(fillStyleId);
+          if (ssfa) {
+            const fas = model.fillAreaStyles.get(ssfa.fillAreaStyleId);
+            if (fas) {
+              for (const fascId of fas.fillStyleIds) {
+                const fasc = model.fillAreaStyleColours.get(fascId);
+                if (fasc) {
+                  const colour = model.colourRgbs.get(fasc.colourId);
+                  if (colour) {
+                    return { r: colour.r, g: colour.g, b: colour.b };
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Extract all solids with their face IDs and colors from the model.
+ */
+export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
+  const solids: SolidWithColor[] = [];
+
+  for (const brep of model.manifoldSolidBreps.values()) {
+    const shell = model.closedShells.get(brep.shellId);
+    if (!shell) continue;
+
+    const color = resolveColorForItem(model, brep.id);
+
+    solids.push({
+      solidId: brep.id,
+      name: brep.name || shell.name || `Solid_${brep.id}`,
+      faceIds: shell.faceIds,
+      color,
+    });
+  }
+
+  // If no MANIFOLD_SOLID_BREP found, check for standalone CLOSED_SHELL
+  if (solids.length === 0) {
+    for (const shell of model.closedShells.values()) {
+      const isReferenced = [...model.manifoldSolidBreps.values()].some(b => b.shellId === shell.id);
+      if (isReferenced) continue;
+
+      const color = resolveColorForItem(model, shell.id);
+
+      solids.push({
+        solidId: shell.id,
+        name: shell.name || `Shell_${shell.id}`,
+        faceIds: shell.faceIds,
+        color,
+      });
+    }
+  }
+
+  return solids;
 }
 
 // =============================================================================

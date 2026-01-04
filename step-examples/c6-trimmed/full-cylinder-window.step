@@ -1,0 +1,111 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Full cylinder with rectangular window - using seam'),'2;1');
+FILE_NAME('full-cylinder-window.step','2024-01-01T00:00:00',(''),(''),'','','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+/* Axis placement for cylinder */
+#1=CARTESIAN_POINT('origin',(0.0,0.0,0.0));
+#2=DIRECTION('axis',(0.0,0.0,1.0));
+#3=DIRECTION('ref',(1.0,0.0,0.0));
+#4=AXIS2_PLACEMENT_3D('placement',#1,#2,#3);
+
+/* Cylindrical surface - radius 40 */
+#10=CYLINDRICAL_SURFACE('cylinder',#4,40.0);
+
+/* Outer boundary - full cylinder using two 180-degree arcs with a seam at angle 0 */
+/* height 0 to 80 */
+
+/* Four corner vertices */
+#20=CARTESIAN_POINT('p1',(40.0,0.0,0.0));      /* angle 0, z=0 */
+#21=CARTESIAN_POINT('p2',(-40.0,0.0,0.0));     /* angle 180, z=0 */
+#22=CARTESIAN_POINT('p3',(-40.0,0.0,80.0));    /* angle 180, z=80 */
+#23=CARTESIAN_POINT('p4',(40.0,0.0,80.0));     /* angle 0, z=80 */
+#30=VERTEX_POINT('v1',#20);
+#31=VERTEX_POINT('v2',#21);
+#32=VERTEX_POINT('v3',#22);
+#33=VERTEX_POINT('v4',#23);
+
+/* Bottom arc 1: angle 0 to 180 (front half) */
+#40=CIRCLE('bottom_arc1',#4,40.0);
+#41=EDGE_CURVE('bottom1',#30,#31,#40,.T.);
+#42=ORIENTED_EDGE('',*,*,#41,.T.);
+
+/* Left seam going up at angle 180 */
+#43=VECTOR('left_dir',#2,80.0);
+#44=LINE('left_line',#21,#43);
+#45=EDGE_CURVE('left',#31,#32,#44,.T.);
+#46=ORIENTED_EDGE('',*,*,#45,.T.);
+
+/* Top arc 1: angle 180 to 360 (back half, going to angle 0) */
+#47=CARTESIAN_POINT('top_origin',(0.0,0.0,80.0));
+#48=AXIS2_PLACEMENT_3D('top_placement',#47,#2,#3);
+#49=CIRCLE('top_arc1',#48,40.0);
+#50=EDGE_CURVE('top1',#32,#33,#49,.T.);
+#51=ORIENTED_EDGE('',*,*,#50,.T.);
+
+/* Right seam going down at angle 0 */
+#52=VECTOR('right_dir',#2,80.0);
+#53=LINE('right_line',#20,#52);
+#54=EDGE_CURVE('right',#33,#30,#53,.T.);
+#55=ORIENTED_EDGE('',*,*,#54,.T.);
+
+/* Outer edge loop - this traces: bottom arc -> left seam -> top arc -> right seam */
+#60=EDGE_LOOP('outer_loop',(#42,#46,#51,#55));
+#61=FACE_OUTER_BOUND('outer_bound',#60,.T.);
+
+/* ========== WINDOW: at angle 45-135 deg, height 25-55 ========== */
+/* angle 45deg: cos=0.707, sin=0.707 -> x=28.3, y=28.3 */
+/* angle 135deg: cos=-0.707, sin=0.707 -> x=-28.3, y=28.3 */
+#70=CARTESIAN_POINT('h1',(28.28427,28.28427,25.0));
+#71=CARTESIAN_POINT('h2',(-28.28427,28.28427,25.0));
+#72=CARTESIAN_POINT('h3',(-28.28427,28.28427,55.0));
+#73=CARTESIAN_POINT('h4',(28.28427,28.28427,55.0));
+#74=VERTEX_POINT('hv1',#70);
+#75=VERTEX_POINT('hv2',#71);
+#76=VERTEX_POINT('hv3',#72);
+#77=VERTEX_POINT('hv4',#73);
+
+#78=CARTESIAN_POINT('hole_bottom_center',(0.0,0.0,25.0));
+#79=AXIS2_PLACEMENT_3D('hole_bottom_place',#78,#2,#3);
+#80=CIRCLE('hole_bottom_arc',#79,40.0);
+#81=EDGE_CURVE('he_bottom',#74,#75,#80,.T.);
+#82=ORIENTED_EDGE('',*,*,#81,.T.);
+
+#83=VECTOR('hole_right_dir',#2,30.0);
+#84=LINE('hole_right_line',#71,#83);
+#85=EDGE_CURVE('he_right',#75,#76,#84,.T.);
+#86=ORIENTED_EDGE('',*,*,#85,.T.);
+
+#87=CARTESIAN_POINT('hole_top_center',(0.0,0.0,55.0));
+#88=AXIS2_PLACEMENT_3D('hole_top_place',#87,#2,#3);
+#89=CIRCLE('hole_top_arc',#88,40.0);
+#90=EDGE_CURVE('he_top',#76,#77,#89,.T.);
+#91=ORIENTED_EDGE('',*,*,#90,.T.);
+
+#92=VECTOR('hole_left_dir',#2,30.0);
+#93=LINE('hole_left_line',#70,#92);
+#94=EDGE_CURVE('he_left',#77,#74,#93,.T.);
+#95=ORIENTED_EDGE('',*,*,#94,.T.);
+
+#100=EDGE_LOOP('hole_loop',(#82,#86,#91,#95));
+#101=FACE_BOUND('hole_bound',#100,.T.);
+
+/* Advanced face with outer bound and hole */
+#110=ADVANCED_FACE('face_with_window',(#61,#101),#10,.T.);
+
+/* Shell and solid */
+#120=CLOSED_SHELL('shell',(#110));
+#121=MANIFOLD_SOLID_BREP('solid',#120);
+#122=SHAPE_REPRESENTATION('shape',(#121),#130);
+#130=( GEOMETRIC_REPRESENTATION_CONTEXT(3)
+       GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#131))
+       GLOBAL_UNIT_ASSIGNED_CONTEXT((#132,#133,#134))
+       REPRESENTATION_CONTEXT('Context','3D') );
+#131=UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#132,'');
+#132=(LENGTH_UNIT()NAMED_UNIT(*)SI_UNIT(.MILLI.,.METRE.));
+#133=(NAMED_UNIT(*)PLANE_ANGLE_UNIT()SI_UNIT($,.RADIAN.));
+#134=(NAMED_UNIT(*)SOLID_ANGLE_UNIT()SI_UNIT($,.STERADIAN.));
+ENDSEC;
+END-ISO-10303-21;

@@ -257,13 +257,39 @@ You can render: high-quality shaded models without artifacts
 Status: ✅ Done
 
 C8 — Full solids / assemblies
-C8.1 Tessellate all faces in CLOSED_SHELL / MANIFOLD_SOLID_BREP
-C8.2 Weld coincident vertices, build unified index buffer
-C8.3 Parse STYLED_ITEM for colors/materials
-C8.4 Handle SHAPE_REPRESENTATION transforms for assemblies
+C8.1 Tessellate all faces in CLOSED_SHELL / MANIFOLD_SOLID_BREP ✅
 
-You can render: complete STEP parts and multi-part assemblies
-Status: ❌ Not started
+Implemented parsing for solid structure entities:
+- `CLOSED_SHELL` - Collection of ADVANCED_FACE IDs forming solid boundary
+- `MANIFOLD_SOLID_BREP` - Links solid name to CLOSED_SHELL
+- `parseStepToMesh()` now uses CLOSED_SHELL face ordering when available
+
+C8.2 Weld coincident vertices, build unified index buffer ✅
+
+Already implemented in `mesh-quality.ts`:
+- `weldVertices()` - Merges coincident vertices using spatial hashing
+- `combineMeshesWithNormals()` - Full pipeline with welding
+
+C8.3 Parse STYLED_ITEM for colors/materials ✅
+
+Implemented full color chain parsing:
+- `STYLED_ITEM` -> `PRESENTATION_STYLE_ASSIGNMENT` -> `SURFACE_STYLE_USAGE`
+- -> `SURFACE_SIDE_STYLE` -> `SURFACE_STYLE_FILL_AREA` -> `FILL_AREA_STYLE`
+- -> `FILL_AREA_STYLE_COLOUR` -> `COLOUR_RGB`
+- `resolveColorForItem()` - Resolves color for a geometry item
+- `extractSolidsWithColors()` - Extracts all solids with their colors
+- `Mesh` interface extended with `color?: ResolvedColor`
+- Three.js renderer uses color from mesh when available
+
+C8.4 Handle SHAPE_REPRESENTATION transforms for assemblies ✅ (basic)
+
+Implemented:
+- `SHAPE_REPRESENTATION` / `ADVANCED_BREP_SHAPE_REPRESENTATION` parsing
+- Basic single-solid support
+- Multi-part assemblies pending (requires REPRESENTATION_RELATIONSHIP traversal)
+
+You can render: complete STEP parts with correct colors
+Status: ✅ Done (single parts with colors, assemblies pending)
 
 C9 — Performance + Large models
 C9.1 Streaming/progressive tessellation for large files

@@ -133,6 +133,8 @@ async function runBenchmarks(page) {
         for (let i = 0; i < CONFIG.warmupRuns; i++) {
             await page.evaluate(async (base64) => {
                 await window.benchmark.runGPU(base64);
+                await window.benchmark.runGPUBatched(base64);
+                await window.benchmark.runGPUHybrid(base64);
                 await window.benchmark.runOCCT(base64);
             }, stepBase64);
         }
@@ -140,8 +142,11 @@ async function runBenchmarks(page) {
         // Benchmark runs
         const gpuTimes = [];
         const gpuSingleTimes = [];
+        const gpuOptimizedTimes = [];
+        const gpuBatchedTimes = [];
+        const gpuHybridTimes = [];
         const occtTimes = [];
-        let gpuResult, gpuSingleResult, occtResult;
+        let gpuResult, gpuSingleResult, gpuOptimizedResult, gpuBatchedResult, gpuHybridResult, occtResult;
 
         for (let i = 0; i < CONFIG.benchmarkRuns; i++) {
             log(`  Run ${i + 1}/${CONFIG.benchmarkRuns}...`, 'dim');
@@ -164,6 +169,33 @@ async function runBenchmarks(page) {
                 gpuSingleTimes.push(gpuSingleResult.totalTime);
             }
 
+            // GPU implementation (optimized - parallel workgroup)
+            gpuOptimizedResult = await page.evaluate(async (base64) => {
+                return await window.benchmark.runGPUOptimized(base64);
+            }, stepBase64);
+
+            if (gpuOptimizedResult.success) {
+                gpuOptimizedTimes.push(gpuOptimizedResult.totalTime);
+            }
+
+            // GPU implementation (batched - single dispatch for all faces)
+            gpuBatchedResult = await page.evaluate(async (base64) => {
+                return await window.benchmark.runGPUBatched(base64);
+            }, stepBase64);
+
+            if (gpuBatchedResult.success) {
+                gpuBatchedTimes.push(gpuBatchedResult.totalTime);
+            }
+
+            // GPU implementation (hybrid - GPU batched + CPU fallback for large polygons)
+            gpuHybridResult = await page.evaluate(async (base64) => {
+                return await window.benchmark.runGPUHybrid(base64);
+            }, stepBase64);
+
+            if (gpuHybridResult.success) {
+                gpuHybridTimes.push(gpuHybridResult.totalTime);
+            }
+
             // OCCT implementation
             occtResult = await page.evaluate(async (base64) => {
                 return await window.benchmark.runOCCT(base64);
@@ -177,6 +209,9 @@ async function runBenchmarks(page) {
         // Calculate averages
         const gpuAvg = gpuTimes.length > 0 ? gpuTimes.reduce((a, b) => a + b) / gpuTimes.length : null;
         const gpuSingleAvg = gpuSingleTimes.length > 0 ? gpuSingleTimes.reduce((a, b) => a + b) / gpuSingleTimes.length : null;
+        const gpuOptimizedAvg = gpuOptimizedTimes.length > 0 ? gpuOptimizedTimes.reduce((a, b) => a + b) / gpuOptimizedTimes.length : null;
+        const gpuBatchedAvg = gpuBatchedTimes.length > 0 ? gpuBatchedTimes.reduce((a, b) => a + b) / gpuBatchedTimes.length : null;
+        const gpuHybridAvg = gpuHybridTimes.length > 0 ? gpuHybridTimes.reduce((a, b) => a + b) / gpuHybridTimes.length : null;
         const occtAvg = occtTimes.length > 0 ? occtTimes.reduce((a, b) => a + b) / occtTimes.length : null;
 
         // Output results
@@ -200,6 +235,36 @@ async function runBenchmarks(page) {
             log(`    GPU (single-dispatch): FAILED - ${gpuSingleResult?.error}`, 'red');
         }
 
+        if (gpuOptimizedAvg !== null) {
+            log(`    GPU (optimized):`, 'bold');
+            log(`      Total time: ${formatTime(gpuOptimizedAvg)}`);
+            log(`      Triangulation: ${formatTime(gpuOptimizedResult.triangulationTime)}`);
+            log(`      Triangles: ${gpuOptimizedResult.triangleCount}`);
+        } else {
+            log(`    GPU (optimized): FAILED - ${gpuOptimizedResult?.error}`, 'red');
+        }
+
+        if (gpuBatchedAvg !== null) {
+            log(`    GPU (batched):`, 'cyan');
+            log(`      Total time: ${formatTime(gpuBatchedAvg)}`);
+            log(`      Triangulation: ${formatTime(gpuBatchedResult.triangulationTime)}`);
+            log(`      Triangles: ${gpuBatchedResult.triangleCount}`);
+        } else {
+            log(`    GPU (batched): FAILED - ${gpuBatchedResult?.error}`, 'red');
+        }
+
+        if (gpuHybridAvg !== null) {
+            log(`    GPU (hybrid):`, 'bold');
+            log(`      Total time: ${formatTime(gpuHybridAvg)}`);
+            log(`      Triangulation: ${formatTime(gpuHybridResult.triangulationTime)}`);
+            log(`      Triangles: ${gpuHybridResult.triangleCount}`);
+            if (gpuHybridResult.timing) {
+                log(`      Breakdown: parse=${formatTime(gpuHybridResult.timing.stepParsing)}, extract=${formatTime(gpuHybridResult.timing.faceExtraction)}, bridge=${formatTime(gpuHybridResult.timing.bridging)}, tri=${formatTime(gpuHybridResult.timing.gpuTriangulation)}`);
+            }
+        } else {
+            log(`    GPU (hybrid): FAILED - ${gpuHybridResult?.error}`, 'red');
+        }
+
         if (occtAvg !== null) {
             log(`    OCCT (WebAssembly):`, 'yellow');
             log(`      Total time: ${formatTime(occtAvg)}`);
@@ -218,9 +283,21 @@ async function runBenchmarks(page) {
             const speedup = occtAvg / gpuSingleAvg;
             log(`      Single-dispatch: ${formatSpeedup(speedup)}`);
         }
-        if (gpuAvg !== null && gpuSingleAvg !== null) {
-            const improvement = gpuAvg / gpuSingleAvg;
-            log(`    Single vs Multi: ${improvement.toFixed(2)}x ${improvement > 1 ? 'faster' : 'slower'}`);
+        if (gpuOptimizedAvg !== null && occtAvg !== null) {
+            const speedup = occtAvg / gpuOptimizedAvg;
+            log(`      Optimized: ${formatSpeedup(speedup)}`);
+        }
+        if (gpuBatchedAvg !== null && occtAvg !== null) {
+            const speedup = occtAvg / gpuBatchedAvg;
+            log(`      Batched: ${formatSpeedup(speedup)}`);
+        }
+        if (gpuHybridAvg !== null && occtAvg !== null) {
+            const speedup = occtAvg / gpuHybridAvg;
+            log(`      Hybrid: ${formatSpeedup(speedup)}`);
+        }
+        if (gpuAvg !== null && gpuBatchedAvg !== null) {
+            const improvement = gpuAvg / gpuBatchedAvg;
+            log(`    Batched vs Multi: ${improvement.toFixed(2)}x ${improvement > 1 ? 'faster' : 'slower'}`);
         }
 
         results.push({
@@ -235,6 +312,22 @@ async function runBenchmarks(page) {
                 triangulationTime: gpuSingleResult.triangulationTime,
                 triangleCount: gpuSingleResult.triangleCount,
             } : null,
+            gpuOptimized: gpuOptimizedAvg !== null ? {
+                totalTime: gpuOptimizedAvg,
+                triangulationTime: gpuOptimizedResult.triangulationTime,
+                triangleCount: gpuOptimizedResult.triangleCount,
+            } : null,
+            gpuBatched: gpuBatchedAvg !== null ? {
+                totalTime: gpuBatchedAvg,
+                triangulationTime: gpuBatchedResult.triangulationTime,
+                triangleCount: gpuBatchedResult.triangleCount,
+            } : null,
+            gpuHybrid: gpuHybridAvg !== null ? {
+                totalTime: gpuHybridAvg,
+                triangulationTime: gpuHybridResult.triangulationTime,
+                triangleCount: gpuHybridResult.triangleCount,
+                timing: gpuHybridResult.timing,
+            } : null,
             occt: occtAvg !== null ? {
                 totalTime: occtAvg,
                 triangleCount: occtResult.triangleCount,
@@ -246,51 +339,52 @@ async function runBenchmarks(page) {
 }
 
 function printSummary(results) {
-    log(`\n${'═'.repeat(100)}`, 'blue');
+    log(`\n${'═'.repeat(140)}`, 'blue');
     log(`  BENCHMARK SUMMARY`, 'bold');
-    log(`${'═'.repeat(100)}`, 'blue');
+    log(`${'═'.repeat(140)}`, 'blue');
 
     console.log('\n');
-    console.log('  File                  │ Multi-Sync  │ Single-Disp │ OCCT        │ Single vs OCCT │ Improvement');
-    console.log('  ──────────────────────┼─────────────┼─────────────┼─────────────┼────────────────┼────────────');
+    console.log('  File                  │ Batched     │ Hybrid      │ OCCT        │ Hybrid vs OCCT  │ Winner');
+    console.log('  ──────────────────────┼─────────────┼─────────────┼─────────────┼─────────────────┼────────────');
 
     for (const r of results) {
         const name = r.name.padEnd(20);
-        const multiTime = r.gpu ? formatTime(r.gpu.totalTime).padEnd(11) : 'N/A'.padEnd(11);
-        const singleTime = r.gpuSingle ? formatTime(r.gpuSingle.totalTime).padEnd(11) : 'N/A'.padEnd(11);
+        const batchedTime = r.gpuBatched ? formatTime(r.gpuBatched.totalTime).padEnd(11) : 'N/A'.padEnd(11);
+        const hybridTime = r.gpuHybrid ? formatTime(r.gpuHybrid.totalTime).padEnd(11) : 'N/A'.padEnd(11);
         const occtTime = r.occt ? formatTime(r.occt.totalTime).padEnd(11) : 'N/A'.padEnd(11);
 
-        let singleVsOcct = 'N/A'.padEnd(14);
-        if (r.gpuSingle && r.occt) {
-            const ratio = r.occt.totalTime / r.gpuSingle.totalTime;
-            singleVsOcct = (ratio >= 1 ? `${ratio.toFixed(2)}x faster` : `${(1/ratio).toFixed(2)}x slower`).padEnd(14);
+        let hybridVsOcct = 'N/A'.padEnd(15);
+        let winner = 'N/A'.padEnd(10);
+        if (r.gpuHybrid && r.occt) {
+            const ratio = r.occt.totalTime / r.gpuHybrid.totalTime;
+            hybridVsOcct = (ratio >= 1 ? `${ratio.toFixed(2)}x faster` : `${(1/ratio).toFixed(2)}x slower`).padEnd(15);
+            winner = (ratio >= 1 ? `${colors.green}GPU${colors.reset}` : `${colors.yellow}OCCT${colors.reset}`).padEnd(20);
         }
 
-        let improvement = 'N/A'.padEnd(10);
-        if (r.gpu && r.gpuSingle) {
-            const ratio = r.gpu.totalTime / r.gpuSingle.totalTime;
-            improvement = `${ratio.toFixed(1)}x`.padEnd(10);
-        }
-
-        console.log(`  ${name} │ ${multiTime} │ ${singleTime} │ ${occtTime} │ ${singleVsOcct} │ ${improvement}`);
+        console.log(`  ${name} │ ${batchedTime} │ ${hybridTime} │ ${occtTime} │ ${hybridVsOcct} │ ${winner}`);
     }
 
     console.log('\n');
 
     // Summary stats
-    const validSingle = results.filter(r => r.gpuSingle && r.occt);
-    if (validSingle.length > 0) {
-        const avgVsOcct = validSingle.reduce((sum, r) => sum + r.occt.totalTime / r.gpuSingle.totalTime, 0) / validSingle.length;
-        log(`  Single-dispatch vs OCCT average: ${formatSpeedup(avgVsOcct)}`, 'bold');
+    const validHybrid = results.filter(r => r.gpuHybrid && r.occt);
+    if (validHybrid.length > 0) {
+        const avgVsOcct = validHybrid.reduce((sum, r) => sum + r.occt.totalTime / r.gpuHybrid.totalTime, 0) / validHybrid.length;
+        log(`  Hybrid GPU vs OCCT average: ${formatSpeedup(avgVsOcct)}`, 'bold');
+
+        const gpuWins = validHybrid.filter(r => r.gpuHybrid.totalTime < r.occt.totalTime).length;
+        log(`  GPU wins: ${gpuWins}/${validHybrid.length} benchmarks`, 'bold');
     }
 
-    const validImprovement = results.filter(r => r.gpu && r.gpuSingle);
-    if (validImprovement.length > 0) {
-        const avgImprovement = validImprovement.reduce((sum, r) => sum + r.gpu.totalTime / r.gpuSingle.totalTime, 0) / validImprovement.length;
-        log(`  Single vs Multi-sync average improvement: ${avgImprovement.toFixed(2)}x`, 'bold');
+    const validBatched = results.filter(r => r.gpuBatched && r.gpuHybrid);
+    if (validBatched.length > 0) {
+        const avgImprovement = validBatched.reduce((sum, r) => sum + r.gpuBatched.totalTime / r.gpuHybrid.totalTime, 0) / validBatched.length;
+        if (avgImprovement > 1.01) {
+            log(`  Hybrid vs Batched (large polygon improvement): ${avgImprovement.toFixed(2)}x`, 'bold');
+        }
     }
 
-    log(`${'═'.repeat(100)}\n`, 'blue');
+    log(`${'═'.repeat(140)}\n`, 'blue');
 }
 
 async function main() {
