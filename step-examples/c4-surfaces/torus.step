@@ -1,0 +1,79 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Simple torus for C4 testing'), '2;1');
+FILE_NAME('torus.step', '2024-01-01T00:00:00', (''), (''), '', '', '');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+
+DATA;
+/* Simple torus: major radius=2, minor radius=0.5, centered at origin, axis along Z */
+
+/* Geometry context */
+#1=CARTESIAN_POINT('origin',(0.,0.,0.));
+#2=DIRECTION('axis',(0.,0.,1.));
+#3=DIRECTION('refdir',(1.,0.,0.));
+#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+
+/* Toroidal surface */
+#10=TOROIDAL_SURFACE('',#4,2.0,0.5);
+
+/* Outer seam circle (at angle=0 in major direction) */
+#20=CARTESIAN_POINT('',(2.,0.,0.));
+#21=DIRECTION('',(0.,1.,0.));
+#22=DIRECTION('',(1.,0.,0.));
+#23=AXIS2_PLACEMENT_3D('',#20,#21,#22);
+#24=CIRCLE('',#23,0.5);
+
+/* Vertex on outer seam (outermost point) */
+#30=CARTESIAN_POINT('',(2.5,0.,0.));
+#31=VERTEX_POINT('',#30);
+
+/* Major circle through outermost points */
+#40=CARTESIAN_POINT('',(0.,0.,0.));
+#41=DIRECTION('',(0.,0.,1.));
+#42=DIRECTION('',(1.,0.,0.));
+#43=AXIS2_PLACEMENT_3D('',#40,#41,#42);
+#44=CIRCLE('',#43,2.5);
+
+/* Edge curves */
+#50=EDGE_CURVE('',#31,#31,#24,.T.);
+#51=EDGE_CURVE('',#31,#31,#44,.T.);
+
+/* Oriented edges for the toroidal face */
+#60=ORIENTED_EDGE('',*,*,#50,.T.);
+#61=ORIENTED_EDGE('',*,*,#51,.T.);
+#62=ORIENTED_EDGE('',*,*,#50,.F.);
+#63=ORIENTED_EDGE('',*,*,#51,.F.);
+
+/* Edge loop for torus surface */
+#70=EDGE_LOOP('',(#60,#61,#62,#63));
+#71=FACE_OUTER_BOUND('',#70,.T.);
+
+/* The toroidal face */
+#100=ADVANCED_FACE('',(#71),#10,.T.);
+
+/* Shell and solid */
+#130=CLOSED_SHELL('',(#100));
+#131=MANIFOLD_SOLID_BREP('torus',#130);
+
+/* Representation context */
+#200=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#201,#202)) REPRESENTATION_CONTEXT('','3D'));
+#201=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));
+#202=(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.));
+
+/* Shape representation */
+#210=SHAPE_REPRESENTATION('',(#4,#131),#200);
+#211=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#131),#200);
+
+/* Product structure */
+#220=PRODUCT('torus','Simple Torus','',(#221));
+#221=PRODUCT_CONTEXT('',#222,'mechanical');
+#222=APPLICATION_CONTEXT('automotive design');
+#223=PRODUCT_DEFINITION_FORMATION('','',#220);
+#224=PRODUCT_DEFINITION('','',#223,#225);
+#225=PRODUCT_DEFINITION_CONTEXT('part definition',#222,'design');
+#226=PRODUCT_DEFINITION_SHAPE('','',#224);
+#227=SHAPE_DEFINITION_REPRESENTATION(#226,#211);
+
+ENDSEC;
+END-ISO-10303-21;

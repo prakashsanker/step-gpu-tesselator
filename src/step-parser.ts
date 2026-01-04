@@ -1234,6 +1234,36 @@ interface Plane {
 }
 
 // =============================================================================
+// C4: Curved Surface Types
+// =============================================================================
+
+interface CylindricalSurface {
+  id: number;
+  placementId: number;  // AXIS2_PLACEMENT_3D (axis of cylinder)
+  radius: number;
+}
+
+interface SphericalSurface {
+  id: number;
+  placementId: number;  // AXIS2_PLACEMENT_3D (center of sphere)
+  radius: number;
+}
+
+interface ConicalSurface {
+  id: number;
+  placementId: number;  // AXIS2_PLACEMENT_3D (apex of cone)
+  radius: number;       // Base radius
+  semiAngle: number;    // Half-angle in radians
+}
+
+interface ToroidalSurface {
+  id: number;
+  placementId: number;  // AXIS2_PLACEMENT_3D (center of torus)
+  majorRadius: number;  // Distance from center to tube center
+  minorRadius: number;  // Tube radius
+}
+
+// =============================================================================
 // C3: Curve Geometry Types
 // =============================================================================
 
@@ -1277,10 +1307,25 @@ interface BSplineCurve {
   closed: boolean;
 }
 
-/** Surface curve wrapper (references the 3D curve) */
+/** Surface curve wrapper (references the 3D curve and PCURVEs) */
 interface SurfaceCurve {
   id: number;
-  curve3dId: number;  // Reference to LINE, CIRCLE, ELLIPSE, or B_SPLINE
+  curve3dId: number;      // Reference to LINE, CIRCLE, ELLIPSE, or B_SPLINE
+  pcurveIds: number[];    // References to PCURVE entities
+  preference: string;     // .PCURVE_S1., .PCURVE_S2., or .CURVE_3D.
+}
+
+/** PCURVE: 2D curve on a parametric surface */
+interface PCurve {
+  id: number;
+  surfaceId: number;               // Reference to surface (PLANE, CYLINDRICAL_SURFACE, etc.)
+  representationId: number;        // Reference to DEFINITIONAL_REPRESENTATION
+}
+
+/** DEFINITIONAL_REPRESENTATION: Container for 2D curve geometry */
+interface DefinitionalRepresentation {
+  id: number;
+  curveIds: number[];     // References to 2D LINE, CIRCLE, etc.
 }
 
 /** Resolved curve geometry ready for sampling */
@@ -1332,6 +1377,11 @@ interface StepModel {
   directions: Map<number, Direction>;
   axis2Placements: Map<number, Axis2Placement3D>;
   planes: Map<number, Plane>;
+  // C4: Curved surfaces
+  cylindricalSurfaces: Map<number, CylindricalSurface>;
+  sphericalSurfaces: Map<number, SphericalSurface>;
+  conicalSurfaces: Map<number, ConicalSurface>;
+  toroidalSurfaces: Map<number, ToroidalSurface>;
   // C3: Curve geometry
   vectors: Map<number, Vector>;
   lines: Map<number, Line>;
@@ -1339,25 +1389,22 @@ interface StepModel {
   ellipses: Map<number, Ellipse>;
   bsplines: Map<number, BSplineCurve>;
   surfaceCurves: Map<number, SurfaceCurve>;
+  // C4: PCURVE support
+  pcurves: Map<number, PCurve>;
+  definitionalRepresentations: Map<number, DefinitionalRepresentation>;
 }
 
 // --- Public API: parse STEP text into a Mesh (one face) ---
 
-export async function parseStepToMesh(stepText: string): Promise<Mesh> {
-  // This function is browser-safe: it expects the STEP file contents as a string,
-  // leaving file I/O (File API, fetch, Node fs, etc.) to the caller.
-
-  const totalStart = performance.now();
-  const parseStart = performance.now();
-
-  const model = parseStep(stepText);
-  if (model.faces.size === 0) {
-    throw new Error("No ADVANCED_FACE found in STEP file.");
-  }
-
-  // For this minimal example, just take the first face
-  const face = [...model.faces.values()][0];
-
+/**
+ * Process a single face and return its 3D vertices and triangle indices.
+ * This is a helper for parseStepToMesh that handles one ADVANCED_FACE.
+ */
+async function processSingleFace(
+  model: StepModel,
+  face: AdvancedFace,
+  faceIndex: number
+): Promise<{ vertices: Vec3[]; triangles: [number, number, number][] }> {
   // C2.1: Extract outer boundary and holes using helper functions
   // C3: Use async version that supports curved edges (GPU curve sampling)
   const { outer, holes } = await extractFaceBoundsWithCurves(model, face);
@@ -1365,12 +1412,6 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // C2.2: Compute face basis and project to 2D
   const basis = computeFaceBasisFromStepFace(model, face, outer);
   const { outer2d, holes2d } = projectFaceLoopsTo2D({ outer, holes }, basis);
-
-  // Debug: verify projection sanity
-  debugVerifyProjection(outer, outer2d, basis, "outer");
-  for (let i = 0; i < holes.length; i++) {
-    debugVerifyProjection(holes[i], holes2d[i], basis, `hole[${i}]`);
-  }
 
   // C2.3: Normalize winding order (outer=CCW, holes=CW)
   const normalized = normalizeWinding({ outer2d, holes2d });
@@ -1385,32 +1426,11 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // C2.4: Validate topology (holes inside outer, no intersections, simple loops)
   const topology = validateTopology(normalized.outer2d, normalized.holes2d);
   if (!topology.valid) {
-    console.warn("[StepParser] Topology validation failed:");
-    for (const error of topology.errors) {
-      console.warn(`  - ${error}`);
-    }
-    // For now, continue anyway but warn. Could throw in strict mode.
-  } else {
-    console.log("[StepParser] Topology validation passed");
+    console.warn(`[StepParser] Face ${faceIndex}: Topology validation failed`);
   }
 
-  // ==========================================================================
   // C2.5: Bridge holes and triangulate
-  // ==========================================================================
-
-  // Log hole information
-  if (normalized.holes2d.length > 0) {
-    console.log(`[StepParser] Face has ${normalized.holes2d.length} hole(s)`);
-    for (let i = 0; i < normalized.holes2d.length; i++) {
-      const holeArea = computeSignedArea2D(normalized.holes2d[i]);
-      console.log(`[StepParser] Hole ${i}: ${normalized.holes2d[i].length} vertices, area=${holeArea.toFixed(4)} (CW)`);
-    }
-  }
-
-  // Bridge holes into outer polygon (if there are any holes)
   const mergedPolygon2d = bridgeAllHoles(normalized.outer2d, normalized.holes2d);
-
-  console.log(`[StepParser] Merged polygon has ${mergedPolygon2d.length} vertices`);
 
   // Create lookup maps for fast 2D → 3D mapping
   const outer2dTo3d = new Map<string, Vec3>();
@@ -1430,7 +1450,6 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   }
 
   // Filter out consecutive duplicate vertices before ear clipping
-  // (bridge points create duplicates that can confuse the algorithm)
   const filteredMerged2d: Vec2[] = [];
   for (let i = 0; i < mergedPolygon2d.length; i++) {
     const curr = mergedPolygon2d[i];
@@ -1438,15 +1457,12 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
       ? filteredMerged2d[filteredMerged2d.length - 1]
       : mergedPolygon2d[mergedPolygon2d.length - 1];
 
-    // Skip if this vertex is at same position as previous
     const dx = curr[0] - prev[0];
     const dy = curr[1] - prev[1];
     const distSq = dx * dx + dy * dy;
 
     if (distSq > 1e-12) {
       filteredMerged2d.push(curr);
-    } else {
-      console.log(`[StepParser] Filtered duplicate vertex at index ${i}`);
     }
   }
 
@@ -1458,14 +1474,11 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     const dy = first[1] - last[1];
     if (dx * dx + dy * dy < 1e-12) {
       filteredMerged2d.pop();
-      console.log(`[StepParser] Filtered wrap-around duplicate vertex`);
     }
   }
 
-  console.log(`[StepParser] Filtered from ${mergedPolygon2d.length} to ${filteredMerged2d.length} vertices`);
-
   // Build 3D positions array from filtered vertices
-  const filtered3d: Vec3[] = [];
+  const vertices: Vec3[] = [];
   for (const pt2d of filteredMerged2d) {
     const key = `${pt2d[0].toFixed(9)},${pt2d[1].toFixed(9)}`;
     let pt3d = outer2dTo3d.get(key);
@@ -1476,40 +1489,82 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
       }
     }
     if (!pt3d) {
-      console.warn(`[StepParser] Could not find 3D coordinate for 2D point (${pt2d[0]}, ${pt2d[1]})`);
       pt3d = [pt2d[0], pt2d[1], 0];
     }
-    filtered3d.push(pt3d);
+    vertices.push(pt3d);
   }
 
-  // Build positions array from filtered 3D vertices
-  const positions = new Float32Array(filtered3d.length * 3);
-  filtered3d.forEach((p, i) => {
+  // Convert 2D points to Vec3 with z=0 for ear clipping
+  const filtered2dAsVec3: Vec3[] = filteredMerged2d.map(p => [p[0], p[1], 0]);
+
+  // Run ear clipping on the filtered (bridged) polygon
+  const triangles = await earClipping(filtered2dAsVec3);
+
+  return { vertices, triangles };
+}
+
+export async function parseStepToMesh(stepText: string): Promise<Mesh> {
+  // This function is browser-safe: it expects the STEP file contents as a string,
+  // leaving file I/O (File API, fetch, Node fs, etc.) to the caller.
+
+  const totalStart = performance.now();
+  const parseStart = performance.now();
+
+  const model = parseStep(stepText);
+  if (model.faces.size === 0) {
+    throw new Error("No ADVANCED_FACE found in STEP file.");
+  }
+
+  const faces = [...model.faces.values()];
+  console.log(`[StepParser] Processing ${faces.length} face(s)`);
+
+  // C4: Process all faces and combine into single mesh
+  const allVertices: Vec3[] = [];
+  const allIndices: number[] = [];
+  let vertexOffset = 0;
+
+  const parseEnd = performance.now();
+  const triangulationStart = performance.now();
+
+  for (let faceIndex = 0; faceIndex < faces.length; faceIndex++) {
+    const face = faces[faceIndex];
+
+    try {
+      const { vertices, triangles } = await processSingleFace(model, face, faceIndex);
+
+      // Add vertices
+      for (const v of vertices) {
+        allVertices.push(v);
+      }
+
+      // Add indices with offset
+      for (const tri of triangles) {
+        allIndices.push(
+          tri[0] + vertexOffset,
+          tri[1] + vertexOffset,
+          tri[2] + vertexOffset
+        );
+      }
+
+      vertexOffset += vertices.length;
+
+      console.log(`[StepParser] Face ${faceIndex}: ${vertices.length} vertices, ${triangles.length} triangles`);
+    } catch (e) {
+      console.warn(`[StepParser] Failed to process face ${faceIndex}: ${e}`);
+    }
+  }
+
+  const triangulationEnd = performance.now();
+
+  // Build final positions array
+  const positions = new Float32Array(allVertices.length * 3);
+  allVertices.forEach((p, i) => {
     positions[i * 3 + 0] = p[0];
     positions[i * 3 + 1] = p[1];
     positions[i * 3 + 2] = p[2];
   });
 
-  // Convert 2D points to Vec3 with z=0 for ear clipping
-  const filtered2dAsVec3: Vec3[] = filteredMerged2d.map(p => [p[0], p[1], 0]);
-
-  // End parsing phase, start triangulation phase
-  const parseEnd = performance.now();
-  const triangulationStart = performance.now();
-
-  // Run ear clipping on the filtered (bridged) polygon
-  const triangles = await earClipping(filtered2dAsVec3);
-
-  const triangulationEnd = performance.now();
-
-  console.log("[StepParser] Triangulation complete:", triangles.length, "triangles");
-
-  // Convert triangles array to flat indices array
-  const indicesArray: number[] = [];
-  for (const triangle of triangles) {
-    indicesArray.push(triangle[0], triangle[1], triangle[2]);
-  }
-  const indices = new Uint32Array(indicesArray);
+  const indices = new Uint32Array(allIndices);
 
   const totalEnd = performance.now();
 
@@ -1518,7 +1573,8 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   const triangulationTime = triangulationEnd - triangulationStart;
   const totalTime = totalEnd - totalStart;
 
-  console.log("[StepParser] Final mesh:", filtered3d.length, "vertices,", triangles.length, "triangles");
+  const triangleCount = allIndices.length / 3;
+  console.log(`[StepParser] Final mesh: ${allVertices.length} vertices, ${triangleCount} triangles from ${faces.length} faces`);
   console.log(`[StepParser] Timing: parse=${parseTime.toFixed(2)}ms, triangulation=${triangulationTime.toFixed(2)}ms, total=${totalTime.toFixed(2)}ms`);
 
   return { positions, indices, parseTime, triangulationTime, totalTime };
@@ -2166,6 +2222,11 @@ function parseStep(stepText: string): StepModel {
     directions: new Map(),
     axis2Placements: new Map(),
     planes: new Map(),
+    // C4: Curved surfaces
+    cylindricalSurfaces: new Map(),
+    sphericalSurfaces: new Map(),
+    conicalSurfaces: new Map(),
+    toroidalSurfaces: new Map(),
     // C3: Curve geometry
     vectors: new Map(),
     lines: new Map(),
@@ -2173,6 +2234,9 @@ function parseStep(stepText: string): StepModel {
     ellipses: new Map(),
     bsplines: new Map(),
     surfaceCurves: new Map(),
+    // C4: PCURVE support
+    pcurves: new Map(),
+    definitionalRepresentations: new Map(),
   };
 
   // Remove comments (/* ... */, / ... */, and -- ... end-of-line)
@@ -2230,6 +2294,19 @@ function parseStep(stepText: string): StepModel {
       case "PLANE":
         parsePlane(id, args, model);
         break;
+      // C4: Curved surface entities
+      case "CYLINDRICAL_SURFACE":
+        parseCylindricalSurface(id, args, model);
+        break;
+      case "SPHERICAL_SURFACE":
+        parseSphericalSurface(id, args, model);
+        break;
+      case "CONICAL_SURFACE":
+        parseConicalSurface(id, args, model);
+        break;
+      case "TOROIDAL_SURFACE":
+        parseToroidalSurface(id, args, model);
+        break;
       // C3: Curve geometry entities
       case "VECTOR":
         parseVector(id, args, model);
@@ -2245,6 +2322,13 @@ function parseStep(stepText: string): StepModel {
         break;
       case "SURFACE_CURVE":
         parseSurfaceCurve(id, args, model);
+        break;
+      // C4: PCURVE entities
+      case "PCURVE":
+        parsePCurve(id, args, model);
+        break;
+      case "DEFINITIONAL_REPRESENTATION":
+        parseDefinitionalRepresentation(id, args, model);
         break;
       // We ignore other entity types for now
     }
@@ -2427,6 +2511,54 @@ function parsePlane(id: number, args: string, model: StepModel) {
 }
 
 // =============================================================================
+// C4: Curved Surface Parsers
+// =============================================================================
+
+function parseCylindricalSurface(id: number, args: string, model: StepModel) {
+  // CYLINDRICAL_SURFACE('', #placement, radius)
+  // Example: CYLINDRICAL_SURFACE('',#127,5.)
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)\s*,\s*([-0-9.Ee+]+)/);
+  if (!m) throw new Error(`Failed to parse CYLINDRICAL_SURFACE args: ${args}`);
+  const placementId = parseInt(m[1], 10);
+  const radius = parseFloat(m[2]);
+
+  model.cylindricalSurfaces.set(id, { id, placementId, radius });
+}
+
+function parseSphericalSurface(id: number, args: string, model: StepModel) {
+  // SPHERICAL_SURFACE('', #placement, radius)
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)\s*,\s*([-0-9.Ee+]+)/);
+  if (!m) throw new Error(`Failed to parse SPHERICAL_SURFACE args: ${args}`);
+  const placementId = parseInt(m[1], 10);
+  const radius = parseFloat(m[2]);
+
+  model.sphericalSurfaces.set(id, { id, placementId, radius });
+}
+
+function parseConicalSurface(id: number, args: string, model: StepModel) {
+  // CONICAL_SURFACE('', #placement, radius, semi_angle)
+  // semi_angle is in radians
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)/);
+  if (!m) throw new Error(`Failed to parse CONICAL_SURFACE args: ${args}`);
+  const placementId = parseInt(m[1], 10);
+  const radius = parseFloat(m[2]);
+  const semiAngle = parseFloat(m[3]);
+
+  model.conicalSurfaces.set(id, { id, placementId, radius, semiAngle });
+}
+
+function parseToroidalSurface(id: number, args: string, model: StepModel) {
+  // TOROIDAL_SURFACE('', #placement, major_radius, minor_radius)
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)/);
+  if (!m) throw new Error(`Failed to parse TOROIDAL_SURFACE args: ${args}`);
+  const placementId = parseInt(m[1], 10);
+  const majorRadius = parseFloat(m[2]);
+  const minorRadius = parseFloat(m[3]);
+
+  model.toroidalSurfaces.set(id, { id, placementId, majorRadius, minorRadius });
+}
+
+// =============================================================================
 // C3: Curve Entity Parsers
 // =============================================================================
 
@@ -2478,12 +2610,63 @@ function parseEllipse(id: number, args: string, model: StepModel) {
 function parseSurfaceCurve(id: number, args: string, model: StepModel) {
   // SURFACE_CURVE('', #3d_curve, (#pcurve1, #pcurve2), .PCURVE_S1.)
   // Example: SURFACE_CURVE('', #223, (#228, #239), .PCURVE_S1.)
-  // We only care about the 3D curve reference (first #id after the name)
-  const m = args.match(/'[^']*'\s*,\s*#(\d+)/);
-  if (!m) throw new Error(`Failed to parse SURFACE_CURVE args: ${args}`);
-  const curve3dId = parseInt(m[1], 10);
 
-  model.surfaceCurves.set(id, { id, curve3dId });
+  // Extract 3D curve reference
+  const curve3dMatch = args.match(/'[^']*'\s*,\s*#(\d+)/);
+  if (!curve3dMatch) throw new Error(`Failed to parse SURFACE_CURVE 3D curve: ${args}`);
+  const curve3dId = parseInt(curve3dMatch[1], 10);
+
+  // Extract PCURVE references from the list
+  const pcurveListMatch = args.match(/\((\s*#\d+(?:\s*,\s*#\d+)*\s*)\)/);
+  const pcurveIds: number[] = [];
+  if (pcurveListMatch) {
+    const pcurveMatches = pcurveListMatch[1].match(/#(\d+)/g);
+    if (pcurveMatches) {
+      for (const match of pcurveMatches) {
+        pcurveIds.push(parseInt(match.substring(1), 10));
+      }
+    }
+  }
+
+  // Extract preference (.PCURVE_S1., .PCURVE_S2., .CURVE_3D.)
+  const prefMatch = args.match(/\.(PCURVE_S1|PCURVE_S2|CURVE_3D)\./);
+  const preference = prefMatch ? prefMatch[1] : 'CURVE_3D';
+
+  model.surfaceCurves.set(id, { id, curve3dId, pcurveIds, preference });
+}
+
+// =============================================================================
+// C4: PCURVE Parsing
+// =============================================================================
+
+function parsePCurve(id: number, args: string, model: StepModel) {
+  // PCURVE('', #surface, #definitional_representation)
+  // Example: PCURVE('',#126,#260)
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)\s*,\s*#(\d+)/);
+  if (!m) throw new Error(`Failed to parse PCURVE args: ${args}`);
+  const surfaceId = parseInt(m[1], 10);
+  const representationId = parseInt(m[2], 10);
+
+  model.pcurves.set(id, { id, surfaceId, representationId });
+}
+
+function parseDefinitionalRepresentation(id: number, args: string, model: StepModel) {
+  // DEFINITIONAL_REPRESENTATION('', (#curve1, #curve2, ...), #context)
+  // Example: DEFINITIONAL_REPRESENTATION('',(#261),#265)
+  // We only care about the curve references
+
+  const curveListMatch = args.match(/\((\s*#\d+(?:\s*,\s*#\d+)*\s*)\)/);
+  const curveIds: number[] = [];
+  if (curveListMatch) {
+    const curveMatches = curveListMatch[1].match(/#(\d+)/g);
+    if (curveMatches) {
+      for (const match of curveMatches) {
+        curveIds.push(parseInt(match.substring(1), 10));
+      }
+    }
+  }
+
+  model.definitionalRepresentations.set(id, { id, curveIds });
 }
 
 // =============================================================================

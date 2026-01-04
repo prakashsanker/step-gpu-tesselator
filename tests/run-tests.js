@@ -1240,6 +1240,102 @@ async function testHoleTriangulation(page) {
 }
 
 /**
+ * Test Suite: Multi-Face Models (C4)
+ * Tests rendering of complete 3D solids with multiple faces
+ */
+async function testMultiFaceModels(page) {
+    log('\n[Suite] Multi-Face Models (C4)', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const tests = [
+        {
+            name: 'Two triangles (2 faces)',
+            path: 'step-examples/c4-multiface/two-triangles.step',
+            expectedVertices: 6,
+            expectedTriangles: 2,
+        },
+        {
+            name: 'Tetrahedron (4 faces)',
+            path: 'step-examples/c4-multiface/tetrahedron.step',
+            expectedVertices: 12,
+            expectedTriangles: 4,
+        },
+        {
+            name: 'Pyramid (5 faces)',
+            path: 'step-examples/c4-multiface/pyramid.step',
+            expectedVertices: 16,
+            expectedTriangles: 6,
+        },
+        {
+            name: 'Triangular prism (5 faces)',
+            path: 'step-examples/c4-multiface/triangular-prism.step',
+            expectedVertices: 18,
+            expectedTriangles: 8,
+        },
+        {
+            name: 'Wedge (5 faces)',
+            path: 'step-examples/c4-multiface/wedge.step',
+            expectedVertices: 16,
+            expectedTriangles: 6,
+        },
+        {
+            name: 'Unit box (6 faces)',
+            path: 'step-examples/c4-multiface/unit-box.step',
+            expectedVertices: 24,
+            expectedTriangles: 12,
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            // Load STEP file
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            // Parse in browser
+            const result = await page.evaluate(async (stepText) => {
+                return await window.testHarness.parseStep(stepText);
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            const vertexCount = result.mesh.vertexCount;
+            const triangleCount = result.mesh.triangleCount;
+
+            const verticesOk = vertexCount === test.expectedVertices;
+            const trianglesOk = triangleCount === test.expectedTriangles;
+
+            if (verticesOk && trianglesOk) {
+                logTest(test.name, true, `${vertexCount} vertices, ${triangleCount} triangles`);
+                passed++;
+            } else {
+                const issues = [];
+                if (!verticesOk) issues.push(`expected ${test.expectedVertices} vertices, got ${vertexCount}`);
+                if (!trianglesOk) issues.push(`expected ${test.expectedTriangles} triangles, got ${triangleCount}`);
+                logTest(test.name, false, issues.join('; '));
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
+/**
  * Test Suite: Curve Sampling (C3)
  * Tests GPU-accelerated curve sampling for circles, ellipses, and B-splines
  */
@@ -1522,6 +1618,7 @@ async function main() {
             testTopologyValidation,
             testHoleTriangulation,
             testCurveSampling,
+            testMultiFaceModels,
         ];
 
         for (const suite of suites) {

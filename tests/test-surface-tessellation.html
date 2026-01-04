@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Surface Tessellation Test</title>
+    <style>
+        body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; margin: 0; }
+        .pass { color: #4ade80; }
+        .fail { color: #f87171; }
+        #container { display: flex; flex-wrap: wrap; gap: 20px; }
+        .surface-view { flex: 1; min-width: 300px; }
+        canvas { display: block; border: 1px solid #444; }
+        h3 { margin: 10px 0 5px; }
+    </style>
+</head>
+<body>
+    <h1>Surface Tessellation Tests</h1>
+    <pre id="output"></pre>
+    <div id="container"></div>
+
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import {
+            tessellateCylinder,
+            tessellateSphere,
+            tessellateCone,
+            tessellateTorus
+        } from '../src/surface-tessellation.ts';
+
+        const output = document.getElementById('output');
+        const container = document.getElementById('container');
+
+        function log(msg, isPass = true) {
+            const span = document.createElement('span');
+            span.className = isPass ? 'pass' : 'fail';
+            span.textContent = msg + '\n';
+            output.appendChild(span);
+            console.log(msg);
+        }
+
+        function createViewer(title, width = 300, height = 300) {
+            const div = document.createElement('div');
+            div.className = 'surface-view';
+
+            const h3 = document.createElement('h3');
+            h3.textContent = title;
+            div.appendChild(h3);
+
+            const canvas = document.createElement('canvas');
+            canvas.width = width;
+            canvas.height = height;
+            div.appendChild(canvas);
+
+            container.appendChild(div);
+
+            // Create Three.js scene
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x1a1a2e);
+
+            const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 100);
+            camera.position.set(3, 2, 3);
+
+            const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+            renderer.setSize(width, height);
+
+            const controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+
+            // Lighting
+            const ambient = new THREE.AmbientLight(0x404040);
+            scene.add(ambient);
+            const directional = new THREE.DirectionalLight(0xffffff, 1);
+            directional.position.set(5, 5, 5);
+            scene.add(directional);
+
+            // Animation loop
+            function animate() {
+                requestAnimationFrame(animate);
+                controls.update();
+                renderer.render(scene, camera);
+            }
+            animate();
+
+            return scene;
+        }
+
+        function addMeshToScene(scene, tessellatedMesh) {
+            const geometry = new THREE.BufferGeometry();
+
+            geometry.setAttribute('position',
+                new THREE.BufferAttribute(tessellatedMesh.positions, 3));
+            geometry.setAttribute('normal',
+                new THREE.BufferAttribute(tessellatedMesh.normals, 3));
+            geometry.setIndex(new THREE.BufferAttribute(tessellatedMesh.indices, 1));
+
+            // Solid mesh
+            const material = new THREE.MeshPhongMaterial({
+                color: 0x4ade80,
+                side: THREE.DoubleSide,
+                flatShading: false
+            });
+            const mesh = new THREE.Mesh(geometry, material);
+            scene.add(mesh);
+
+            // Wireframe overlay
+            const wireframe = new THREE.WireframeGeometry(geometry);
+            const line = new THREE.LineSegments(wireframe, new THREE.LineBasicMaterial({
+                color: 0x222222,
+                linewidth: 1
+            }));
+            scene.add(line);
+
+            // Axes helper
+            const axes = new THREE.AxesHelper(1);
+            scene.add(axes);
+        }
+
+        async function runTests() {
+            log('=== Surface Tessellation Tests ===\n');
+
+            // Default placement at origin
+            const defaultPlacement = {
+                location: [0, 0, 0],
+                axis: [0, 0, 1],
+                refDirection: [1, 0, 0]
+            };
+
+            // Test 1: Cylinder
+            try {
+                log('Test 1: Cylinder tessellation...');
+                const cylinderSurface = {
+                    type: "CYLINDRICAL_SURFACE",
+                    placement: defaultPlacement,
+                    radius: 1
+                };
+                const mesh = await tessellateCylinder(
+                    cylinderSurface, 0, Math.PI * 2, 0, 2, 16
+                );
+                log(`  Vertices: ${mesh.positions.length / 3}`);
+                log(`  Triangles: ${mesh.indices.length / 3}`);
+
+                if (mesh.positions.length > 0 && mesh.indices.length > 0) {
+                    log('  PASS: Cylinder tessellated', true);
+                    const scene = createViewer('Cylinder');
+                    addMeshToScene(scene, mesh);
+                } else {
+                    log('  FAIL: Empty mesh', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+            }
+
+            // Test 2: Sphere
+            try {
+                log('\nTest 2: Sphere tessellation...');
+                const sphereSurface = {
+                    type: "SPHERICAL_SURFACE",
+                    placement: defaultPlacement,
+                    radius: 1
+                };
+                const mesh = await tessellateSphere(
+                    sphereSurface, 0, Math.PI * 2, -Math.PI/2, Math.PI/2, 16, 8
+                );
+                log(`  Vertices: ${mesh.positions.length / 3}`);
+                log(`  Triangles: ${mesh.indices.length / 3}`);
+
+                if (mesh.positions.length > 0 && mesh.indices.length > 0) {
+                    log('  PASS: Sphere tessellated', true);
+                    const scene = createViewer('Sphere');
+                    addMeshToScene(scene, mesh);
+                } else {
+                    log('  FAIL: Empty mesh', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+            }
+
+            // Test 3: Cone
+            try {
+                log('\nTest 3: Cone tessellation...');
+                const coneSurface = {
+                    type: "CONICAL_SURFACE",
+                    placement: defaultPlacement,
+                    radius: 0.5,
+                    semiAngle: Math.PI / 6  // 30 degrees
+                };
+                const mesh = await tessellateCone(
+                    coneSurface, 0, Math.PI * 2, 0, 2, 16
+                );
+                log(`  Vertices: ${mesh.positions.length / 3}`);
+                log(`  Triangles: ${mesh.indices.length / 3}`);
+
+                if (mesh.positions.length > 0 && mesh.indices.length > 0) {
+                    log('  PASS: Cone tessellated', true);
+                    const scene = createViewer('Cone');
+                    addMeshToScene(scene, mesh);
+                } else {
+                    log('  FAIL: Empty mesh', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+            }
+
+            // Test 4: Torus
+            try {
+                log('\nTest 4: Torus tessellation...');
+                const torusSurface = {
+                    type: "TOROIDAL_SURFACE",
+                    placement: defaultPlacement,
+                    majorRadius: 1,
+                    minorRadius: 0.3
+                };
+                const mesh = await tessellateTorus(
+                    torusSurface, 0, Math.PI * 2, 0, Math.PI * 2, 24, 12
+                );
+                log(`  Vertices: ${mesh.positions.length / 3}`);
+                log(`  Triangles: ${mesh.indices.length / 3}`);
+
+                if (mesh.positions.length > 0 && mesh.indices.length > 0) {
+                    log('  PASS: Torus tessellated', true);
+                    const scene = createViewer('Torus');
+                    addMeshToScene(scene, mesh);
+                } else {
+                    log('  FAIL: Empty mesh', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+            }
+
+            // Test 5: Partial cylinder (quarter)
+            try {
+                log('\nTest 5: Partial cylinder (quarter)...');
+                const cylinderSurface = {
+                    type: "CYLINDRICAL_SURFACE",
+                    placement: defaultPlacement,
+                    radius: 1
+                };
+                const mesh = await tessellateCylinder(
+                    cylinderSurface, 0, Math.PI / 2, 0, 1.5, 8
+                );
+                log(`  Vertices: ${mesh.positions.length / 3}`);
+                log(`  Triangles: ${mesh.indices.length / 3}`);
+
+                if (mesh.positions.length > 0 && mesh.indices.length > 0) {
+                    log('  PASS: Partial cylinder tessellated', true);
+                    const scene = createViewer('Quarter Cylinder');
+                    addMeshToScene(scene, mesh);
+                } else {
+                    log('  FAIL: Empty mesh', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+            }
+
+            log('\n=== Tests Complete ===');
+            window.testsDone = true;
+        }
+
+        runTests();
+    </script>
+</body>
+</html>

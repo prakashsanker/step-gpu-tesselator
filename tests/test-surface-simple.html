@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Simple Surface Test</title>
+    <style>
+        body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; }
+        .pass { color: #4ade80; }
+        .fail { color: #f87171; }
+    </style>
+</head>
+<body>
+    <h1>Simple Surface Tessellation Test</h1>
+    <pre id="output"></pre>
+
+    <script type="module">
+        // Import only what we need
+        import { constrainedDelaunayTriangulation } from '../src/cdt-gpu.ts';
+        import { evaluateSurface, surfaceNormal } from '../src/surfaces.ts';
+        import { createCylinderUVBoundary } from '../src/uv-extraction.ts';
+
+        const output = document.getElementById('output');
+        function log(msg, isPass = true) {
+            const span = document.createElement('span');
+            span.className = isPass ? 'pass' : 'fail';
+            span.textContent = msg + '\n';
+            output.appendChild(span);
+            console.log(msg);
+        }
+
+        async function runTests() {
+            log('=== Simple Surface Tests ===\n');
+
+            // Test 1: Create UV boundary for cylinder
+            try {
+                log('Test 1: Create cylinder UV boundary...');
+                const uvBoundary = createCylinderUVBoundary(0, Math.PI * 2, 0, 2, 8);
+                log(`  UV boundary has ${uvBoundary.length} points`);
+
+                if (uvBoundary.length > 0) {
+                    log('  PASS: UV boundary created', true);
+                } else {
+                    log('  FAIL: Empty UV boundary', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+                console.error(e);
+            }
+
+            // Test 2: Triangulate UV boundary
+            try {
+                log('\nTest 2: Triangulate UV boundary...');
+                const uvBoundary = createCylinderUVBoundary(0, Math.PI, 0, 1, 4);
+                log(`  Input: ${uvBoundary.length} vertices`);
+
+                const triangles = await constrainedDelaunayTriangulation(uvBoundary, [], true);
+                log(`  Result: ${triangles.length} triangles`);
+
+                if (triangles.length > 0) {
+                    log('  PASS: Triangulation succeeded', true);
+                } else {
+                    log('  FAIL: No triangles', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+                console.error(e);
+            }
+
+            // Test 3: Evaluate surface point
+            try {
+                log('\nTest 3: Evaluate cylinder surface point...');
+                const cylinderSurface = {
+                    type: "CYLINDRICAL_SURFACE",
+                    placement: {
+                        location: [0, 0, 0],
+                        axis: [0, 0, 1],
+                        refDirection: [1, 0, 0]
+                    },
+                    radius: 1
+                };
+
+                const point = evaluateSurface(cylinderSurface, 0, 1);
+                log(`  Point at u=0, v=1: [${point.map(v => v.toFixed(3)).join(', ')}]`);
+
+                // At u=0, v=1: should be [1, 0, 1] for a unit cylinder along Z axis
+                if (Math.abs(point[0] - 1) < 0.01 && Math.abs(point[2] - 1) < 0.01) {
+                    log('  PASS: Surface evaluation correct', true);
+                } else {
+                    log('  FAIL: Unexpected point value', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+                console.error(e);
+            }
+
+            // Test 4: Get surface normal
+            try {
+                log('\nTest 4: Get cylinder surface normal...');
+                const cylinderSurface = {
+                    type: "CYLINDRICAL_SURFACE",
+                    placement: {
+                        location: [0, 0, 0],
+                        axis: [0, 0, 1],
+                        refDirection: [1, 0, 0]
+                    },
+                    radius: 1
+                };
+
+                const normal = surfaceNormal(cylinderSurface, 0, 0);
+                log(`  Normal at u=0: [${normal.map(v => v.toFixed(3)).join(', ')}]`);
+
+                // At u=0: normal should point in +X direction [1, 0, 0]
+                if (Math.abs(normal[0] - 1) < 0.01) {
+                    log('  PASS: Normal calculation correct', true);
+                } else {
+                    log('  FAIL: Unexpected normal', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+                console.error(e);
+            }
+
+            log('\n=== Tests Complete ===');
+            window.testsDone = true;
+        }
+
+        runTests();
+    </script>
+</body>
+</html>

@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>CDT Test</title>
+    <style>
+        body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; }
+        .pass { color: #4ade80; }
+        .fail { color: #f87171; }
+        canvas { border: 1px solid #444; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Constrained Delaunay Triangulation Test</h1>
+    <pre id="output"></pre>
+    <canvas id="canvas" width="400" height="400"></canvas>
+
+    <script type="module">
+        import { constrainedDelaunayTriangulation } from '../src/cdt-gpu.ts';
+
+        const output = document.getElementById('output');
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+
+        function log(msg, isPass = true) {
+            const span = document.createElement('span');
+            span.className = isPass ? 'pass' : 'fail';
+            span.textContent = msg + '\n';
+            output.appendChild(span);
+            console.log(msg);
+        }
+
+        function drawTriangulation(vertices, triangles, title) {
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Find bounds
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (const [x, y] of vertices) {
+                minX = Math.min(minX, x);
+                minY = Math.min(minY, y);
+                maxX = Math.max(maxX, x);
+                maxY = Math.max(maxY, y);
+            }
+
+            const padding = 40;
+            const scaleX = (canvas.width - 2 * padding) / (maxX - minX);
+            const scaleY = (canvas.height - 2 * padding) / (maxY - minY);
+            const scale = Math.min(scaleX, scaleY);
+
+            function toScreen(x, y) {
+                return [
+                    padding + (x - minX) * scale,
+                    canvas.height - padding - (y - minY) * scale
+                ];
+            }
+
+            // Draw triangles
+            ctx.strokeStyle = '#4ade80';
+            ctx.lineWidth = 1;
+            for (const [a, b, c] of triangles) {
+                const [ax, ay] = toScreen(...vertices[a]);
+                const [bx, by] = toScreen(...vertices[b]);
+                const [cx, cy] = toScreen(...vertices[c]);
+
+                ctx.beginPath();
+                ctx.moveTo(ax, ay);
+                ctx.lineTo(bx, by);
+                ctx.lineTo(cx, cy);
+                ctx.closePath();
+                ctx.stroke();
+            }
+
+            // Draw vertices
+            ctx.fillStyle = '#fbbf24';
+            for (const [x, y] of vertices) {
+                const [sx, sy] = toScreen(x, y);
+                ctx.beginPath();
+                ctx.arc(sx, sy, 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Title
+            ctx.fillStyle = '#eee';
+            ctx.font = '14px monospace';
+            ctx.fillText(title, 10, 20);
+        }
+
+        async function runTests() {
+            log('=== CDT Integration Tests ===\n');
+
+            // Test 1: Simple square
+            try {
+                log('Test 1: Simple square...');
+                const square = [[0, 0], [1, 0], [1, 1], [0, 1]];
+                const triangles = await constrainedDelaunayTriangulation(square);
+                log(`  Result: ${triangles.length} triangles`);
+                log(`  Triangles: ${JSON.stringify(triangles)}`);
+
+                if (triangles.length === 2) {
+                    log('  PASS: Square triangulated correctly', true);
+                } else {
+                    log('  FAIL: Expected 2 triangles', false);
+                }
+
+                drawTriangulation(square, triangles, 'Square - 2 triangles');
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+            }
+
+            // Test 2: Pentagon
+            try {
+                log('\nTest 2: Regular pentagon...');
+                const pentagon = [];
+                for (let i = 0; i < 5; i++) {
+                    const angle = (Math.PI / 2) + (2 * Math.PI * i / 5);
+                    pentagon.push([Math.cos(angle), Math.sin(angle)]);
+                }
+                const triangles = await constrainedDelaunayTriangulation(pentagon);
+                log(`  Result: ${triangles.length} triangles`);
+
+                if (triangles.length === 3) {
+                    log('  PASS: Pentagon triangulated correctly', true);
+                } else {
+                    log('  FAIL: Expected 3 triangles', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+            }
+
+            // Test 3: Concave polygon (L-shape)
+            try {
+                log('\nTest 3: L-shape (concave)...');
+                const lShape = [
+                    [0, 0], [2, 0], [2, 1], [1, 1], [1, 2], [0, 2]
+                ];
+                const triangles = await constrainedDelaunayTriangulation(lShape);
+                log(`  Result: ${triangles.length} triangles`);
+
+                if (triangles.length === 4) {
+                    log('  PASS: L-shape triangulated correctly', true);
+                } else {
+                    log('  FAIL: Expected 4 triangles', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+            }
+
+            // Test 4: Without Delaunay optimization
+            try {
+                log('\nTest 4: Without Delaunay (ear clipping only)...');
+                const square = [[0, 0], [1, 0], [1, 1], [0, 1]];
+                const triangles = await constrainedDelaunayTriangulation(square, [], false);
+                log(`  Result: ${triangles.length} triangles`);
+
+                if (triangles.length === 2) {
+                    log('  PASS: Ear clipping only mode works', true);
+                } else {
+                    log('  FAIL: Expected 2 triangles', false);
+                }
+            } catch (e) {
+                log(`  FAIL: ${e.message}`, false);
+            }
+
+            log('\n=== Tests Complete ===');
+            window.testsDone = true;
+        }
+
+        runTests();
+    </script>
+</body>
+</html>

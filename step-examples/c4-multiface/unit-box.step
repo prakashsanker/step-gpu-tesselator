@@ -1,0 +1,166 @@
+ISO-10303-21;
+HEADER;
+  FILE_DESCRIPTION(('Unit box - 6 planar faces'),'2;1');
+  FILE_NAME('unit-box.stp','2025-01-04',(''),(''),'','','');
+  FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+ENDSEC;
+DATA;
+
+  /* ==== Vertices of unit cube ====
+        V5------V6
+       /|      /|
+      V1------V2|
+      | V8----|-V7
+      |/      |/
+      V4------V3
+
+     V1=(0,1,1), V2=(1,1,1), V3=(1,0,1), V4=(0,0,1)  - front face
+     V5=(0,1,0), V6=(1,1,0), V7=(1,0,0), V8=(0,0,0)  - back face
+  */
+
+  #1 = CARTESIAN_POINT('V1', (0.0, 1.0, 1.0));
+  #2 = CARTESIAN_POINT('V2', (1.0, 1.0, 1.0));
+  #3 = CARTESIAN_POINT('V3', (1.0, 0.0, 1.0));
+  #4 = CARTESIAN_POINT('V4', (0.0, 0.0, 1.0));
+  #5 = CARTESIAN_POINT('V5', (0.0, 1.0, 0.0));
+  #6 = CARTESIAN_POINT('V6', (1.0, 1.0, 0.0));
+  #7 = CARTESIAN_POINT('V7', (1.0, 0.0, 0.0));
+  #8 = CARTESIAN_POINT('V8', (0.0, 0.0, 0.0));
+
+  #11 = VERTEX_POINT('', #1);
+  #12 = VERTEX_POINT('', #2);
+  #13 = VERTEX_POINT('', #3);
+  #14 = VERTEX_POINT('', #4);
+  #15 = VERTEX_POINT('', #5);
+  #16 = VERTEX_POINT('', #6);
+  #17 = VERTEX_POINT('', #7);
+  #18 = VERTEX_POINT('', #8);
+
+  /* ==== Generic line (reused for all straight edges) ==== */
+  #20 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #21 = DIRECTION('', (1.0, 0.0, 0.0));
+  #22 = VECTOR('', #21, 1.0);
+  #23 = LINE('', #20, #22);
+
+  /* ==== FACE 1: Front (z=1) - V1,V2,V3,V4 ==== */
+  #100 = CARTESIAN_POINT('', (0.0, 0.0, 1.0));
+  #101 = DIRECTION('', (0.0, 0.0, 1.0));
+  #102 = DIRECTION('', (1.0, 0.0, 0.0));
+  #103 = AXIS2_PLACEMENT_3D('', #100, #101, #102);
+  #104 = PLANE('', #103);
+
+  #110 = EDGE_CURVE('', #11, #12, #23, .T.);
+  #111 = EDGE_CURVE('', #12, #13, #23, .T.);
+  #112 = EDGE_CURVE('', #13, #14, #23, .T.);
+  #113 = EDGE_CURVE('', #14, #11, #23, .T.);
+
+  #120 = ORIENTED_EDGE('', *, *, #110, .T.);
+  #121 = ORIENTED_EDGE('', *, *, #111, .T.);
+  #122 = ORIENTED_EDGE('', *, *, #112, .T.);
+  #123 = ORIENTED_EDGE('', *, *, #113, .T.);
+  #124 = EDGE_LOOP('', (#120, #121, #122, #123));
+  #125 = FACE_OUTER_BOUND('', #124, .T.);
+  #126 = ADVANCED_FACE('Front', (#125), #104, .T.);
+
+  /* ==== FACE 2: Back (z=0) - V6,V5,V8,V7 ==== */
+  #200 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #201 = DIRECTION('', (0.0, 0.0, -1.0));
+  #202 = DIRECTION('', (1.0, 0.0, 0.0));
+  #203 = AXIS2_PLACEMENT_3D('', #200, #201, #202);
+  #204 = PLANE('', #203);
+
+  #210 = EDGE_CURVE('', #16, #15, #23, .T.);
+  #211 = EDGE_CURVE('', #15, #18, #23, .T.);
+  #212 = EDGE_CURVE('', #18, #17, #23, .T.);
+  #213 = EDGE_CURVE('', #17, #16, #23, .T.);
+
+  #220 = ORIENTED_EDGE('', *, *, #210, .T.);
+  #221 = ORIENTED_EDGE('', *, *, #211, .T.);
+  #222 = ORIENTED_EDGE('', *, *, #212, .T.);
+  #223 = ORIENTED_EDGE('', *, *, #213, .T.);
+  #224 = EDGE_LOOP('', (#220, #221, #222, #223));
+  #225 = FACE_OUTER_BOUND('', #224, .T.);
+  #226 = ADVANCED_FACE('Back', (#225), #204, .T.);
+
+  /* ==== FACE 3: Top (y=1) - V1,V5,V6,V2 ==== */
+  #300 = CARTESIAN_POINT('', (0.0, 1.0, 0.0));
+  #301 = DIRECTION('', (0.0, 1.0, 0.0));
+  #302 = DIRECTION('', (1.0, 0.0, 0.0));
+  #303 = AXIS2_PLACEMENT_3D('', #300, #301, #302);
+  #304 = PLANE('', #303);
+
+  #310 = EDGE_CURVE('', #11, #15, #23, .T.);
+  #311 = EDGE_CURVE('', #15, #16, #23, .T.);
+  #312 = EDGE_CURVE('', #16, #12, #23, .T.);
+  #313 = EDGE_CURVE('', #12, #11, #23, .T.);
+
+  #320 = ORIENTED_EDGE('', *, *, #310, .T.);
+  #321 = ORIENTED_EDGE('', *, *, #311, .T.);
+  #322 = ORIENTED_EDGE('', *, *, #312, .T.);
+  #323 = ORIENTED_EDGE('', *, *, #313, .T.);
+  #324 = EDGE_LOOP('', (#320, #321, #322, #323));
+  #325 = FACE_OUTER_BOUND('', #324, .T.);
+  #326 = ADVANCED_FACE('Top', (#325), #304, .T.);
+
+  /* ==== FACE 4: Bottom (y=0) - V4,V3,V7,V8 ==== */
+  #400 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #401 = DIRECTION('', (0.0, -1.0, 0.0));
+  #402 = DIRECTION('', (1.0, 0.0, 0.0));
+  #403 = AXIS2_PLACEMENT_3D('', #400, #401, #402);
+  #404 = PLANE('', #403);
+
+  #410 = EDGE_CURVE('', #14, #13, #23, .T.);
+  #411 = EDGE_CURVE('', #13, #17, #23, .T.);
+  #412 = EDGE_CURVE('', #17, #18, #23, .T.);
+  #413 = EDGE_CURVE('', #18, #14, #23, .T.);
+
+  #420 = ORIENTED_EDGE('', *, *, #410, .T.);
+  #421 = ORIENTED_EDGE('', *, *, #411, .T.);
+  #422 = ORIENTED_EDGE('', *, *, #412, .T.);
+  #423 = ORIENTED_EDGE('', *, *, #413, .T.);
+  #424 = EDGE_LOOP('', (#420, #421, #422, #423));
+  #425 = FACE_OUTER_BOUND('', #424, .T.);
+  #426 = ADVANCED_FACE('Bottom', (#425), #404, .T.);
+
+  /* ==== FACE 5: Right (x=1) - V2,V6,V7,V3 ==== */
+  #500 = CARTESIAN_POINT('', (1.0, 0.0, 0.0));
+  #501 = DIRECTION('', (1.0, 0.0, 0.0));
+  #502 = DIRECTION('', (0.0, 1.0, 0.0));
+  #503 = AXIS2_PLACEMENT_3D('', #500, #501, #502);
+  #504 = PLANE('', #503);
+
+  #510 = EDGE_CURVE('', #12, #16, #23, .T.);
+  #511 = EDGE_CURVE('', #16, #17, #23, .T.);
+  #512 = EDGE_CURVE('', #17, #13, #23, .T.);
+  #513 = EDGE_CURVE('', #13, #12, #23, .T.);
+
+  #520 = ORIENTED_EDGE('', *, *, #510, .T.);
+  #521 = ORIENTED_EDGE('', *, *, #511, .T.);
+  #522 = ORIENTED_EDGE('', *, *, #512, .T.);
+  #523 = ORIENTED_EDGE('', *, *, #513, .T.);
+  #524 = EDGE_LOOP('', (#520, #521, #522, #523));
+  #525 = FACE_OUTER_BOUND('', #524, .T.);
+  #526 = ADVANCED_FACE('Right', (#525), #504, .T.);
+
+  /* ==== FACE 6: Left (x=0) - V5,V1,V4,V8 ==== */
+  #600 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #601 = DIRECTION('', (-1.0, 0.0, 0.0));
+  #602 = DIRECTION('', (0.0, 1.0, 0.0));
+  #603 = AXIS2_PLACEMENT_3D('', #600, #601, #602);
+  #604 = PLANE('', #603);
+
+  #610 = EDGE_CURVE('', #15, #11, #23, .T.);
+  #611 = EDGE_CURVE('', #11, #14, #23, .T.);
+  #612 = EDGE_CURVE('', #14, #18, #23, .T.);
+  #613 = EDGE_CURVE('', #18, #15, #23, .T.);
+
+  #620 = ORIENTED_EDGE('', *, *, #610, .T.);
+  #621 = ORIENTED_EDGE('', *, *, #611, .T.);
+  #622 = ORIENTED_EDGE('', *, *, #612, .T.);
+  #623 = ORIENTED_EDGE('', *, *, #613, .T.);
+  #624 = EDGE_LOOP('', (#620, #621, #622, #623));
+  #625 = FACE_OUTER_BOUND('', #624, .T.);
+  #626 = ADVANCED_FACE('Left', (#625), #604, .T.);
+
+ENDSEC;
+END-ISO-10303-21;

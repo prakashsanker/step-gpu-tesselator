@@ -1,0 +1,89 @@
+ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION(('Simple cone for C4 testing'), '2;1');
+FILE_NAME('cone.step', '2024-01-01T00:00:00', (''), (''), '', '', '');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+
+DATA;
+/* Simple cone: base radius=1, height=2, apex at origin, axis along Z */
+/* Semi-angle = atan(1/2) = 0.4636 radians (26.57 degrees) */
+
+/* Geometry context - apex at origin */
+#1=CARTESIAN_POINT('origin',(0.,0.,0.));
+#2=DIRECTION('axis',(0.,0.,1.));
+#3=DIRECTION('refdir',(1.,0.,0.));
+#4=AXIS2_PLACEMENT_3D('',#1,#2,#3);
+
+/* Conical surface: radius at apex=0, semi_angle=atan(0.5) */
+#10=CONICAL_SURFACE('',#4,0.0,0.4636476090008061);
+
+/* Base circle (z=2, radius=1) */
+#20=CARTESIAN_POINT('',(0.,0.,2.));
+#21=DIRECTION('',(0.,0.,1.));
+#22=DIRECTION('',(1.,0.,0.));
+#23=AXIS2_PLACEMENT_3D('',#20,#21,#22);
+#24=CIRCLE('',#23,1.0);
+
+/* Apex vertex */
+#30=CARTESIAN_POINT('',(0.,0.,0.));
+#31=VERTEX_POINT('',#30);
+
+/* Base vertex (on seam) */
+#40=CARTESIAN_POINT('',(1.,0.,2.));
+#41=VERTEX_POINT('',#40);
+
+/* Seam line from apex to base */
+#50=CARTESIAN_POINT('',(0.,0.,0.));
+#51=DIRECTION('',(0.4472135954999579,0.,0.8944271909999159));
+#52=VECTOR('',#51,2.23606797749979);
+#53=LINE('',#50,#52);
+
+/* Edge curves */
+#60=EDGE_CURVE('',#41,#41,#24,.T.);
+#61=EDGE_CURVE('',#31,#41,#53,.T.);
+
+/* Oriented edges for the conical face */
+#70=ORIENTED_EDGE('',*,*,#61,.T.);
+#71=ORIENTED_EDGE('',*,*,#60,.T.);
+#72=ORIENTED_EDGE('',*,*,#61,.F.);
+
+/* Edge loop for cone lateral surface */
+#80=EDGE_LOOP('',(#70,#71,#72));
+#81=FACE_OUTER_BOUND('',#80,.T.);
+
+/* The conical face */
+#100=ADVANCED_FACE('',(#81),#10,.T.);
+
+/* Base cap (planar) */
+#110=PLANE('',#23);
+#111=ORIENTED_EDGE('',*,*,#60,.F.);
+#112=EDGE_LOOP('',(#111));
+#113=FACE_OUTER_BOUND('',#112,.T.);
+#114=ADVANCED_FACE('',(#113),#110,.F.);
+
+/* Shell and solid */
+#130=CLOSED_SHELL('',(#100,#114));
+#131=MANIFOLD_SOLID_BREP('cone',#130);
+
+/* Representation context */
+#200=(GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNIT_ASSIGNED_CONTEXT((#201,#202)) REPRESENTATION_CONTEXT('','3D'));
+#201=(LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.));
+#202=(NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.));
+
+/* Shape representation */
+#210=SHAPE_REPRESENTATION('',(#4,#131),#200);
+#211=ADVANCED_BREP_SHAPE_REPRESENTATION('',(#131),#200);
+
+/* Product structure */
+#220=PRODUCT('cone','Simple Cone','',(#221));
+#221=PRODUCT_CONTEXT('',#222,'mechanical');
+#222=APPLICATION_CONTEXT('automotive design');
+#223=PRODUCT_DEFINITION_FORMATION('','',#220);
+#224=PRODUCT_DEFINITION('','',#223,#225);
+#225=PRODUCT_DEFINITION_CONTEXT('part definition',#222,'design');
+#226=PRODUCT_DEFINITION_SHAPE('','',#224);
+#227=SHAPE_DEFINITION_REPRESENTATION(#226,#211);
+
+ENDSEC;
+END-ISO-10303-21;

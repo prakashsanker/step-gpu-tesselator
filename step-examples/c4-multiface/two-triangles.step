@@ -1,0 +1,99 @@
+ISO-10303-21;
+HEADER;
+  FILE_DESCRIPTION(('Two adjacent triangles - simplest multi-face test'),'2;1');
+  FILE_NAME('two-triangles.stp','2025-01-04',(''),(''),'','','');
+  FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+ENDSEC;
+DATA;
+
+  /* ==== Two triangles sharing edge V1-V2 ====
+     Triangle 1 (XY plane, z=0): V1, V2, V3
+     Triangle 2 (tilted 90°, XZ plane): V1, V2, V4
+
+       V3 (0,2,0)
+        |\
+        | \
+        |  \
+     V1 ----V2
+        |  /
+        | /
+        |/
+       V4 (0,0,2)
+  */
+
+  #1 = CARTESIAN_POINT('V1', (0.0, 0.0, 0.0));
+  #2 = CARTESIAN_POINT('V2', (2.0, 0.0, 0.0));
+  #3 = CARTESIAN_POINT('V3', (0.0, 2.0, 0.0));
+  #4 = CARTESIAN_POINT('V4', (0.0, 0.0, 2.0));
+
+  #11 = VERTEX_POINT('', #1);
+  #12 = VERTEX_POINT('', #2);
+  #13 = VERTEX_POINT('', #3);
+  #14 = VERTEX_POINT('', #4);
+
+  /* ==== Lines ==== */
+  /* Shared edge V1-V2 */
+  #20 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #21 = DIRECTION('', (1.0, 0.0, 0.0));
+  #22 = VECTOR('', #21, 1.0);
+  #23 = LINE('', #20, #22);
+
+  /* Triangle 1 edges */
+  #24 = CARTESIAN_POINT('', (2.0, 0.0, 0.0));
+  #25 = DIRECTION('', (-1.0, 1.0, 0.0));
+  #26 = VECTOR('', #25, 1.0);
+  #27 = LINE('', #24, #26);
+
+  #28 = CARTESIAN_POINT('', (0.0, 2.0, 0.0));
+  #29 = DIRECTION('', (0.0, -1.0, 0.0));
+  #30 = VECTOR('', #29, 1.0);
+  #31 = LINE('', #28, #30);
+
+  /* Triangle 2 edges */
+  #32 = CARTESIAN_POINT('', (2.0, 0.0, 0.0));
+  #33 = DIRECTION('', (-1.0, 0.0, 1.0));
+  #34 = VECTOR('', #33, 1.0);
+  #35 = LINE('', #32, #34);
+
+  #36 = CARTESIAN_POINT('', (0.0, 0.0, 2.0));
+  #37 = DIRECTION('', (0.0, 0.0, -1.0));
+  #38 = VECTOR('', #37, 1.0);
+  #39 = LINE('', #36, #38);
+
+  /* ==== Edge curves ==== */
+  #50 = EDGE_CURVE('', #11, #12, #23, .T.);  /* Shared edge */
+  #51 = EDGE_CURVE('', #12, #13, #27, .T.);
+  #52 = EDGE_CURVE('', #13, #11, #31, .T.);
+  #53 = EDGE_CURVE('', #12, #14, #35, .T.);
+  #54 = EDGE_CURVE('', #14, #11, #39, .T.);
+
+  /* ==== FACE 1: XY plane triangle ==== */
+  #100 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #101 = DIRECTION('', (0.0, 0.0, 1.0));
+  #102 = DIRECTION('', (1.0, 0.0, 0.0));
+  #103 = AXIS2_PLACEMENT_3D('', #100, #101, #102);
+  #104 = PLANE('', #103);
+
+  #105 = ORIENTED_EDGE('', *, *, #50, .T.);
+  #106 = ORIENTED_EDGE('', *, *, #51, .T.);
+  #107 = ORIENTED_EDGE('', *, *, #52, .T.);
+  #109 = EDGE_LOOP('', (#105, #106, #107));
+  #110 = FACE_OUTER_BOUND('', #109, .T.);
+  #111 = ADVANCED_FACE('Face1', (#110), #104, .T.);
+
+  /* ==== FACE 2: XZ plane triangle ==== */
+  #120 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #121 = DIRECTION('', (0.0, -1.0, 0.0));
+  #122 = DIRECTION('', (1.0, 0.0, 0.0));
+  #123 = AXIS2_PLACEMENT_3D('', #120, #121, #122);
+  #124 = PLANE('', #123);
+
+  #125 = ORIENTED_EDGE('', *, *, #50, .F.);
+  #126 = ORIENTED_EDGE('', *, *, #54, .F.);
+  #127 = ORIENTED_EDGE('', *, *, #53, .F.);
+  #129 = EDGE_LOOP('', (#125, #126, #127));
+  #130 = FACE_OUTER_BOUND('', #129, .T.);
+  #131 = ADVANCED_FACE('Face2', (#130), #124, .T.);
+
+ENDSEC;
+END-ISO-10303-21;
