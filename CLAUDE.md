@@ -95,3 +95,9 @@ All GPU operations use a shared WebGPU device obtained via `lib.ts:getGPUDevice(
 - GPU buffer operations are asynchronous - use `await device.queue.onSubmittedWorkDone()` between dependent operations
 - Point coordinates are normalized to 4-component vectors `[x, y, z, padding]` for GPU alignment
 - The ear clipping algorithm runs iteratively on CPU but executes compute shaders on GPU each iteration
+
+
+## Style
+
+1. Prefer descriptive variable names.
+2. Instead of using ternary operators, prefer using if statements. 

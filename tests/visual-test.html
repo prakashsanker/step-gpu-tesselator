@@ -1,0 +1,202 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Hole Triangulation Visual Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            font-family: monospace;
+            background: #1a1a1a;
+            color: #eee;
+            overflow: hidden;
+        }
+        #info {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 100;
+            background: rgba(0,0,0,0.7);
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 300px;
+        }
+        #canvas {
+            display: block;
+        }
+        .pass { color: #4ade80; }
+        .fail { color: #f87171; }
+    </style>
+</head>
+<body>
+    <div id="info">
+        <div id="status">Loading...</div>
+        <div id="details"></div>
+    </div>
+    <canvas id="canvas"></canvas>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { parseStepToMesh } from '/src/step-parser.ts';
+        import { getGPUDevice } from '/src/lib.ts';
+
+        // Expose test functions to window for Puppeteer
+        window.visualTest = {
+            renderer: null,
+            scene: null,
+            camera: null,
+            currentMesh: null,
+
+            async init() {
+                const canvas = document.getElementById('canvas');
+
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas,
+                    antialias: true,
+                    preserveDrawingBuffer: true  // Required for screenshots
+                });
+                this.renderer.setSize(800, 600);
+                this.renderer.setPixelRatio(1);  // Fixed for consistent screenshots
+
+                this.scene = new THREE.Scene();
+                this.scene.background = new THREE.Color(0x202125);
+
+                this.camera = new THREE.PerspectiveCamera(45, 800 / 600, 0.01, 1000);
+
+                // Lights
+                const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+                this.scene.add(hemiLight);
+
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+                dirLight.position.set(3, 4, 5);
+                this.scene.add(dirLight);
+
+                // Grid
+                const grid = new THREE.GridHelper(20, 20);
+                grid.rotation.x = Math.PI / 2;  // Rotate to XY plane
+                this.scene.add(grid);
+
+                return { success: true };
+            },
+
+            async loadAndRender(stepText, testName) {
+                try {
+                    document.getElementById('status').textContent = `Loading: ${testName}`;
+
+                    // Parse STEP file
+                    const mesh = await parseStepToMesh(stepText);
+
+                    // Remove previous mesh
+                    if (this.currentMesh) {
+                        this.scene.remove(this.currentMesh);
+                        this.currentMesh.geometry.dispose();
+                    }
+
+                    // Create Three.js geometry
+                    const geometry = new THREE.BufferGeometry();
+                    geometry.setAttribute('position', new THREE.BufferAttribute(mesh.positions, 3));
+                    geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+                    geometry.computeVertexNormals();
+
+                    // Compute bounding box for camera positioning
+                    geometry.computeBoundingBox();
+                    const bbox = geometry.boundingBox;
+                    const center = new THREE.Vector3();
+                    bbox.getCenter(center);
+                    const size = new THREE.Vector3();
+                    bbox.getSize(size);
+                    const maxDim = Math.max(size.x, size.y, size.z);
+
+                    // Create mesh with double-sided material
+                    const material = new THREE.MeshStandardMaterial({
+                        color: 0x4a90d9,
+                        metalness: 0.1,
+                        roughness: 0.6,
+                        side: THREE.DoubleSide,
+                    });
+
+                    this.currentMesh = new THREE.Mesh(geometry, material);
+                    this.scene.add(this.currentMesh);
+
+                    // Also add wireframe overlay to show triangulation
+                    const wireframeMaterial = new THREE.MeshBasicMaterial({
+                        color: 0x000000,
+                        wireframe: true,
+                        transparent: true,
+                        opacity: 0.3
+                    });
+                    const wireframe = new THREE.Mesh(geometry.clone(), wireframeMaterial);
+                    this.currentMesh.add(wireframe);
+
+                    // Position camera to see the whole mesh
+                    this.camera.position.set(
+                        center.x,
+                        center.y,
+                        center.z + maxDim * 2
+                    );
+                    this.camera.lookAt(center);
+
+                    // Render
+                    this.renderer.render(this.scene, this.camera);
+
+                    const vertexCount = mesh.positions.length / 3;
+                    const triangleCount = mesh.indices.length / 3;
+
+                    document.getElementById('status').innerHTML = `<span class="pass">✓ ${testName}</span>`;
+                    document.getElementById('details').innerHTML =
+                        `Vertices: ${vertexCount}<br>Triangles: ${triangleCount}`;
+
+                    return {
+                        success: true,
+                        vertexCount,
+                        triangleCount,
+                        bounds: {
+                            min: { x: bbox.min.x, y: bbox.min.y, z: bbox.min.z },
+                            max: { x: bbox.max.x, y: bbox.max.y, z: bbox.max.z }
+                        }
+                    };
+                } catch (e) {
+                    document.getElementById('status').innerHTML = `<span class="fail">✗ ${testName}</span>`;
+                    document.getElementById('details').textContent = e.message;
+                    return {
+                        success: false,
+                        error: e.message,
+                        stack: e.stack
+                    };
+                }
+            },
+
+            async checkWebGPU() {
+                try {
+                    const device = await getGPUDevice();
+                    return { available: true };
+                } catch (e) {
+                    return { available: false, error: e.message };
+                }
+            },
+
+            getCanvasDataURL() {
+                return this.renderer.domElement.toDataURL('image/png');
+            }
+        };
+
+        // Initialize and signal ready
+        async function init() {
+            const gpuCheck = await window.visualTest.checkWebGPU();
+            if (!gpuCheck.available) {
+                document.getElementById('status').innerHTML =
+                    `<span class="fail">WebGPU not available: ${gpuCheck.error}</span>`;
+                return;
+            }
+
+            await window.visualTest.init();
+            document.getElementById('status').textContent = 'Ready - waiting for test...';
+            window.visualTestReady = true;
+        }
+
+        init();
+    </script>
+</body>
+</html>

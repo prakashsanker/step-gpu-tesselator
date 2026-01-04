@@ -60,15 +60,23 @@ no intersections (outer↔hole, hole↔hole)
 loops simple
 Status: ✅ Done
 
-C2.5 Triangulate with holes
+C2.5 Triangulate with holes ✅
 
-Choose one:
+Implemented C2.5a (Ear clipping path):
+- Bridge holes into outer boundary using ray-casting algorithm
+- Process holes right-to-left (by rightmost X) to avoid bridge crossings
+- Find mutually visible vertex on outer polygon for each hole
+- Merge into single CCW polygon, then ear clip
 
-C2.5a (Ear clipping path): bridge holes → single loop → ear clip
+Key implementation details:
+- `findRightmostVertexIndex()` - Find bridge start point on hole
+- `castRayToPolygon()` - Ray cast +X to find target edge
+- `findBridgeTargetVertex()` - Find visible vertex (handles reflex vertices)
+- `mergeHoleIntoOuter()` - Build merged polygon with bridge edges
+- Fixed ear clipping to skip same-coordinate vertices (not just same-index)
 
-C2.5b (CDT path): constrained triangulation using outer+hole constraints
 You can render: planar faces with one or many holes (washers, flanges, plates w/ cutouts)
-Status: 🚧 Next
+Status: ✅ Done
 
 C3 — Curved edges and real STEP geometry (sampling)
 C3.1 Support non-line edges in loops (CIRCLE, ELLIPSE, B-SPLINE, etc.)

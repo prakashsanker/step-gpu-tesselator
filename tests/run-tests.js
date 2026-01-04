@@ -1069,6 +1069,226 @@ async function testTopologyValidation(page) {
     return { passed, failed };
 }
 
+/**
+ * Test Suite: Hole Triangulation (C2.5)
+ * Tests the hole bridging algorithm with visual verification
+ */
+async function testHoleTriangulation(page) {
+    log('\n[Suite] Hole Triangulation (C2.5)', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const tests = [
+        {
+            name: 'Square with triangle hole (existing)',
+            path: 'step-examples/basics/square-with-triangle-hole.step',
+            expectedOuterVertices: 4,
+            expectedHoleVertices: 3,
+            // After bridging: 4 outer + 3 hole + 2 bridge duplicates = 9
+            expectedMergedVertices: 9,
+            // Triangles = mergedVertices - 2 = 7
+            expectedTriangles: 7,
+        },
+        {
+            name: 'Square with two holes',
+            path: 'step-examples/basics/square-with-two-holes.step',
+            expectedOuterVertices: 4,
+            expectedHoles: 2,
+            // 4 + 3 + 2 (first hole bridged) + 3 + 2 (second hole bridged) = 14
+            expectedMergedVertices: 14,
+            expectedTriangles: 12,
+        },
+        {
+            name: 'Square with square hole',
+            path: 'step-examples/holes/square-with-square-hole.step',
+            expectedOuterVertices: 4,
+            expectedHoleVertices: 4,
+            // 4 outer + 4 hole + 2 bridge = 10
+            expectedMergedVertices: 10,
+            expectedTriangles: 8,
+        },
+        {
+            name: 'Square with right-side hole',
+            path: 'step-examples/holes/square-with-right-hole.step',
+            expectedOuterVertices: 4,
+            expectedHoleVertices: 3,
+            expectedMergedVertices: 9,
+            expectedTriangles: 7,
+        },
+        {
+            name: 'Square with three holes',
+            path: 'step-examples/holes/square-with-three-holes.step',
+            expectedOuterVertices: 4,
+            expectedHoles: 3,
+            // 4 + (3+2)*3 = 4 + 15 = 19
+            expectedMergedVertices: 19,
+            expectedTriangles: 17,
+        },
+        {
+            name: 'Hexagon with triangle hole',
+            path: 'step-examples/holes/hexagon-with-triangle-hole.step',
+            expectedOuterVertices: 6,
+            expectedHoleVertices: 3,
+            // 6 outer + 3 hole + 2 bridge = 11
+            expectedMergedVertices: 11,
+            expectedTriangles: 9,
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            // Load STEP file
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            // Parse and triangulate
+            const result = await page.evaluate(async (stepText) => {
+                return await window.testHarness.parseStep(stepText);
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            const vertexCount = result.mesh.vertexCount;
+            const triangleCount = result.mesh.triangleCount;
+
+            // Validate
+            const issues = [];
+
+            if (test.expectedMergedVertices && vertexCount !== test.expectedMergedVertices) {
+                issues.push(`expected ${test.expectedMergedVertices} merged vertices, got ${vertexCount}`);
+            }
+
+            if (test.expectedTriangles && triangleCount !== test.expectedTriangles) {
+                issues.push(`expected ${test.expectedTriangles} triangles, got ${triangleCount}`);
+            }
+
+            // Check triangle count matches n-2 formula for merged polygon
+            const expectedFromFormula = vertexCount - 2;
+            if (triangleCount !== expectedFromFormula) {
+                issues.push(`triangle count ${triangleCount} != vertices-2 (${expectedFromFormula})`);
+            }
+
+            if (issues.length === 0) {
+                logTest(test.name, true, `${vertexCount} vertices, ${triangleCount} triangles`);
+                passed++;
+            } else {
+                logTest(test.name, false, issues.join('; '));
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
+/**
+ * Test Suite: Visual Hole Rendering with Screenshots
+ */
+async function testVisualHoleRendering(page, browser) {
+    log('\n[Suite] Visual Hole Rendering (Screenshots)', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    // Create screenshots directory
+    const screenshotDir = join(PROJECT_ROOT, 'tests', 'screenshots');
+    if (!fs.existsSync(screenshotDir)) {
+        fs.mkdirSync(screenshotDir, { recursive: true });
+    }
+
+    // Open visual test page
+    const visualPage = await browser.newPage();
+    await visualPage.goto(`http://localhost:${CONFIG.vitePort}/tests/visual-test.html`, {
+        waitUntil: 'networkidle0',
+        timeout: CONFIG.timeout,
+    });
+
+    // Wait for visual test to be ready
+    await visualPage.waitForFunction(
+        () => window.visualTestReady === true,
+        { timeout: CONFIG.timeout }
+    );
+
+    const tests = [
+        {
+            name: 'square-with-triangle-hole',
+            path: 'step-examples/basics/square-with-triangle-hole.step',
+        },
+        {
+            name: 'square-with-two-holes',
+            path: 'step-examples/basics/square-with-two-holes.step',
+        },
+        {
+            name: 'square-with-square-hole',
+            path: 'step-examples/holes/square-with-square-hole.step',
+        },
+        {
+            name: 'square-with-three-holes',
+            path: 'step-examples/holes/square-with-three-holes.step',
+        },
+        {
+            name: 'hexagon-with-triangle-hole',
+            path: 'step-examples/holes/hexagon-with-triangle-hole.step',
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            // Load STEP file
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(`Visual: ${test.name}`, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            // Render in visual page
+            const result = await visualPage.evaluate(async (stepText, testName) => {
+                return await window.visualTest.loadAndRender(stepText, testName);
+            }, stepContent, test.name);
+
+            if (!result.success) {
+                logTest(`Visual: ${test.name}`, false, result.error);
+                failed++;
+                continue;
+            }
+
+            // Take screenshot
+            const screenshotPath = join(screenshotDir, `${test.name}.png`);
+            await visualPage.screenshot({
+                path: screenshotPath,
+                clip: { x: 0, y: 0, width: 800, height: 600 }
+            });
+
+            logTest(`Visual: ${test.name}`, true, `${result.triangleCount} triangles, screenshot saved`);
+            passed++;
+
+        } catch (e) {
+            logTest(`Visual: ${test.name}`, false, e.message);
+            failed++;
+        }
+    }
+
+    await visualPage.close();
+    log(`  Screenshots saved to: ${screenshotDir}`, 'dim');
+
+    return { passed, failed };
+}
+
 // ============================================================================
 // MAIN
 // ============================================================================
@@ -1134,6 +1354,7 @@ async function main() {
             testProjection,
             testWindingNormalization,
             testTopologyValidation,
+            testHoleTriangulation,
         ];
 
         for (const suite of suites) {
@@ -1141,6 +1362,11 @@ async function main() {
             totalPassed += result.passed;
             totalFailed += result.failed;
         }
+
+        // Run visual tests (needs browser reference for new page)
+        const visualResult = await testVisualHoleRendering(page, browser);
+        totalPassed += visualResult.passed;
+        totalFailed += visualResult.failed;
 
         // Summary
         log('\n========================================', 'blue');

@@ -345,11 +345,25 @@ function pointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
     const [xi, yi] = polygon[i];
     const [xj, yj] = polygon[j];
 
-    // Check if ray crosses this edge
-    const intersects = ((yi > py) !== (yj > py)) &&
-      (px < (xj - xi) * (py - yi) / (yj - yi) + xi);
+    // Check if horizontal ray from point crosses this edge
+    //
+    // Step 1: Does the edge straddle our y-level?
+    //         One vertex must be above py, one below
+    const edgeStraddlesRay = (yi > py) !== (yj > py);
 
-    if (intersects) {
+    // Step 2: Where does the edge cross the horizontal line y = py?
+    //         Using linear interpolation along the edge:
+    //         t = (py - yi) / (yj - yi)     [how far along the edge]
+    //         xCrossing = xi + t * (xj - xi) [x-coord at that point]
+    const t = (py - yi) / (yj - yi);
+    const xCrossing = xi + t * (xj - xi);
+
+    // Step 3: Is the crossing point to the RIGHT of our point?
+    //         (We're casting ray in +X direction)
+    const crossingIsToRight = px < xCrossing;
+
+    // If edge straddles ray AND crossing is to the right, we hit this edge
+    if (edgeStraddlesRay && crossingIsToRight) {
       inside = !inside;
     }
   }
@@ -532,6 +546,579 @@ function validateTopology(outer2d: Vec2[], holes2d: Vec2[][]): TopologyValidatio
   };
 }
 
+// =============================================================================
+// C2.5: Hole Bridging Algorithm
+// =============================================================================
+//
+// GOAL: Merge holes into the outer boundary to create a single polygon
+//       that can be triangulated with ear clipping.
+//
+// VISUAL OVERVIEW:
+//
+//     BEFORE (outer + hole)              AFTER (single merged polygon)
+//
+//     0 ────────────→ 1                  0 ────────────→ 1
+//     ↑               │                  ↑               │
+//     │    a → b      │                  │    5 → 6      │
+//     │    ↑   ↓      ↓                  │    ↑   ↓      ↓
+//     │    d ← c      │        →→→       │    8 ← 7      │
+//     │               │                  │  ↗         ↘  │
+//     │               │                  │ 4=9         3 │
+//     3 ←──────────── 2                  ↑←──────────────┘
+//                                        (4 and 9 are same point - bridge)
+//                                        (3 appears twice - bridge back)
+//
+// The merged polygon visits: 0→1→2→3→[bridge to hole]→5→6→7→8→[bridge back]→3→0
+//
+// =============================================================================
+
+/**
+ * Find the index of the vertex with the maximum X coordinate.
+ * This is the "rightmost" vertex in the polygon.
+ *
+ * WHY: We start bridging from the rightmost hole vertex because:
+ *      1. A ray cast to +X from this point is guaranteed to hit the outer boundary
+ *      2. Processing holes right-to-left prevents bridge edges from crossing
+ */
+function findRightmostVertexIndex(polygon: Vec2[]): number {
+  let maxIndex = 0;
+  let maxX = polygon[0][0];
+
+  for (let i = 1; i < polygon.length; i++) {
+    // If this vertex has a larger X coordinate, it becomes the new rightmost
+    if (polygon[i][0] > maxX) {
+      maxX = polygon[i][0];
+      maxIndex = i;
+    }
+  }
+
+  return maxIndex;
+}
+
+/**
+ * Cast a horizontal ray from point P in the +X direction and find where
+ * it first intersects an edge of the polygon.
+ *
+ * VISUAL:
+ *
+ *         P ─────────────────●─────────────→ +X
+ *                            ↑
+ *                       intersection
+ *                            │
+ *                      ┌─────┴─────┐
+ *                      │           │
+ *                      │   outer   │
+ *                      │  polygon  │
+ *                      └───────────┘
+ *
+ * RETURNS:
+ *   - edgeStartIndex: which edge was hit (edge goes from [i] to [i+1])
+ *   - intersectionX: the X coordinate where ray hits the edge
+ *   - edgeParameter: how far along the edge (0.0 = at start, 1.0 = at end)
+ */
+function castRayToPolygon(
+  rayOrigin: Vec2,
+  polygon: Vec2[]
+): { edgeStartIndex: number; intersectionX: number; edgeParameter: number } | null {
+
+  const rayY = rayOrigin[1];  // Ray is horizontal at this Y level
+  const rayX = rayOrigin[0];  // Starting X position
+
+  let closestIntersectionX = Infinity;
+  let closestEdgeIndex = -1;
+  let closestEdgeParameter = 0;
+
+  const numVertices = polygon.length;
+
+  // Check each edge of the polygon
+  for (let i = 0; i < numVertices; i++) {
+    const edgeStart = polygon[i];
+    const edgeEnd = polygon[(i + 1) % numVertices];
+
+    // STEP 1: Check if this edge crosses our ray's Y level
+    //
+    //    edgeStart.y ●
+    //                 \
+    //    rayY ─────────\────────→  (ray at this Y level)
+    //                   \
+    //    edgeEnd.y       ●
+    //
+    // The edge crosses rayY if one endpoint is above and one is below
+
+    const startAboveRay = edgeStart[1] > rayY;
+    const endAboveRay = edgeEnd[1] > rayY;
+
+    // If both endpoints are on the same side of the ray, no intersection
+    if (startAboveRay === endAboveRay) {
+      continue;
+    }
+
+    // STEP 2: Find WHERE on the edge the intersection occurs
+    //
+    // Using linear interpolation:
+    //   t = (rayY - startY) / (endY - startY)
+    //   intersectX = startX + t * (endX - startX)
+    //
+    // t is the "edge parameter" - how far along the edge (0 to 1)
+
+    const edgeParameter = (rayY - edgeStart[1]) / (edgeEnd[1] - edgeStart[1]);
+    const intersectionX = edgeStart[0] + edgeParameter * (edgeEnd[0] - edgeStart[0]);
+
+    // STEP 3: Only consider intersections to the RIGHT of ray origin
+    // (we're casting in +X direction)
+
+    if (intersectionX <= rayX) {
+      continue;  // Intersection is behind the ray origin
+    }
+
+    // STEP 4: Keep track of the CLOSEST intersection
+    if (intersectionX < closestIntersectionX) {
+      closestIntersectionX = intersectionX;
+      closestEdgeIndex = i;
+      closestEdgeParameter = edgeParameter;
+    }
+  }
+
+  // No intersection found
+  if (closestEdgeIndex === -1) {
+    return null;
+  }
+
+  return {
+    edgeStartIndex: closestEdgeIndex,
+    intersectionX: closestIntersectionX,
+    edgeParameter: closestEdgeParameter
+  };
+}
+
+/**
+ * Check if a line segment from A to B intersects with segment from C to D.
+ * Uses the cross product orientation test.
+ *
+ * VISUAL - Intersection case:
+ *
+ *       A
+ *        \
+ *     C───\────D
+ *          \
+ *           B
+ *
+ * VISUAL - No intersection case:
+ *
+ *       A────B
+ *
+ *     C────D
+ */
+function doSegmentsIntersect(a: Vec2, b: Vec2, c: Vec2, d: Vec2): boolean {
+  // Helper: compute orientation of triplet (p, q, r)
+  // Returns: positive if CCW, negative if CW, zero if collinear
+  function orientation(p: Vec2, q: Vec2, r: Vec2): number {
+    return (q[1] - p[1]) * (r[0] - q[0]) - (q[0] - p[0]) * (r[1] - q[1]);
+  }
+
+  const o1 = orientation(a, b, c);
+  const o2 = orientation(a, b, d);
+  const o3 = orientation(c, d, a);
+  const o4 = orientation(c, d, b);
+
+  // General case: segments intersect if orientations are different
+  // (c and d are on opposite sides of line AB) AND
+  // (a and b are on opposite sides of line CD)
+  if (o1 * o2 < 0 && o3 * o4 < 0) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Check if we can draw a straight line from point A to point B
+ * without crossing any edge of the polygon.
+ *
+ * VISUAL - Visible:
+ *
+ *     ┌───────────┐
+ *     │           │
+ *     │  A ────── B  (no edges crossed)
+ *     │           │
+ *     └───────────┘
+ *
+ * VISUAL - Not visible:
+ *
+ *     ┌─────┬─────┐
+ *     │     │     │
+ *     │  A ─┼── B    (edge crossed!)
+ *     │     │     │
+ *     └─────┴─────┘
+ *
+ * @param skipVertexIndices - Don't check edges that touch these vertices
+ *                            (because A or B might BE one of these vertices)
+ */
+function isVisible(
+  a: Vec2,
+  b: Vec2,
+  polygon: Vec2[],
+  skipVertexIndices: Set<number>
+): boolean {
+  const n = polygon.length;
+
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+
+    // Skip edges that include vertices we're connecting to
+    if (skipVertexIndices.has(i) || skipVertexIndices.has(j)) {
+      continue;
+    }
+
+    const edgeStart = polygon[i];
+    const edgeEnd = polygon[j];
+
+    // Check if our line A→B crosses this edge
+    if (doSegmentsIntersect(a, b, edgeStart, edgeEnd)) {
+      return false;  // Blocked!
+    }
+  }
+
+  return true;  // No edges block the view
+}
+
+/**
+ * Check if point P is inside triangle ABC.
+ *
+ * Uses the "same side" test: P is inside if it's on the same side
+ * of each edge as the interior of the triangle.
+ *
+ * VISUAL:
+ *
+ *           A
+ *          /\
+ *         /  \
+ *        / P  \     ← P is inside
+ *       /      \
+ *      B────────C
+ */
+function isPointInTriangle(a: Vec2, b: Vec2, c: Vec2, p: Vec2): boolean {
+  // Compute vectors from A to other points
+  const v0x = c[0] - a[0];
+  const v0y = c[1] - a[1];
+  const v1x = b[0] - a[0];
+  const v1y = b[1] - a[1];
+  const v2x = p[0] - a[0];
+  const v2y = p[1] - a[1];
+
+  // Compute dot products for barycentric coordinates
+  const dot00 = v0x * v0x + v0y * v0y;
+  const dot01 = v0x * v1x + v0y * v1y;
+  const dot02 = v0x * v2x + v0y * v2y;
+  const dot11 = v1x * v1x + v1y * v1y;
+  const dot12 = v1x * v2x + v1y * v2y;
+
+  // Compute barycentric coordinates
+  const invDenom = 1 / (dot00 * dot11 - dot01 * dot01);
+  const u = (dot11 * dot02 - dot01 * dot12) * invDenom;
+  const v = (dot00 * dot12 - dot01 * dot02) * invDenom;
+
+  // Check if point is in triangle
+  return (u >= -EPSILON) && (v >= -EPSILON) && (u + v <= 1 + EPSILON);
+}
+
+/**
+ * Find the vertex on the outer polygon that we should connect to
+ * from the hole's rightmost vertex.
+ *
+ * ALGORITHM:
+ *
+ * 1. Cast ray from hole vertex P in +X direction
+ * 2. Find where ray hits outer polygon (intersection point I)
+ * 3. The edge we hit goes from vertex V1 to V2
+ * 4. Pick the endpoint with larger X coordinate as candidate M
+ * 5. If P can "see" M directly (no edges block), return M
+ * 6. Otherwise, find a better vertex inside triangle P-I-M
+ *
+ * VISUAL:
+ *
+ *                     V1
+ *                    /
+ *     P ───────────●I        M = V2 (rightmost endpoint)
+ *        (ray)    /  \
+ *                /    \
+ *               V2 ════ rest of outer
+ *                ↑
+ *                M (candidate - rightmost endpoint of hit edge)
+ */
+function findBridgeTargetVertex(
+  holeVertex: Vec2,
+  outerPolygon: Vec2[]
+): number {
+  // STEP 1: Cast ray from hole vertex
+  const rayHit = castRayToPolygon(holeVertex, outerPolygon);
+
+  if (rayHit === null) {
+    // This shouldn't happen if topology validation passed (C2.4)
+    console.error("[Bridging] Ray cast failed - hole may be outside outer polygon");
+    return 0;
+  }
+
+  const { edgeStartIndex, intersectionX, edgeParameter } = rayHit;
+
+  // STEP 2: Get the edge endpoints
+  const edgeStart = outerPolygon[edgeStartIndex];
+  const edgeEnd = outerPolygon[(edgeStartIndex + 1) % outerPolygon.length];
+
+  console.log(`[Bridging] Ray hit edge ${edgeStartIndex}→${(edgeStartIndex + 1) % outerPolygon.length} at x=${intersectionX.toFixed(3)}`);
+
+  // STEP 3: Pick candidate M = rightmost endpoint of the hit edge
+  let candidateIndex: number;
+  let candidateVertex: Vec2;
+
+  if (edgeStart[0] >= edgeEnd[0]) {
+    candidateIndex = edgeStartIndex;
+    candidateVertex = edgeStart;
+  } else {
+    candidateIndex = (edgeStartIndex + 1) % outerPolygon.length;
+    candidateVertex = edgeEnd;
+  }
+
+  console.log(`[Bridging] Candidate vertex M: index=${candidateIndex}, coords=(${candidateVertex[0].toFixed(3)}, ${candidateVertex[1].toFixed(3)})`);
+
+  // STEP 4: Check if we can directly see M from P
+  const skipIndices = new Set([candidateIndex]);
+  // Also skip the adjacent edges
+  const prevIndex = (candidateIndex - 1 + outerPolygon.length) % outerPolygon.length;
+  const nextIndex = (candidateIndex + 1) % outerPolygon.length;
+  skipIndices.add(prevIndex);
+
+  if (isVisible(holeVertex, candidateVertex, outerPolygon, skipIndices)) {
+    console.log(`[Bridging] Direct visibility to M confirmed`);
+    return candidateIndex;
+  }
+
+  // STEP 5: M is not directly visible
+  // We need to find a "reflex" vertex inside triangle P-I-M
+  // that IS visible from P
+
+  console.log(`[Bridging] M not directly visible, searching for alternate vertex`);
+
+  const intersectionPoint: Vec2 = [intersectionX, holeVertex[1]];
+
+  // Search all vertices to find one inside the triangle P-I-M
+  // that is visible from P and has minimum angle to the ray direction
+
+  let bestIndex = candidateIndex;  // Fallback to M
+  let bestAngle = Math.PI;  // Start with worst angle
+
+  for (let i = 0; i < outerPolygon.length; i++) {
+    if (i === candidateIndex) continue;
+
+    const vertex = outerPolygon[i];
+
+    // Is this vertex inside triangle (P, I, M)?
+    if (!isPointInTriangle(holeVertex, intersectionPoint, candidateVertex, vertex)) {
+      continue;
+    }
+
+    // Is it visible from P?
+    const checkSkip = new Set([i, (i - 1 + outerPolygon.length) % outerPolygon.length]);
+    if (!isVisible(holeVertex, vertex, outerPolygon, checkSkip)) {
+      continue;
+    }
+
+    // Compute angle from ray direction (+X) to P→vertex direction
+    const dx = vertex[0] - holeVertex[0];
+    const dy = vertex[1] - holeVertex[1];
+    const angle = Math.abs(Math.atan2(dy, dx));
+
+    // Keep the vertex with smallest angle (closest to ray direction)
+    if (angle < bestAngle) {
+      bestAngle = angle;
+      bestIndex = i;
+    }
+  }
+
+  console.log(`[Bridging] Selected vertex: index=${bestIndex}`);
+  return bestIndex;
+}
+
+/**
+ * Merge a single hole into the outer polygon by creating a bridge.
+ *
+ * The bridge creates two new edges:
+ *   1. outer[M] → hole[P]   (bridge INTO the hole)
+ *   2. hole[P] → outer[M]   (bridge OUT of the hole)
+ *
+ * BEFORE:
+ *
+ *   Outer (CCW):  0 → 1 → 2 → 3 → 0
+ *   Hole (CW):    a → d → c → b → a  (CW = indices go backwards visually)
+ *
+ *     0 ────→ 1
+ *     ↑       ↓
+ *     │ a → b │
+ *     │ ↑   ↓ │     hole[P] = b (rightmost)
+ *     │ d ← c │     outer[M] = 2 (found by ray cast)
+ *     ↑       ↓
+ *     3 ←──── 2
+ *
+ * AFTER (single polygon, CCW):
+ *
+ *     0 ────→ 1
+ *     ↑       ↓
+ *     │ 6 → 7 │
+ *     │ ↑   ↓ │     Merged: 0→1→2→[b→c→d→a→b]→2→3→0
+ *     │ 9 ← 8 │              └─────────────┘
+ *     ↑   ↓   ↓                 hole traversed
+ *     3 ←─5←─ 2
+ *         ↑
+ *     (2 appears twice: index 2 and index 10)
+ *     (b appears twice: index 3 and index 7)
+ *
+ * The merged polygon is:
+ *   [0, 1, 2, b, c, d, a, b, 2, 3]
+ *            ↑           ↑
+ *         bridge in   bridge out
+ */
+function mergeHoleIntoOuter(outer: Vec2[], hole: Vec2[]): Vec2[] {
+  // STEP 1: Find rightmost vertex on the hole (this is P)
+  const holeRightmostIndex = findRightmostVertexIndex(hole);
+  const holeVertex = hole[holeRightmostIndex];
+
+  console.log(`[Bridging] Hole rightmost vertex P: index=${holeRightmostIndex}, coords=(${holeVertex[0].toFixed(3)}, ${holeVertex[1].toFixed(3)})`);
+
+  // STEP 2: Find the vertex on outer to connect to (this is M)
+  const outerTargetIndex = findBridgeTargetVertex(holeVertex, outer);
+  const outerVertex = outer[outerTargetIndex];
+
+  console.log(`[Bridging] Bridge target M: index=${outerTargetIndex}, coords=(${outerVertex[0].toFixed(3)}, ${outerVertex[1].toFixed(3)})`);
+
+  // STEP 3: Build the merged polygon
+  //
+  // We construct the new polygon by:
+  //   Part A: outer[0] through outer[M] (inclusive)
+  //   Part B: hole[P] through hole[P-1] (wrapping around, all vertices)
+  //   Part C: hole[P] again (to complete the bridge)
+  //   Part D: outer[M] again (to complete the bridge)
+  //   Part E: outer[M+1] through outer[end]
+
+  const merged: Vec2[] = [];
+  const outerLen = outer.length;
+  const holeLen = hole.length;
+
+  // Part A: outer vertices from 0 to M (inclusive)
+  for (let i = 0; i <= outerTargetIndex; i++) {
+    merged.push(outer[i]);
+  }
+
+  // Part B: ALL hole vertices starting from P, going FORWARD (in array order)
+  // The hole is CW. When we enter the hole from an outer CCW polygon, we must
+  // traverse the hole in its CW direction to EXCLUDE the hole interior.
+  // Going backward (CCW) would INCLUDE the hole interior - wrong!
+  //
+  // VISUAL - Why forward traversal excludes the hole:
+  //
+  //   Outer CCW:    ─────────→ (left side is interior)
+  //                 ↑         │
+  //                 │ [hole]  ↓
+  //                 ←─────────
+  //
+  //   Hole CW:      ←─────────  (right side is interior)
+  //                 │         ↑
+  //                 ↓ [hole]  │
+  //                 ─────────→
+  //
+  //   By traversing the hole CW (forward), the hole's interior stays on
+  //   our RIGHT while the outer's interior stays on our LEFT.
+  //   This correctly excludes the hole from the triangulation.
+  //
+  for (let i = 0; i < holeLen; i++) {
+    const holeIndex = (holeRightmostIndex + i) % holeLen;
+    merged.push(hole[holeIndex]);
+  }
+
+  // Part C: hole[P] again - back to bridge entry point
+  // Note: we use the same coordinates (no epsilon offset) because:
+  // 1. The 2D→3D mapping needs exact coordinates
+  // 2. The ear clipping should handle collinear/coincident points
+  merged.push([...hole[holeRightmostIndex]]);
+
+  // Part D: outer[M] again - return to outer at bridge point
+  merged.push([...outer[outerTargetIndex]]);
+
+  // Part E: remaining outer vertices from M+1 to end
+  for (let i = outerTargetIndex + 1; i < outerLen; i++) {
+    merged.push(outer[i]);
+  }
+
+  console.log(`[Bridging] Merged: ${outerLen} outer + ${holeLen} hole → ${merged.length} total vertices`);
+
+  // Debug: verify merged polygon is CCW
+  const mergedArea = computeSignedArea2D(merged);
+  console.log(`[Bridging] Merged polygon signed area: ${mergedArea.toFixed(4)} (should be positive for CCW)`);
+  if (mergedArea < 0) {
+    console.warn(`[Bridging] WARNING: Merged polygon is CW (negative area), reversing!`);
+    merged.reverse();
+  }
+
+  return merged;
+}
+
+/**
+ * Bridge ALL holes into the outer polygon.
+ *
+ * IMPORTANT: We process holes from RIGHT to LEFT (sorted by rightmost X).
+ * This prevents bridge edges from crossing each other.
+ *
+ * VISUAL - Why right-to-left matters:
+ *
+ *   Processing left-to-right (WRONG):
+ *
+ *     ┌─────────────────────────┐
+ *     │   ┌──┐         ┌──┐     │
+ *     │   │H1│─────────│H2│     │  ← Bridge to H1 crosses bridge to H2!
+ *     │   └──┘    ╳    └──┘     │
+ *     └──────────────────────────┘
+ *
+ *   Processing right-to-left (CORRECT):
+ *
+ *     ┌──────────────────────────┐
+ *     │   ┌──┐         ┌──┐     │
+ *     │   │H1│         │H2│─────│  ← Bridge H2 first (rightmost)
+ *     │   └──┘         └──┘     │
+ *     └──────────────────────────┘
+ *     Then bridge H1 - no crossing!
+ */
+function bridgeAllHoles(outer: Vec2[], holes: Vec2[][]): Vec2[] {
+  if (holes.length === 0) {
+    return outer;
+  }
+
+  console.log(`[Bridging] Starting to bridge ${holes.length} hole(s)`);
+
+  // STEP 1: Sort holes by rightmost X coordinate (descending = right to left)
+  const holesWithRightmostX = holes.map((hole, index) => {
+    const rightmostIndex = findRightmostVertexIndex(hole);
+    const rightmostX = hole[rightmostIndex][0];
+    return { hole, index, rightmostX };
+  });
+
+  holesWithRightmostX.sort((a, b) => b.rightmostX - a.rightmostX);
+
+  console.log(`[Bridging] Processing order (right to left): ${holesWithRightmostX.map(h => `hole${h.index}(x=${h.rightmostX.toFixed(2)})`).join(', ')}`);
+
+  // STEP 2: Merge each hole one by one
+  let currentPolygon = outer;
+
+  for (let i = 0; i < holesWithRightmostX.length; i++) {
+    const { hole, index } = holesWithRightmostX[i];
+    console.log(`[Bridging] Processing hole ${i + 1}/${holes.length} (original index ${index})`);
+
+    currentPolygon = mergeHoleIntoOuter(currentPolygon, hole);
+  }
+
+  console.log(`[Bridging] Complete! Final polygon has ${currentPolygon.length} vertices`);
+
+  return currentPolygon;
+}
+
 /**
  * Debug function to verify projection sanity.
  * Checks:
@@ -703,31 +1290,109 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     console.log("[StepParser] Topology validation passed");
   }
 
-  // Build positions array from oriented 3D outer boundary (for rendering)
-  const positions = new Float32Array(oriented3d.outer.length * 3);
-  oriented3d.outer.forEach((p, i) => {
+  // ==========================================================================
+  // C2.5: Bridge holes and triangulate
+  // ==========================================================================
+
+  // Log hole information
+  if (normalized.holes2d.length > 0) {
+    console.log(`[StepParser] Face has ${normalized.holes2d.length} hole(s)`);
+    for (let i = 0; i < normalized.holes2d.length; i++) {
+      const holeArea = computeSignedArea2D(normalized.holes2d[i]);
+      console.log(`[StepParser] Hole ${i}: ${normalized.holes2d[i].length} vertices, area=${holeArea.toFixed(4)} (CW)`);
+    }
+  }
+
+  // Bridge holes into outer polygon (if there are any holes)
+  const mergedPolygon2d = bridgeAllHoles(normalized.outer2d, normalized.holes2d);
+
+  console.log(`[StepParser] Merged polygon has ${mergedPolygon2d.length} vertices`);
+
+  // Create lookup maps for fast 2D → 3D mapping
+  const outer2dTo3d = new Map<string, Vec3>();
+  for (let i = 0; i < normalized.outer2d.length; i++) {
+    const key = `${normalized.outer2d[i][0].toFixed(9)},${normalized.outer2d[i][1].toFixed(9)}`;
+    outer2dTo3d.set(key, oriented3d.outer[i]);
+  }
+
+  const holes2dTo3d: Map<string, Vec3>[] = [];
+  for (let h = 0; h < normalized.holes2d.length; h++) {
+    const holeMap = new Map<string, Vec3>();
+    for (let i = 0; i < normalized.holes2d[h].length; i++) {
+      const key = `${normalized.holes2d[h][i][0].toFixed(9)},${normalized.holes2d[h][i][1].toFixed(9)}`;
+      holeMap.set(key, oriented3d.holes[h][i]);
+    }
+    holes2dTo3d.push(holeMap);
+  }
+
+  // Filter out consecutive duplicate vertices before ear clipping
+  // (bridge points create duplicates that can confuse the algorithm)
+  const filteredMerged2d: Vec2[] = [];
+  for (let i = 0; i < mergedPolygon2d.length; i++) {
+    const curr = mergedPolygon2d[i];
+    const prev = filteredMerged2d.length > 0
+      ? filteredMerged2d[filteredMerged2d.length - 1]
+      : mergedPolygon2d[mergedPolygon2d.length - 1];
+
+    // Skip if this vertex is at same position as previous
+    const dx = curr[0] - prev[0];
+    const dy = curr[1] - prev[1];
+    const distSq = dx * dx + dy * dy;
+
+    if (distSq > 1e-12) {
+      filteredMerged2d.push(curr);
+    } else {
+      console.log(`[StepParser] Filtered duplicate vertex at index ${i}`);
+    }
+  }
+
+  // Also check if last vertex equals first (wrap-around duplicate)
+  if (filteredMerged2d.length > 1) {
+    const first = filteredMerged2d[0];
+    const last = filteredMerged2d[filteredMerged2d.length - 1];
+    const dx = first[0] - last[0];
+    const dy = first[1] - last[1];
+    if (dx * dx + dy * dy < 1e-12) {
+      filteredMerged2d.pop();
+      console.log(`[StepParser] Filtered wrap-around duplicate vertex`);
+    }
+  }
+
+  console.log(`[StepParser] Filtered from ${mergedPolygon2d.length} to ${filteredMerged2d.length} vertices`);
+
+  // Build 3D positions array from filtered vertices
+  const filtered3d: Vec3[] = [];
+  for (const pt2d of filteredMerged2d) {
+    const key = `${pt2d[0].toFixed(9)},${pt2d[1].toFixed(9)}`;
+    let pt3d = outer2dTo3d.get(key);
+    if (!pt3d) {
+      for (const holeMap of holes2dTo3d) {
+        pt3d = holeMap.get(key);
+        if (pt3d) break;
+      }
+    }
+    if (!pt3d) {
+      console.warn(`[StepParser] Could not find 3D coordinate for 2D point (${pt2d[0]}, ${pt2d[1]})`);
+      pt3d = [pt2d[0], pt2d[1], 0];
+    }
+    filtered3d.push(pt3d);
+  }
+
+  // Build positions array from filtered 3D vertices
+  const positions = new Float32Array(filtered3d.length * 3);
+  filtered3d.forEach((p, i) => {
     positions[i * 3 + 0] = p[0];
     positions[i * 3 + 1] = p[1];
     positions[i * 3 + 2] = p[2];
   });
 
-  // Log hole information for now (triangulation with holes not yet implemented)
-  if (normalized.holes2d.length > 0) {
-    console.log(`[StepParser] Face has ${normalized.holes2d.length} hole(s) - hole triangulation not yet implemented`);
-    for (let i = 0; i < normalized.holes2d.length; i++) {
-      const holeArea = computeSignedArea2D(normalized.holes2d[i]);
-      console.log(`[StepParser] Hole ${i}: ${normalized.holes2d[i].length} vertices, area=${holeArea.toFixed(4)} (should be negative/CW)`);
-    }
-  }
-
   // Convert 2D points to Vec3 with z=0 for ear clipping
-  // (ear clipping algorithm expects Vec3 but operates in 2D)
-  const outer2dAsVec3: Vec3[] = normalized.outer2d.map(p => [p[0], p[1], 0]);
+  const filtered2dAsVec3: Vec3[] = filteredMerged2d.map(p => [p[0], p[1], 0]);
 
-  // Use ear clipping algorithm for triangulation (outer boundary only for now)
-  const triangles = await earClipping(outer2dAsVec3);
+  // Run ear clipping on the filtered (bridged) polygon
+  const triangles = await earClipping(filtered2dAsVec3);
 
-  console.log("[StepParser] Received triangles from earClipping:", triangles);
+  console.log("[StepParser] Triangulation complete:", triangles.length, "triangles");
 
   // Convert triangles array to flat indices array
   const indicesArray: number[] = [];
@@ -736,9 +1401,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   }
   const indices = new Uint32Array(indicesArray);
 
-  console.log("[StepParser] Final indices array:", Array.from(indices));
-  console.log("[StepParser] Indices length:", indices.length);
-  console.log("[StepParser] Expected triangle count:", triangles.length);
+  console.log("[StepParser] Final mesh:", filtered3d.length, "vertices,", triangles.length, "triangles");
 
   return { positions, indices };
 }

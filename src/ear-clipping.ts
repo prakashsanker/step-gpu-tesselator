@@ -181,6 +181,16 @@ export function createIsEarShader(device: GPUDevice) {
                         continue;
                     }
                     var p = pointsBuffer[j];
+
+                    // Skip vertices that have the same coordinates as triangle vertices
+                    // (can happen with bridge points in hole-merged polygons)
+                    let sameAsA = abs(p.x - a.x) < 1e-9 && abs(p.y - a.y) < 1e-9;
+                    let sameAsB = abs(p.x - b.x) < 1e-9 && abs(p.y - b.y) < 1e-9;
+                    let sameAsC = abs(p.x - c.x) < 1e-9 && abs(p.y - c.y) < 1e-9;
+                    if (sameAsA || sameAsB || sameAsC) {
+                        continue;
+                    }
+
                     var isInside = pointInTriangle(a, b, c, p);
                     if (isInside) {
                         vertexIsEarBuffer[i] = 0u;
