@@ -1457,6 +1457,90 @@ async function testCurveSampling(page) {
 }
 
 /**
+ * Test Suite: Curved Surfaces (C4)
+ * Tests parsing and tessellation of cylindrical, spherical, conical, and toroidal surfaces
+ */
+async function testCurvedSurfaces(page) {
+    log('\n[Suite] Curved Surfaces (C4)', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const tests = [
+        {
+            name: 'Cylinder (radius=1, height=2)',
+            path: 'step-examples/c4-surfaces/cylinder.step',
+            surfaceType: 'CYLINDRICAL_SURFACE',
+            expectedMinTriangles: 10, // Should have curved surface triangles
+        },
+        {
+            name: 'Sphere (radius=1)',
+            path: 'step-examples/c4-surfaces/sphere.step',
+            surfaceType: 'SPHERICAL_SURFACE',
+            expectedMinTriangles: 10,
+        },
+        {
+            name: 'Cone (semi-angle ~26.5 deg)',
+            path: 'step-examples/c4-surfaces/cone.step',
+            surfaceType: 'CONICAL_SURFACE',
+            expectedMinTriangles: 10,
+        },
+        {
+            name: 'Torus (major=2, minor=0.5)',
+            path: 'step-examples/c4-surfaces/torus.step',
+            surfaceType: 'TOROIDAL_SURFACE',
+            expectedMinTriangles: 20,
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            // Load STEP file
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            // Check that the surface type is in the file
+            if (!stepContent.includes(test.surfaceType)) {
+                logTest(test.name, false, `File missing ${test.surfaceType} entity`);
+                failed++;
+                continue;
+            }
+
+            // Parse in browser
+            const result = await page.evaluate(async (stepText) => {
+                return await window.testHarness.parseStep(stepText);
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            const triangleCount = result.mesh.triangleCount;
+
+            if (triangleCount >= test.expectedMinTriangles) {
+                logTest(test.name, true, `${result.mesh.vertexCount} vertices, ${triangleCount} triangles`);
+                passed++;
+            } else {
+                logTest(test.name, false, `expected >= ${test.expectedMinTriangles} triangles, got ${triangleCount}`);
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
+/**
  * Test Suite: Visual Hole Rendering with Screenshots
  */
 async function testVisualHoleRendering(page, browser) {
@@ -1619,6 +1703,7 @@ async function main() {
             testHoleTriangulation,
             testCurveSampling,
             testMultiFaceModels,
+            testCurvedSurfaces,
         ];
 
         for (const suite of suites) {

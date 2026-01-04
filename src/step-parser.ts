@@ -1,5 +1,11 @@
 import { earClipping } from "./ear-clipping";
 import { earClippingSingleDispatch } from "./ear-clipping-single-dispatch";
+import {
+  tessellateCylinder,
+  tessellateSphere,
+  tessellateCone,
+  tessellateTorus,
+} from "./surface-tessellation";
 
 // Minimal STEP → mesh parser for the square face example
 type Vec3 = [number, number, number];
@@ -1397,6 +1403,456 @@ interface StepModel {
 // --- Public API: parse STEP text into a Mesh (one face) ---
 
 /**
+ * Try to tessellate a curved surface (cylinder, sphere, cone, torus).
+ * Returns null if the face uses a planar surface.
+ */
+async function tryTessellateCurvedSurface(
+  model: StepModel,
+  face: AdvancedFace
+): Promise<{ vertices: Vec3[]; triangles: [number, number, number][] } | null> {
+  const surfaceId = face.surfaceId;
+
+  // Extract edge loop vertices from the face to determine UV bounds
+  const boundaryVertices = extractFaceBoundaryVertices(model, face);
+  if (boundaryVertices.length === 0) {
+    console.warn("[tryTessellateCurvedSurface] No boundary vertices found");
+    return null;
+  }
+
+  // Check for each curved surface type
+  const cylinder = model.cylindricalSurfaces.get(surfaceId);
+  if (cylinder) {
+    const placement = getPlacementData(model, cylinder.placementId);
+    const { uMin, uMax, vMin, vMax } = computeCylinderUVBounds(
+      boundaryVertices, placement
+    );
+    console.log(`[Cylinder] UV bounds: u=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], v=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+    const mesh = await tessellateCylinder(
+      {
+        type: "CYLINDRICAL_SURFACE",
+        placement,
+        radius: cylinder.radius,
+      },
+      uMin, uMax,
+      vMin, vMax,
+      16
+    );
+    return meshToVerticesAndTriangles(mesh);
+  }
+
+  const sphere = model.sphericalSurfaces.get(surfaceId);
+  if (sphere) {
+    const placement = getPlacementData(model, sphere.placementId);
+    const { uMin, uMax, vMin, vMax } = computeSphereUVBounds(
+      boundaryVertices, placement, sphere.radius
+    );
+    console.log(`[Sphere] UV bounds: u=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], v=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+    const mesh = await tessellateSphere(
+      {
+        type: "SPHERICAL_SURFACE",
+        placement,
+        radius: sphere.radius,
+      },
+      uMin, uMax,
+      vMin, vMax,
+      16, 8
+    );
+    return meshToVerticesAndTriangles(mesh);
+  }
+
+  const cone = model.conicalSurfaces.get(surfaceId);
+  if (cone) {
+    const placement = getPlacementData(model, cone.placementId);
+    const { uMin, uMax, vMin, vMax } = computeConeUVBounds(
+      boundaryVertices, placement, cone.semiAngle
+    );
+    console.log(`[Cone] UV bounds: u=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], v=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+    const mesh = await tessellateCone(
+      {
+        type: "CONICAL_SURFACE",
+        placement,
+        radius: cone.radius,
+        semiAngle: cone.semiAngle,
+      },
+      uMin, uMax,
+      vMin, vMax,
+      16
+    );
+    return meshToVerticesAndTriangles(mesh);
+  }
+
+  const torus = model.toroidalSurfaces.get(surfaceId);
+  if (torus) {
+    const placement = getPlacementData(model, torus.placementId);
+    const { uMin, uMax, vMin, vMax } = computeTorusUVBounds(
+      boundaryVertices, placement, torus.majorRadius, torus.minorRadius
+    );
+    console.log(`[Torus] UV bounds: u=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], v=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+    const mesh = await tessellateTorus(
+      {
+        type: "TOROIDAL_SURFACE",
+        placement,
+        majorRadius: torus.majorRadius,
+        minorRadius: torus.minorRadius,
+      },
+      uMin, uMax,
+      vMin, vMax,
+      24, 12
+    );
+    return meshToVerticesAndTriangles(mesh);
+  }
+
+  // Not a curved surface (probably a PLANE)
+  return null;
+}
+
+/**
+ * Extract all boundary vertices from a face's edge loops.
+ * For circular edges (full circles), samples points along the circle.
+ */
+function extractFaceBoundaryVertices(model: StepModel, face: AdvancedFace): Vec3[] {
+  const vertices: Vec3[] = [];
+
+  for (const boundId of face.boundIds) {
+    const bound = model.faceBounds.get(boundId);
+    if (!bound) continue;
+
+    const loop = model.edgeLoops.get(bound.loopId);
+    if (!loop) continue;
+
+    for (const orientedEdgeId of loop.orientedEdgeIds) {
+      const orientedEdge = model.orientedEdges.get(orientedEdgeId);
+      if (!orientedEdge) continue;
+
+      const edgeCurve = model.edgeCurves.get(orientedEdge.edgeElementId);
+      if (!edgeCurve) continue;
+
+      // Check if this is a circular edge (full circle when start=end)
+      const isFullCircle = edgeCurve.startVertexId === edgeCurve.endVertexId;
+
+      // Try to get curve geometry for circles
+      const circle = model.circles.get(edgeCurve.curveId);
+      if (circle) {
+        // Sample points around the circle (full or partial arc)
+        const circlePlacement = model.axis2Placements.get(circle.placementId);
+        if (circlePlacement) {
+          const center = model.points.get(circlePlacement.locationId)?.coords || [0,0,0];
+          let axis: Vec3 = [0, 0, 1];
+          let refDir: Vec3 = [1, 0, 0];
+
+          if (circlePlacement.axisId !== null) {
+            const dir = model.directions.get(circlePlacement.axisId);
+            if (dir) axis = dir.dir;
+          }
+          if (circlePlacement.refDirectionId !== null) {
+            const dir = model.directions.get(circlePlacement.refDirectionId);
+            if (dir) refDir = dir.dir;
+          }
+
+          const yDir = vec3Cross(axis, refDir);
+
+          if (isFullCircle) {
+            // Sample 8 points around the full circle
+            for (let i = 0; i < 8; i++) {
+              const angle = (i / 8) * Math.PI * 2;
+              const x = center[0] + circle.radius * (Math.cos(angle) * refDir[0] + Math.sin(angle) * yDir[0]);
+              const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
+              const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
+              vertices.push([x, y, z]);
+            }
+          } else {
+            // Partial arc - get start and end points, sample between them
+            const startVertex = model.vertices.get(edgeCurve.startVertexId);
+            const endVertex = model.vertices.get(edgeCurve.endVertexId);
+
+            if (startVertex && endVertex) {
+              const startPt = model.points.get(startVertex.pointId)?.coords;
+              const endPt = model.points.get(endVertex.pointId)?.coords;
+
+              if (startPt && endPt) {
+                // Compute angles for start and end points
+                const d1: Vec3 = [startPt[0] - center[0], startPt[1] - center[1], startPt[2] - center[2]];
+                const d2: Vec3 = [endPt[0] - center[0], endPt[1] - center[1], endPt[2] - center[2]];
+
+                const angle1 = Math.atan2(vec3Dot(d1, yDir), vec3Dot(d1, refDir));
+                let angle2 = Math.atan2(vec3Dot(d2, yDir), vec3Dot(d2, refDir));
+
+                // Ensure we go the right way around
+                if (angle2 < angle1) angle2 += Math.PI * 2;
+
+                // Sample 4 points along the arc
+                for (let i = 0; i <= 4; i++) {
+                  const t = i / 4;
+                  const angle = angle1 + t * (angle2 - angle1);
+                  const x = center[0] + circle.radius * (Math.cos(angle) * refDir[0] + Math.sin(angle) * yDir[0]);
+                  const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
+                  const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
+                  vertices.push([x, y, z]);
+                }
+              }
+            }
+          }
+          continue;
+        }
+      }
+
+      // Get start vertex
+      const startVertex = model.vertices.get(edgeCurve.startVertexId);
+      if (startVertex) {
+        const point = model.points.get(startVertex.pointId);
+        if (point) {
+          vertices.push(point.coords);
+        }
+      }
+
+      // Get end vertex (skip if same as start for non-circle edges)
+      if (!isFullCircle) {
+        const endVertex = model.vertices.get(edgeCurve.endVertexId);
+        if (endVertex) {
+          const point = model.points.get(endVertex.pointId);
+          if (point) {
+            vertices.push(point.coords);
+          }
+        }
+      }
+    }
+  }
+
+  return vertices;
+}
+
+/**
+ * Compute UV bounds for a cylinder from 3D boundary vertices
+ */
+function computeCylinderUVBounds(
+  vertices: Vec3[],
+  placement: { location: Vec3; axis: Vec3; refDirection: Vec3 }
+): { uMin: number; uMax: number; vMin: number; vMax: number } {
+  const { location, axis, refDirection } = placement;
+
+  // Compute Y direction (perpendicular to axis and refDirection)
+  const yDir = vec3Cross(axis, refDirection);
+
+  let uMin = Infinity, uMax = -Infinity;
+  let vMin = Infinity, vMax = -Infinity;
+
+  for (const p of vertices) {
+    // Vector from cylinder origin to point
+    const d: Vec3 = [p[0] - location[0], p[1] - location[1], p[2] - location[2]];
+
+    // v = projection onto axis (height)
+    const v = vec3Dot(d, axis);
+
+    // u = angle in the plane perpendicular to axis
+    const x = vec3Dot(d, refDirection);
+    const y = vec3Dot(d, yDir);
+    const u = Math.atan2(y, x);
+
+    uMin = Math.min(uMin, u);
+    uMax = Math.max(uMax, u);
+    vMin = Math.min(vMin, v);
+    vMax = Math.max(vMax, v);
+  }
+
+  // Handle full circle case (if angle span is close to 2π)
+  if (uMax - uMin > Math.PI * 1.9) {
+    uMin = 0;
+    uMax = Math.PI * 2;
+  }
+
+  return { uMin, uMax, vMin, vMax };
+}
+
+/**
+ * Compute UV bounds for a sphere from 3D boundary vertices
+ */
+function computeSphereUVBounds(
+  vertices: Vec3[],
+  placement: { location: Vec3; axis: Vec3; refDirection: Vec3 },
+  radius: number
+): { uMin: number; uMax: number; vMin: number; vMax: number } {
+  const { location, axis, refDirection } = placement;
+  const yDir = vec3Cross(axis, refDirection);
+
+  let uMin = Infinity, uMax = -Infinity;
+  let vMin = Infinity, vMax = -Infinity;
+
+  for (const p of vertices) {
+    const d: Vec3 = [p[0] - location[0], p[1] - location[1], p[2] - location[2]];
+    const len = Math.sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
+    if (len < 1e-10) continue;
+
+    // Normalize
+    const dn: Vec3 = [d[0]/len, d[1]/len, d[2]/len];
+
+    // v = latitude (angle from equator)
+    const sinLat = vec3Dot(dn, axis);
+    const v = Math.asin(Math.max(-1, Math.min(1, sinLat)));
+
+    // u = longitude
+    const x = vec3Dot(dn, refDirection);
+    const y = vec3Dot(dn, yDir);
+    const u = Math.atan2(y, x);
+
+    uMin = Math.min(uMin, u);
+    uMax = Math.max(uMax, u);
+    vMin = Math.min(vMin, v);
+    vMax = Math.max(vMax, v);
+  }
+
+  if (uMax - uMin > Math.PI * 1.9) {
+    uMin = 0;
+    uMax = Math.PI * 2;
+  }
+
+  return { uMin, uMax, vMin, vMax };
+}
+
+/**
+ * Compute UV bounds for a cone from 3D boundary vertices
+ */
+function computeConeUVBounds(
+  vertices: Vec3[],
+  placement: { location: Vec3; axis: Vec3; refDirection: Vec3 },
+  semiAngle: number
+): { uMin: number; uMax: number; vMin: number; vMax: number } {
+  const { location, axis, refDirection } = placement;
+  const yDir = vec3Cross(axis, refDirection);
+
+  let uMin = Infinity, uMax = -Infinity;
+  let vMin = Infinity, vMax = -Infinity;
+
+  for (const p of vertices) {
+    const d: Vec3 = [p[0] - location[0], p[1] - location[1], p[2] - location[2]];
+
+    // v = projection onto axis (height from apex)
+    const v = vec3Dot(d, axis);
+
+    // u = angle around axis
+    const x = vec3Dot(d, refDirection);
+    const y = vec3Dot(d, yDir);
+    const u = Math.atan2(y, x);
+
+    uMin = Math.min(uMin, u);
+    uMax = Math.max(uMax, u);
+    vMin = Math.min(vMin, v);
+    vMax = Math.max(vMax, v);
+  }
+
+  if (uMax - uMin > Math.PI * 1.9) {
+    uMin = 0;
+    uMax = Math.PI * 2;
+  }
+
+  return { uMin, uMax, vMin, vMax };
+}
+
+/**
+ * Compute UV bounds for a torus from 3D boundary vertices
+ */
+function computeTorusUVBounds(
+  vertices: Vec3[],
+  placement: { location: Vec3; axis: Vec3; refDirection: Vec3 },
+  majorRadius: number,
+  minorRadius: number
+): { uMin: number; uMax: number; vMin: number; vMax: number } {
+  const { location, axis, refDirection } = placement;
+  const yDir = vec3Cross(axis, refDirection);
+
+  let uMin = Infinity, uMax = -Infinity;
+  let vMin = Infinity, vMax = -Infinity;
+
+  for (const p of vertices) {
+    const d: Vec3 = [p[0] - location[0], p[1] - location[1], p[2] - location[2]];
+
+    // Project onto the XY plane (perpendicular to axis)
+    const projX = vec3Dot(d, refDirection);
+    const projY = vec3Dot(d, yDir);
+    const projZ = vec3Dot(d, axis);
+
+    // u = major angle (around the torus center)
+    const u = Math.atan2(projY, projX);
+
+    // Distance from axis in the XY plane
+    const distFromAxis = Math.sqrt(projX*projX + projY*projY);
+
+    // v = minor angle (around the tube)
+    const dx = distFromAxis - majorRadius;
+    const v = Math.atan2(projZ, dx);
+
+    uMin = Math.min(uMin, u);
+    uMax = Math.max(uMax, u);
+    vMin = Math.min(vMin, v);
+    vMax = Math.max(vMax, v);
+  }
+
+  if (uMax - uMin > Math.PI * 1.9) {
+    uMin = 0;
+    uMax = Math.PI * 2;
+  }
+  if (vMax - vMin > Math.PI * 1.9) {
+    vMin = 0;
+    vMax = Math.PI * 2;
+  }
+
+  return { uMin, uMax, vMin, vMax };
+}
+
+/**
+ * Helper to get placement data from model
+ */
+function getPlacementData(model: StepModel, placementId: number): {
+  location: Vec3;
+  axis: Vec3;
+  refDirection: Vec3;
+} {
+  const placement = model.axis2Placements.get(placementId);
+  if (!placement) {
+    return {
+      location: [0, 0, 0],
+      axis: [0, 0, 1],
+      refDirection: [1, 0, 0],
+    };
+  }
+
+  const location = model.points.get(placement.locationId)?.coords || [0, 0, 0];
+
+  let axis: Vec3 = [0, 0, 1];
+  if (placement.axisId !== null) {
+    const dir = model.directions.get(placement.axisId);
+    if (dir) axis = dir.dir;
+  }
+
+  let refDirection: Vec3 = [1, 0, 0];
+  if (placement.refDirectionId !== null) {
+    const dir = model.directions.get(placement.refDirectionId);
+    if (dir) refDirection = dir.dir;
+  }
+
+  return { location, axis, refDirection };
+}
+
+/**
+ * Convert TessellatedMesh to vertices and triangles format
+ */
+function meshToVerticesAndTriangles(mesh: {
+  positions: Float32Array;
+  indices: Uint32Array;
+}): { vertices: Vec3[]; triangles: [number, number, number][] } {
+  const vertices: Vec3[] = [];
+  for (let i = 0; i < mesh.positions.length; i += 3) {
+    vertices.push([mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]]);
+  }
+
+  const triangles: [number, number, number][] = [];
+  for (let i = 0; i < mesh.indices.length; i += 3) {
+    triangles.push([mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]]);
+  }
+
+  return { vertices, triangles };
+}
+
+/**
  * Process a single face and return its 3D vertices and triangle indices.
  * This is a helper for parseStepToMesh that handles one ADVANCED_FACE.
  */
@@ -1405,6 +1861,12 @@ async function processSingleFace(
   face: AdvancedFace,
   faceIndex: number
 ): Promise<{ vertices: Vec3[]; triangles: [number, number, number][] }> {
+  // C4: Check if this is a curved surface and tessellate accordingly
+  const curvedResult = await tryTessellateCurvedSurface(model, face);
+  if (curvedResult) {
+    return curvedResult;
+  }
+
   // C2.1: Extract outer boundary and holes using helper functions
   // C3: Use async version that supports curved edges (GPU curve sampling)
   const { outer, holes } = await extractFaceBoundsWithCurves(model, face);
