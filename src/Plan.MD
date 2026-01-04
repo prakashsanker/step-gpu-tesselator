@@ -139,18 +139,137 @@ Created `surface-tessellation.ts` with:
 You can render: cylinders, spheres, cones, tori (true CAD faces)
 Status: ✅ Done
 
-C5 — Mesh quality + refinement (CAD-grade tessellation)
-C5.1 Adaptive refinement by curvature / error metric
-C5.2 Stitch cracks between adjacent faces (consistent tessellation)
-C5.3 Normals + smoothing groups
+C5 — B-spline / NURBS surfaces (freeform geometry)
+C5.1 Parse B_SPLINE_SURFACE_WITH_KNOTS entity ✅
 
-You can render: high-quality shaded models without skinny triangles
+Implemented in `step-parser.ts:parseBSplineSurface()`:
+- Parse degrees (u, v)
+- Parse 2D control point array ((#1,#2,...),(#3,#4,...),...)
+- Parse knot multiplicities and knot values
+- Expand knots using multiplicities
+
+C5.2 Implement De Boor's algorithm for surface evaluation (u,v) → 3D ✅
+
+Implemented in `surfaces.ts`:
+- `deBoor1D()` - De Boor recursion for 1D B-spline curve
+- `evaluateBSplineSurface()` - Evaluate surface by: v-direction first, then u-direction
+- `normalBSplineSurface()` - Finite difference approximation for normals
+
+C5.3 Handle rational B-splines (weights for NURBS)
+- Interface supports weights, implementation pending
+
+C5.4 UV grid tessellation with adaptive refinement based on curvature ✅ (basic)
+
+Implemented in `surface-tessellation.ts:tessellateBSplineSurface()`:
+- Fixed 16x16 UV grid sampling
+- Adaptive refinement pending
+
+Integration in `step-parser.ts:tryTessellateCurvedSurface()`:
+- Resolve control point IDs to 3D coordinates
+- Build expanded knot vectors from multiplicities
+- Call tessellation pipeline
+
+You can render: freeform surfaces (car bodies, organic shapes, filleted edges)
+Status: ✅ Done (basic), NURBS weights pending
+
+C6 — Trimmed surfaces (bounded regions on surfaces)
+C6.1 Detect trimmed vs full surfaces using UV area ratio ✅
+
+Implemented area-based detection in `step-parser.ts:tryTessellateCurvedSurface()`:
+- Extract UV boundary polygon from edge loops
+- Compute polygon area using shoelace formula
+- Compare to expected full-surface area (2π × height for cylinders)
+- If ratio < 0.8, treat as trimmed surface
+
+C6.2 Extract trim loops as UV boundary polygon ✅
+
+Implemented `extractUVBoundaryLoop()` in `step-parser.ts`:
+- Walk edge loops maintaining proper edge orientation
+- Sample circular arcs with correct direction (short vs long path)
+- Convert 3D points to UV coordinates via `pointToCylinderUV()` etc.
+- Handle full circles (360°) vs partial arcs
+
+C6.3 Triangulate arbitrary UV regions ✅
+
+Implemented `tessellateTrimmedSurface()` in `surface-tessellation.ts`:
+- Takes UV boundary polygon (not rectangular bounds)
+- Adds interior Steiner points for mesh quality
+- Uses CDT for proper triangulation
+- Evaluates UV vertices to 3D surface points
+
+C6.4 Handle multiple trim loops (outer + inner holes on curved surfaces) ✅
+
+Implemented hole support for curved surfaces in `step-parser.ts` and `surface-tessellation.ts`:
+- `extractUVBoundaryLoopsSeparate()` - Extract outer and hole loops separately in UV space
+- `bridgeAllHolesUV()` - Bridge holes into outer boundary using ray-casting algorithm
+- `mergeHoleIntoOuterUV()` - Merge single hole into outer polygon
+- Modified `tessellateTrimmedSurface()` to accept optional `uvHoles` parameter
+- Process holes right-to-left (by rightmost U) to avoid bridge crossings
+
+You can render: partial cylinders with holes, curved surfaces with cutouts
+Status: ✅ Done
+
+C7 — Mesh quality + refinement (CAD-grade tessellation)
+C7.1 Adaptive refinement by curvature / chord error metric ✅
+
+Implemented in `mesh-quality.ts`:
+- `computeChordError()` - Measures distance from surface to linear approximation
+- `computeTriangleChordError()` - Finds worst edge in a triangle
+- `adaptiveRefineMesh()` - Iteratively subdivides triangles exceeding tolerance
+- `computeAdaptiveSampleCount()` - Curvature-based sample count estimation
+
+Implemented in `surface-tessellation.ts`:
+- `tessellateCylinderAdaptive()` - Cylinder with adaptive refinement
+- `tessellateSphereAdaptive()` - Sphere with adaptive refinement
+- `TessellationQualityOptions` - Configuration for chord tolerance, max depth, etc.
+
+C7.2 Stitch cracks between adjacent faces (T-junctions) ✅
+
+Implemented in `mesh-quality.ts`:
+- `buildEdgeMap()` - Maps edges to triangles using them
+- `findSharedEdges()` - Identifies matching edges between meshes
+- `weldVertices()` - Merges coincident vertices using spatial hashing
+- `SharedEdge` interface - Represents boundary edges for stitching
+
+C7.3 Smooth vertex normals based on face adjacency ✅
+
+Implemented in `mesh-quality.ts`:
+- `computeFaceNormals()` - Calculate per-triangle normals
+- `computeSmoothNormals()` - Angle-weighted vertex normal averaging
+- `computeSmoothNormalsWithCreases()` - Preserve sharp edges above crease angle
+
+Integrated in `step-parser.ts`:
+- `parseStepToMesh()` now computes and returns smooth normals
+- Added `normals?: Float32Array` to `Mesh` interface
+
+Integrated in `threejs-render.ts`:
+- Uses provided normals for rendering, falls back to computed normals
+
+C7.4 Control triangle aspect ratio (avoid slivers) ✅
+
+Implemented in `mesh-quality.ts`:
+- `computeTriangleAspectRatio()` - Measures triangle quality (longest edge / shortest altitude)
+- `isSliverTriangle()` - Detects triangles with bad aspect ratio
+- `filterDegenerateTriangles()` - Removes zero-area and sliver triangles
+- `combineMeshesWithNormals()` - Full pipeline: weld → filter → smooth normals
+
+You can render: high-quality shaded models without artifacts
+Status: ✅ Done
+
+C8 — Full solids / assemblies
+C8.1 Tessellate all faces in CLOSED_SHELL / MANIFOLD_SOLID_BREP
+C8.2 Weld coincident vertices, build unified index buffer
+C8.3 Parse STYLED_ITEM for colors/materials
+C8.4 Handle SHAPE_REPRESENTATION transforms for assemblies
+
+You can render: complete STEP parts and multi-part assemblies
 Status: ❌ Not started
 
-C6 — Full solids / assemblies
-C6.1 Tessellate all faces in a STEP body
-C6.2 Weld vertices, build index buffers per mesh
-C6.3 Materials / colors / transforms
+C9 — Performance + Large models
+C9.1 Streaming/progressive tessellation for large files
+C9.2 Level-of-detail (LOD) generation
+C9.3 GPU instancing for repeated geometry
+C9.4 Web Worker offloading for parsing
 
-You can render: complete STEP parts and assemblies
+You can render: large industrial models (1000+ faces) smoothly
 Status: ❌ Not started

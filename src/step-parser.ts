@@ -1,15 +1,50 @@
 import { earClipping } from "./ear-clipping";
 import { earClippingSingleDispatch } from "./ear-clipping-single-dispatch";
+import { earClippingOptimized } from "./ear-clipping-optimized";
+import { earClippingBatched, type BatchedPolygon } from "./ear-clipping-batched";
+import { triangulateHybrid } from "./triangulate-hybrid";
 import {
   tessellateCylinder,
   tessellateSphere,
   tessellateCone,
   tessellateTorus,
+  tessellateBSplineSurface,
+  tessellateTrimmedSurface,
 } from "./surface-tessellation";
+import { computeSmoothNormals } from "./mesh-quality";
 
 // Minimal STEP → mesh parser for the square face example
 type Vec3 = [number, number, number];
 type Vec2 = [number, number];
+
+// =============================================================================
+// Ear Clipping Algorithm Selection
+// =============================================================================
+
+// Use VITE_USE_OPTIMIZED_EAR_CLIPPING=true to enable optimized version
+const USE_OPTIMIZED = import.meta.env.VITE_USE_OPTIMIZED_EAR_CLIPPING === 'true';
+
+// Maximum vertices for optimized version (workgroup memory limit)
+const OPTIMIZED_MAX_VERTICES = 256;
+
+/**
+ * Select and run the appropriate ear clipping algorithm.
+ * - Optimized: Single GPU dispatch with parallel processing (≤256 vertices)
+ * - SingleDispatch: Single GPU dispatch, single-threaded (>256 vertices or fallback)
+ * - Original: Multiple GPU dispatches (when env var not set)
+ */
+async function runEarClipping(points: Vec3[]): Promise<number[][]> {
+  if (USE_OPTIMIZED) {
+    if (points.length <= OPTIMIZED_MAX_VERTICES) {
+      return await earClippingOptimized(points);
+    } else {
+      // Fall back to single-dispatch for large polygons
+      return await earClippingSingleDispatch(points);
+    }
+  }
+  // Default: original ear clipping
+  return await earClipping(points);
+}
 
 // =============================================================================
 // Vector Helpers
@@ -146,7 +181,6 @@ function computeFaceBasisFromStepFace(
 
         // Check for degenerate basis
         if (vec3Len(u) > EPSILON && vec3Len(v) > EPSILON && vec3Len(n) > EPSILON) {
-          console.log("[Projection] Using STEP plane basis");
           return { origin, u, v, n };
         }
       }
@@ -154,7 +188,6 @@ function computeFaceBasisFromStepFace(
   }
 
   // Fallback: compute basis from outer loop geometry
-  console.log("[Projection] Falling back to geometric basis from outer loop");
   return computeFaceBasisFromLoop(outerLoop);
 }
 
@@ -274,9 +307,7 @@ function normalizeWinding(projected: ProjectedLoops): NormalizedLoops {
     : outer2d;
 
   if (outerReversed) {
-    console.log(`[Winding] Outer loop reversed: area was ${outerArea.toFixed(4)} (CW → CCW)`);
   } else {
-    console.log(`[Winding] Outer loop OK: area is ${outerArea.toFixed(4)} (CCW)`);
   }
 
   // Step 2: Check each hole's winding
@@ -292,10 +323,8 @@ function normalizeWinding(projected: ProjectedLoops): NormalizedLoops {
 
     if (needsReverse) {
       normalizedHoles.push(hole.slice().reverse());
-      console.log(`[Winding] Hole ${i} reversed: area was ${holeArea.toFixed(4)} (CCW → CW)`);
     } else {
       normalizedHoles.push(hole);
-      console.log(`[Winding] Hole ${i} OK: area is ${holeArea.toFixed(4)} (CW)`);
     }
   }
 
@@ -873,7 +902,6 @@ function findBridgeTargetVertex(
   const edgeStart = outerPolygon[edgeStartIndex];
   const edgeEnd = outerPolygon[(edgeStartIndex + 1) % outerPolygon.length];
 
-  console.log(`[Bridging] Ray hit edge ${edgeStartIndex}→${(edgeStartIndex + 1) % outerPolygon.length} at x=${intersectionX.toFixed(3)}`);
 
   // STEP 3: Pick candidate M = rightmost endpoint of the hit edge
   let candidateIndex: number;
@@ -887,7 +915,6 @@ function findBridgeTargetVertex(
     candidateVertex = edgeEnd;
   }
 
-  console.log(`[Bridging] Candidate vertex M: index=${candidateIndex}, coords=(${candidateVertex[0].toFixed(3)}, ${candidateVertex[1].toFixed(3)})`);
 
   // STEP 4: Check if we can directly see M from P
   const skipIndices = new Set([candidateIndex]);
@@ -897,7 +924,6 @@ function findBridgeTargetVertex(
   skipIndices.add(prevIndex);
 
   if (isVisible(holeVertex, candidateVertex, outerPolygon, skipIndices)) {
-    console.log(`[Bridging] Direct visibility to M confirmed`);
     return candidateIndex;
   }
 
@@ -905,7 +931,6 @@ function findBridgeTargetVertex(
   // We need to find a "reflex" vertex inside triangle P-I-M
   // that IS visible from P
 
-  console.log(`[Bridging] M not directly visible, searching for alternate vertex`);
 
   const intersectionPoint: Vec2 = [intersectionX, holeVertex[1]];
 
@@ -943,7 +968,6 @@ function findBridgeTargetVertex(
     }
   }
 
-  console.log(`[Bridging] Selected vertex: index=${bestIndex}`);
   return bestIndex;
 }
 
@@ -990,13 +1014,11 @@ function mergeHoleIntoOuter(outer: Vec2[], hole: Vec2[]): Vec2[] {
   const holeRightmostIndex = findRightmostVertexIndex(hole);
   const holeVertex = hole[holeRightmostIndex];
 
-  console.log(`[Bridging] Hole rightmost vertex P: index=${holeRightmostIndex}, coords=(${holeVertex[0].toFixed(3)}, ${holeVertex[1].toFixed(3)})`);
 
   // STEP 2: Find the vertex on outer to connect to (this is M)
   const outerTargetIndex = findBridgeTargetVertex(holeVertex, outer);
   const outerVertex = outer[outerTargetIndex];
 
-  console.log(`[Bridging] Bridge target M: index=${outerTargetIndex}, coords=(${outerVertex[0].toFixed(3)}, ${outerVertex[1].toFixed(3)})`);
 
   // STEP 3: Build the merged polygon
   //
@@ -1056,13 +1078,10 @@ function mergeHoleIntoOuter(outer: Vec2[], hole: Vec2[]): Vec2[] {
     merged.push(outer[i]);
   }
 
-  console.log(`[Bridging] Merged: ${outerLen} outer + ${holeLen} hole → ${merged.length} total vertices`);
 
   // Debug: verify merged polygon is CCW
   const mergedArea = computeSignedArea2D(merged);
-  console.log(`[Bridging] Merged polygon signed area: ${mergedArea.toFixed(4)} (should be positive for CCW)`);
   if (mergedArea < 0) {
-    console.warn(`[Bridging] WARNING: Merged polygon is CW (negative area), reversing!`);
     merged.reverse();
   }
 
@@ -1099,7 +1118,6 @@ function bridgeAllHoles(outer: Vec2[], holes: Vec2[][]): Vec2[] {
     return outer;
   }
 
-  console.log(`[Bridging] Starting to bridge ${holes.length} hole(s)`);
 
   // STEP 1: Sort holes by rightmost X coordinate (descending = right to left)
   const holesWithRightmostX = holes.map((hole, index) => {
@@ -1110,19 +1128,16 @@ function bridgeAllHoles(outer: Vec2[], holes: Vec2[][]): Vec2[] {
 
   holesWithRightmostX.sort((a, b) => b.rightmostX - a.rightmostX);
 
-  console.log(`[Bridging] Processing order (right to left): ${holesWithRightmostX.map(h => `hole${h.index}(x=${h.rightmostX.toFixed(2)})`).join(', ')}`);
 
   // STEP 2: Merge each hole one by one
   let currentPolygon = outer;
 
   for (let i = 0; i < holesWithRightmostX.length; i++) {
     const { hole, index } = holesWithRightmostX[i];
-    console.log(`[Bridging] Processing hole ${i + 1}/${holes.length} (original index ${index})`);
 
     currentPolygon = mergeHoleIntoOuter(currentPolygon, hole);
   }
 
-  console.log(`[Bridging] Complete! Final polygon has ${currentPolygon.length} vertices`);
 
   return currentPolygon;
 }
@@ -1156,13 +1171,10 @@ function debugVerifyProjection(
   const planarityValid = maxZDeviation < 1e-6;
 
   if (!areaValid) {
-    console.warn(`[Projection] ${loopName}: signed area is ~0 (${signedArea.toExponential(2)}), polygon may be degenerate`);
   }
   if (!planarityValid) {
-    console.warn(`[Projection] ${loopName}: max Z deviation = ${maxZDeviation.toExponential(2)}, points may not be coplanar`);
   }
   if (areaValid && planarityValid) {
-    console.log(`[Projection] ${loopName}: OK (area=${signedArea.toFixed(4)}, maxZ=${maxZDeviation.toExponential(2)})`);
   }
 
   return { valid: areaValid && planarityValid, signedArea, maxZDeviation };
@@ -1171,6 +1183,7 @@ function debugVerifyProjection(
 export interface Mesh {
   positions: Float32Array;
   indices: Uint32Array;
+  normals?: Float32Array;     // Vertex normals for smooth shading (C7.3)
   // Timing information for benchmarking
   parseTime?: number;         // Time spent parsing STEP file (ms)
   triangulationTime?: number; // Time spent in GPU triangulation (ms)
@@ -1267,6 +1280,21 @@ interface ToroidalSurface {
   placementId: number;  // AXIS2_PLACEMENT_3D (center of torus)
   majorRadius: number;  // Distance from center to tube center
   minorRadius: number;  // Tube radius
+}
+
+/** B-spline surface with knots (C5) */
+interface BSplineSurface {
+  id: number;
+  uDegree: number;
+  vDegree: number;
+  controlPointIds: number[][];  // 2D array [v][u] of CARTESIAN_POINT refs
+  uKnotMultiplicities: number[];
+  vKnotMultiplicities: number[];
+  uKnots: number[];
+  vKnots: number[];
+  weights?: number[][];         // For rational B-splines (NURBS)
+  uClosed: boolean;
+  vClosed: boolean;
 }
 
 // =============================================================================
@@ -1388,6 +1416,8 @@ interface StepModel {
   sphericalSurfaces: Map<number, SphericalSurface>;
   conicalSurfaces: Map<number, ConicalSurface>;
   toroidalSurfaces: Map<number, ToroidalSurface>;
+  // C5: B-spline surfaces
+  bSplineSurfaces: Map<number, BSplineSurface>;
   // C3: Curve geometry
   vectors: Map<number, Vector>;
   lines: Map<number, Line>;
@@ -1415,7 +1445,6 @@ async function tryTessellateCurvedSurface(
   // Extract edge loop vertices from the face to determine UV bounds
   const boundaryVertices = extractFaceBoundaryVertices(model, face);
   if (boundaryVertices.length === 0) {
-    console.warn("[tryTessellateCurvedSurface] No boundary vertices found");
     return null;
   }
 
@@ -1423,10 +1452,100 @@ async function tryTessellateCurvedSurface(
   const cylinder = model.cylindricalSurfaces.get(surfaceId);
   if (cylinder) {
     const placement = getPlacementData(model, cylinder.placementId);
+
+    // C6: Try UV boundary polygon approach for proper trimmed surfaces
+    const uvBoundary = extractUVBoundaryLoop(
+      model, face,
+      (pt) => pointToCylinderUV(pt, placement),
+      8
+    );
+
+    if (uvBoundary.length >= 3) {
+      // Fix angle wrapping for continuous UV polygon
+      const fixedUV = fixUVAngleWrapping(uvBoundary);
+
+      // Check if this is a full cylinder (closed loop at same angular position)
+      // A full cylinder has edges that go all the way around (u changes by 2π)
+      // A half cylinder has edges that go partway (u stays within a range)
+
+      // Check if any single edge spans more than π (indicating a "going around" motion)
+      // For a half-cylinder, each arc edge spans ~π (half circle) but in opposite directions
+      // For a full cylinder, each arc edge spans ~2π (full circle)
+
+      // Alternative: check if the boundary's 3D vertices span the full angular range
+      // by looking at the original boundary vertices
+      const { uMin: boundsUMin, uMax: boundsUMax } = computeCylinderUVBounds(boundaryVertices, placement);
+
+      // Check the actual angular span from the original 3D points (not UV-wrapped)
+      // If the 3D points only cover ~180°, it's a half cylinder
+      const boundsSpan = boundsUMax - boundsUMin;
+
+      // Also compute signed area of UV polygon - if it's too small relative to bounds, something's wrong
+      let uvArea = 0;
+      for (let i = 0; i < fixedUV.length; i++) {
+        const j = (i + 1) % fixedUV.length;
+        uvArea += fixedUV[i][0] * fixedUV[j][1] - fixedUV[j][0] * fixedUV[i][1];
+      }
+      uvArea = Math.abs(uvArea) / 2;
+
+      // Expected area for full cylinder = 2π * height
+      // For half cylinder = π * height
+      let vMin = Infinity, vMax = -Infinity;
+      for (const [_u, v] of fixedUV) {
+        vMin = Math.min(vMin, v);
+        vMax = Math.max(vMax, v);
+      }
+      const height = vMax - vMin;
+      const expectedFullArea = Math.PI * 2 * height;
+      const areaRatio = uvArea / expectedFullArea;
+
+      // Use trimmed tessellation if area ratio suggests partial surface OR if there are holes
+      const isPartialSurface = areaRatio < 0.8;
+
+      // C6.4: Check for holes by extracting loops separately
+      const { outer: outerLoop, holes: holeLoops } = extractUVBoundaryLoopsSeparate(
+        model, face,
+        (pt) => pointToCylinderUV(pt, placement),
+        8
+      );
+
+      if (isPartialSurface || holeLoops.length > 0) {
+        // Use trimmed surface tessellation with actual UV boundary
+        console.log(`[Cylinder/Trimmed] Outer loop: ${outerLoop.length} points, holes: ${holeLoops.length}, area ratio=${areaRatio.toFixed(2)}`);
+
+        // Debug: print first few UV coordinates
+        if (outerLoop.length > 0) {
+          console.log(`[Cylinder/Trimmed] First 3 outer UV coords:`, outerLoop.slice(0, 3).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', '));
+          console.log(`[Cylinder/Trimmed] Last 3 outer UV coords:`, outerLoop.slice(-3).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', '));
+        }
+        if (holeLoops.length > 0 && holeLoops[0].length > 0) {
+          console.log(`[Cylinder/Trimmed] First 3 hole UV coords:`, holeLoops[0].slice(0, 3).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', '));
+        }
+
+        // Debug: also check what uvBoundary contains
+        console.log(`[Cylinder/Trimmed] uvBoundary length: ${uvBoundary.length}`);
+        if (uvBoundary.length > 0) {
+          console.log(`[Cylinder/Trimmed] uvBoundary first 3:`, uvBoundary.slice(0, 3).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', '));
+        }
+
+        const mesh = await tessellateTrimmedSurface(
+          {
+            type: "CYLINDRICAL_SURFACE",
+            placement,
+            radius: cylinder.radius,
+          },
+          outerLoop.length > 0 ? outerLoop : uvBoundary,  // Use outer loop or fall back to combined
+          16,  // Grid density for tessellation
+          holeLoops  // C6.4: Pass hole loops
+        );
+        return meshToVerticesAndTriangles(mesh);
+      }
+    }
+
+    // Fall back to grid tessellation for full cylinders
     const { uMin, uMax, vMin, vMax } = computeCylinderUVBounds(
       boundaryVertices, placement
     );
-    console.log(`[Cylinder] UV bounds: u=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], v=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
     const mesh = await tessellateCylinder(
       {
         type: "CYLINDRICAL_SURFACE",
@@ -1446,7 +1565,6 @@ async function tryTessellateCurvedSurface(
     const { uMin, uMax, vMin, vMax } = computeSphereUVBounds(
       boundaryVertices, placement, sphere.radius
     );
-    console.log(`[Sphere] UV bounds: u=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], v=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
     const mesh = await tessellateSphere(
       {
         type: "SPHERICAL_SURFACE",
@@ -1466,7 +1584,6 @@ async function tryTessellateCurvedSurface(
     const { uMin, uMax, vMin, vMax } = computeConeUVBounds(
       boundaryVertices, placement, cone.semiAngle
     );
-    console.log(`[Cone] UV bounds: u=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], v=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
     const mesh = await tessellateCone(
       {
         type: "CONICAL_SURFACE",
@@ -1487,7 +1604,6 @@ async function tryTessellateCurvedSurface(
     const { uMin, uMax, vMin, vMax } = computeTorusUVBounds(
       boundaryVertices, placement, torus.majorRadius, torus.minorRadius
     );
-    console.log(`[Torus] UV bounds: u=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], v=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
     const mesh = await tessellateTorus(
       {
         type: "TOROIDAL_SURFACE",
@@ -1498,6 +1614,56 @@ async function tryTessellateCurvedSurface(
       uMin, uMax,
       vMin, vMax,
       24, 12
+    );
+    return meshToVerticesAndTriangles(mesh);
+  }
+
+  // C5: Check for B-spline surface
+  const bspline = model.bSplineSurfaces.get(surfaceId);
+  if (bspline) {
+    // Resolve control point IDs to actual 3D coordinates
+    const controlPoints: Vec3[][] = [];
+    for (const row of bspline.controlPointIds) {
+      const cpRow: Vec3[] = [];
+      for (const cpId of row) {
+        const point = model.points.get(cpId);
+        if (!point) {
+          return null;
+        }
+        cpRow.push(point.coords);
+      }
+      controlPoints.push(cpRow);
+    }
+
+    // Build full knot vectors from multiplicities
+    const uKnots: number[] = [];
+    for (let i = 0; i < bspline.uKnots.length; i++) {
+      const multiplicity = bspline.uKnotMultiplicities[i] || 1;
+      for (let j = 0; j < multiplicity; j++) {
+        uKnots.push(bspline.uKnots[i]);
+      }
+    }
+
+    const vKnots: number[] = [];
+    for (let i = 0; i < bspline.vKnots.length; i++) {
+      const multiplicity = bspline.vKnotMultiplicities[i] || 1;
+      for (let j = 0; j < multiplicity; j++) {
+        vKnots.push(bspline.vKnots[i]);
+      }
+    }
+
+
+    const mesh = await tessellateBSplineSurface(
+      {
+        type: "B_SPLINE_SURFACE",
+        controlPoints,
+        uDegree: bspline.uDegree,
+        vDegree: bspline.vDegree,
+        uKnots,
+        vKnots,
+        weights: bspline.weights,
+      },
+      16, 16
     );
     return meshToVerticesAndTriangles(mesh);
   }
@@ -1622,6 +1788,459 @@ function extractFaceBoundaryVertices(model: StepModel, face: AdvancedFace): Vec3
 }
 
 /**
+ * C6: Convert a 3D point to UV coordinates on a cylindrical surface
+ */
+function pointToCylinderUV(
+  point: Vec3,
+  placement: { location: Vec3; axis: Vec3; refDirection: Vec3 }
+): Vec2 {
+  const { location, axis, refDirection } = placement;
+  const yDir = vec3Cross(axis, refDirection);
+
+  const d: Vec3 = [point[0] - location[0], point[1] - location[1], point[2] - location[2]];
+  const v = vec3Dot(d, axis);
+  const x = vec3Dot(d, refDirection);
+  const y = vec3Dot(d, yDir);
+  const u = Math.atan2(y, x);
+
+  return [u, v];
+}
+
+/**
+ * C6: Convert a 3D point to UV coordinates on a spherical surface
+ */
+function pointToSphereUV(
+  point: Vec3,
+  placement: { location: Vec3; axis: Vec3; refDirection: Vec3 }
+): Vec2 {
+  const { location, axis, refDirection } = placement;
+  const yDir = vec3Cross(axis, refDirection);
+
+  const d: Vec3 = [point[0] - location[0], point[1] - location[1], point[2] - location[2]];
+  const len = Math.sqrt(d[0]*d[0] + d[1]*d[1] + d[2]*d[2]);
+  if (len < 1e-10) return [0, 0];
+
+  const dn: Vec3 = [d[0]/len, d[1]/len, d[2]/len];
+  const sinLat = vec3Dot(dn, axis);
+  const v = Math.asin(Math.max(-1, Math.min(1, sinLat)));
+  const x = vec3Dot(dn, refDirection);
+  const y = vec3Dot(dn, yDir);
+  const u = Math.atan2(y, x);
+
+  return [u, v];
+}
+
+/**
+ * C6: Convert a 3D point to UV coordinates on a conical surface
+ */
+function pointToConeUV(
+  point: Vec3,
+  placement: { location: Vec3; axis: Vec3; refDirection: Vec3 },
+  _semiAngle: number
+): Vec2 {
+  const { location, axis, refDirection } = placement;
+  const yDir = vec3Cross(axis, refDirection);
+
+  const d: Vec3 = [point[0] - location[0], point[1] - location[1], point[2] - location[2]];
+  const v = vec3Dot(d, axis);
+  const x = vec3Dot(d, refDirection);
+  const y = vec3Dot(d, yDir);
+  const u = Math.atan2(y, x);
+
+  return [u, v];
+}
+
+/**
+ * C6: Convert a 3D point to UV coordinates on a toroidal surface
+ */
+function pointToTorusUV(
+  point: Vec3,
+  placement: { location: Vec3; axis: Vec3; refDirection: Vec3 },
+  majorRadius: number,
+  minorRadius: number
+): Vec2 {
+  const { location, axis, refDirection } = placement;
+  const yDir = vec3Cross(axis, refDirection);
+
+  const d: Vec3 = [point[0] - location[0], point[1] - location[1], point[2] - location[2]];
+
+  // Project onto the equatorial plane to find major angle
+  const dFlat: Vec3 = [
+    d[0] - vec3Dot(d, axis) * axis[0],
+    d[1] - vec3Dot(d, axis) * axis[1],
+    d[2] - vec3Dot(d, axis) * axis[2]
+  ];
+  const flatLen = Math.sqrt(dFlat[0]*dFlat[0] + dFlat[1]*dFlat[1] + dFlat[2]*dFlat[2]);
+
+  let u = 0;
+  if (flatLen > 1e-10) {
+    const xProj = vec3Dot(dFlat, refDirection) / flatLen;
+    const yProj = vec3Dot(dFlat, yDir) / flatLen;
+    u = Math.atan2(yProj, xProj);
+  }
+
+  // Find minor angle (angle within the tube cross-section)
+  const tubeCenterDist = flatLen - majorRadius;
+  const tubeCenterHeight = vec3Dot(d, axis);
+  const v = Math.atan2(tubeCenterHeight, tubeCenterDist);
+
+  return [u, v];
+}
+
+/**
+ * C6: Extract ordered UV boundary polygon from a face's edge loops
+ * This properly maintains edge order for trimmed surface triangulation
+ */
+function extractUVBoundaryLoop(
+  model: StepModel,
+  face: AdvancedFace,
+  pointToUV: (point: Vec3) => Vec2,
+  samplesPerEdge: number = 8
+): Vec2[] {
+  const uvPoints: Vec2[] = [];
+
+  for (const boundId of face.boundIds) {
+    const bound = model.faceBounds.get(boundId);
+    if (!bound) continue;
+
+    const loop = model.edgeLoops.get(bound.loopId);
+    if (!loop) continue;
+
+    for (const orientedEdgeId of loop.orientedEdgeIds) {
+      const orientedEdge = model.orientedEdges.get(orientedEdgeId);
+      if (!orientedEdge) continue;
+
+      const edgeCurve = model.edgeCurves.get(orientedEdge.edgeElementId);
+      if (!edgeCurve) continue;
+
+      const edgeOrientation = orientedEdge.orientation;
+
+      // Get edge endpoints
+      const startVertexId = edgeOrientation ? edgeCurve.startVertexId : edgeCurve.endVertexId;
+      const endVertexId = edgeOrientation ? edgeCurve.endVertexId : edgeCurve.startVertexId;
+
+      const startVertex = model.vertices.get(startVertexId);
+      const endVertex = model.vertices.get(endVertexId);
+      if (!startVertex || !endVertex) continue;
+
+      const startPt = model.points.get(startVertex.pointId)?.coords;
+      const endPt = model.points.get(endVertex.pointId)?.coords;
+      if (!startPt || !endPt) continue;
+
+      // Check if edge is a circle
+      const circle = model.circles.get(edgeCurve.curveId);
+      if (circle) {
+        // Check if this is a full circle (start and end are the same vertex)
+        const isFullCircle = edgeCurve.startVertexId === edgeCurve.endVertexId;
+
+        const circlePlacement = model.axis2Placements.get(circle.placementId);
+        if (circlePlacement) {
+          const center = model.points.get(circlePlacement.locationId)?.coords || [0, 0, 0];
+          let axis: Vec3 = [0, 0, 1];
+          let refDir: Vec3 = [1, 0, 0];
+
+          if (circlePlacement.axisId !== null) {
+            const dir = model.directions.get(circlePlacement.axisId);
+            if (dir) axis = dir.dir;
+          }
+          if (circlePlacement.refDirectionId !== null) {
+            const dir = model.directions.get(circlePlacement.refDirectionId);
+            if (dir) refDir = dir.dir;
+          }
+
+          const yDir = vec3Cross(axis, refDir);
+
+          // For full circles, sample around the entire circle
+          if (isFullCircle) {
+            for (let i = 0; i < samplesPerEdge; i++) {
+              const angle = (i / samplesPerEdge) * Math.PI * 2;
+              const x = center[0] + circle.radius * (Math.cos(angle) * refDir[0] + Math.sin(angle) * yDir[0]);
+              const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
+              const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
+              uvPoints.push(pointToUV([x, y, z]));
+            }
+            continue;
+          }
+
+          // Compute start and end angles for partial arcs
+          const d1: Vec3 = [startPt[0] - center[0], startPt[1] - center[1], startPt[2] - center[2]];
+          const d2: Vec3 = [endPt[0] - center[0], endPt[1] - center[1], endPt[2] - center[2]];
+
+          let angle1 = Math.atan2(vec3Dot(d1, yDir), vec3Dot(d1, refDir));
+          let angle2 = Math.atan2(vec3Dot(d2, yDir), vec3Dot(d2, refDir));
+
+          // Choose the shorter path around the circle
+          // Compute both possible angular distances
+          let ccwDist = angle2 - angle1;  // counterclockwise
+          if (ccwDist < 0) ccwDist += Math.PI * 2;
+          const cwDist = Math.PI * 2 - ccwDist;  // clockwise
+
+          // Take the shorter path, but prefer the one that stays in [0, π] range
+          // for typical half-surfaces
+          let angleSpan: number;
+          if (ccwDist < cwDist) {
+            // Counterclockwise is shorter
+            angleSpan = ccwDist;
+          } else if (cwDist < ccwDist) {
+            // Clockwise is shorter
+            angleSpan = -cwDist;
+          } else {
+            // Equal distance - prefer the path that keeps angles in a reasonable range
+            // Check midpoint of each path
+            const ccwMid = angle1 + ccwDist / 2;
+            const cwMid = angle1 - cwDist / 2;
+            // Prefer the path whose midpoint is in [0, π] (upper half)
+            const ccwMidNorm = ((ccwMid % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+            const cwMidNorm = ((cwMid % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+
+            if (cwMidNorm >= 0 && cwMidNorm <= Math.PI) {
+              angleSpan = -cwDist;  // Clockwise path is in upper half
+            } else if (ccwMidNorm >= 0 && ccwMidNorm <= Math.PI) {
+              angleSpan = ccwDist;  // Counterclockwise path is in upper half
+            } else {
+              // Default to clockwise when in doubt
+              angleSpan = -cwDist;
+            }
+          }
+
+          // Sample along arc
+          for (let i = 0; i < samplesPerEdge; i++) {
+            const t = i / samplesPerEdge;
+            const angle = angle1 + t * angleSpan;
+            const x = center[0] + circle.radius * (Math.cos(angle) * refDir[0] + Math.sin(angle) * yDir[0]);
+            const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
+            const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
+            uvPoints.push(pointToUV([x, y, z]));
+          }
+          continue;
+        }
+      }
+
+      // For lines and other curves, sample linearly
+      for (let i = 0; i < samplesPerEdge; i++) {
+        const t = i / samplesPerEdge;
+        const pt: Vec3 = [
+          startPt[0] + t * (endPt[0] - startPt[0]),
+          startPt[1] + t * (endPt[1] - startPt[1]),
+          startPt[2] + t * (endPt[2] - startPt[2])
+        ];
+        uvPoints.push(pointToUV(pt));
+      }
+    }
+  }
+
+  return uvPoints;
+}
+
+/**
+ * C6.4: Extract UV boundary loops separately for outer and holes.
+ * Returns the outer boundary and an array of hole boundaries.
+ */
+function extractUVBoundaryLoopsSeparate(
+  model: StepModel,
+  face: AdvancedFace,
+  pointToUV: (point: Vec3) => Vec2,
+  samplesPerEdge: number = 8
+): { outer: Vec2[]; holes: Vec2[][] } {
+  let outer: Vec2[] = [];
+  const holes: Vec2[][] = [];
+
+  for (const boundId of face.boundIds) {
+    const bound = model.faceBounds.get(boundId);
+    if (!bound) continue;
+
+    const loop = model.edgeLoops.get(bound.loopId);
+    if (!loop) continue;
+
+    const loopPoints: Vec2[] = [];
+
+    for (const orientedEdgeId of loop.orientedEdgeIds) {
+      const orientedEdge = model.orientedEdges.get(orientedEdgeId);
+      if (!orientedEdge) continue;
+
+      const edgeCurve = model.edgeCurves.get(orientedEdge.edgeElementId);
+      if (!edgeCurve) continue;
+
+      const edgeOrientation = orientedEdge.orientation;
+
+      // Get edge endpoints
+      const startVertexId = edgeOrientation ? edgeCurve.startVertexId : edgeCurve.endVertexId;
+      const endVertexId = edgeOrientation ? edgeCurve.endVertexId : edgeCurve.startVertexId;
+
+      const startVertex = model.vertices.get(startVertexId);
+      const endVertex = model.vertices.get(endVertexId);
+      if (!startVertex || !endVertex) continue;
+
+      const startPt = model.points.get(startVertex.pointId)?.coords;
+      const endPt = model.points.get(endVertex.pointId)?.coords;
+      if (!startPt || !endPt) continue;
+
+      // Check if edge is a circle
+      const circle = model.circles.get(edgeCurve.curveId);
+      if (circle) {
+        const isFullCircle = edgeCurve.startVertexId === edgeCurve.endVertexId;
+
+        const circlePlacement = model.axis2Placements.get(circle.placementId);
+        if (circlePlacement) {
+          const center = model.points.get(circlePlacement.locationId)?.coords || [0, 0, 0];
+          let axis: Vec3 = [0, 0, 1];
+          let refDir: Vec3 = [1, 0, 0];
+
+          if (circlePlacement.axisId !== null) {
+            const dir = model.directions.get(circlePlacement.axisId);
+            if (dir) axis = dir.dir;
+          }
+          if (circlePlacement.refDirectionId !== null) {
+            const dir = model.directions.get(circlePlacement.refDirectionId);
+            if (dir) refDir = dir.dir;
+          }
+
+          const yDir = vec3Cross(axis, refDir);
+
+          if (isFullCircle) {
+            for (let i = 0; i < samplesPerEdge; i++) {
+              const angle = (i / samplesPerEdge) * Math.PI * 2;
+              const x = center[0] + circle.radius * (Math.cos(angle) * refDir[0] + Math.sin(angle) * yDir[0]);
+              const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
+              const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
+              loopPoints.push(pointToUV([x, y, z]));
+            }
+            continue;
+          }
+
+          // Partial arc
+          const d1: Vec3 = [startPt[0] - center[0], startPt[1] - center[1], startPt[2] - center[2]];
+          const d2: Vec3 = [endPt[0] - center[0], endPt[1] - center[1], endPt[2] - center[2]];
+
+          let angle1 = Math.atan2(vec3Dot(d1, yDir), vec3Dot(d1, refDir));
+          let angle2 = Math.atan2(vec3Dot(d2, yDir), vec3Dot(d2, refDir));
+
+          let ccwDist = angle2 - angle1;
+          if (ccwDist < 0) ccwDist += Math.PI * 2;
+          const cwDist = Math.PI * 2 - ccwDist;
+
+          let angleSpan: number;
+          if (ccwDist < cwDist) {
+            angleSpan = ccwDist;
+          } else if (cwDist < ccwDist) {
+            angleSpan = -cwDist;
+          } else {
+            const cwMid = angle1 - cwDist / 2;
+            const cwMidNorm = ((cwMid % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2);
+            if (cwMidNorm >= 0 && cwMidNorm <= Math.PI) {
+              angleSpan = -cwDist;
+            } else {
+              angleSpan = ccwDist;
+            }
+          }
+
+          for (let i = 0; i < samplesPerEdge; i++) {
+            const t = i / samplesPerEdge;
+            const angle = angle1 + t * angleSpan;
+            const x = center[0] + circle.radius * (Math.cos(angle) * refDir[0] + Math.sin(angle) * yDir[0]);
+            const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
+            const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
+            loopPoints.push(pointToUV([x, y, z]));
+          }
+          continue;
+        }
+      }
+
+      // For lines and other curves, sample linearly
+      for (let i = 0; i < samplesPerEdge; i++) {
+        const t = i / samplesPerEdge;
+        const pt: Vec3 = [
+          startPt[0] + t * (endPt[0] - startPt[0]),
+          startPt[1] + t * (endPt[1] - startPt[1]),
+          startPt[2] + t * (endPt[2] - startPt[2])
+        ];
+        loopPoints.push(pointToUV(pt));
+      }
+    }
+
+    if (loopPoints.length >= 3) {
+      if (bound.isOuter) {
+        outer = loopPoints;
+      } else {
+        holes.push(loopPoints);
+      }
+    }
+  }
+
+  return { outer, holes };
+}
+
+/**
+ * C6: Fix UV angles to minimize the angular span
+ * This handles cases like half-cylinders where we want angles in [0, π] not [0, 2π]
+ */
+function fixUVAngleWrapping(uvPoints: Vec2[]): Vec2[] {
+  if (uvPoints.length < 2) return uvPoints;
+
+  // First, make angles continuous (no jumps > π)
+  const continuous: Vec2[] = [[...uvPoints[0]]];
+  let prevU = uvPoints[0][0];
+
+  for (let i = 1; i < uvPoints.length; i++) {
+    let u = uvPoints[i][0];
+    const v = uvPoints[i][1];
+
+    // If there's a large jump in u, adjust by ±2π
+    while (u - prevU > Math.PI) u -= Math.PI * 2;
+    while (prevU - u > Math.PI) u += Math.PI * 2;
+
+    continuous.push([u, v]);
+    prevU = u;
+  }
+
+  // Find the min/max of the continuous version
+  let uMin = Infinity, uMax = -Infinity;
+  for (const [u, _v] of continuous) {
+    uMin = Math.min(uMin, u);
+    uMax = Math.max(uMax, u);
+  }
+
+  // If the span is > π, try shifting everything by π to see if we get a smaller span
+  const currentSpan = uMax - uMin;
+  if (currentSpan > Math.PI) {
+    // Try shifting all angles by adding π (shift the range)
+    const shifted: Vec2[] = continuous.map(([u, v]) => {
+      let newU = u - Math.PI;
+      // Normalize to [-π, π]
+      while (newU < -Math.PI) newU += Math.PI * 2;
+      while (newU > Math.PI) newU -= Math.PI * 2;
+      return [newU, v] as Vec2;
+    });
+
+    // Make shifted version continuous too
+    const shiftedContinuous: Vec2[] = [[...shifted[0]]];
+    prevU = shifted[0][0];
+    for (let i = 1; i < shifted.length; i++) {
+      let u = shifted[i][0];
+      const v = shifted[i][1];
+      while (u - prevU > Math.PI) u -= Math.PI * 2;
+      while (prevU - u > Math.PI) u += Math.PI * 2;
+      shiftedContinuous.push([u, v]);
+      prevU = u;
+    }
+
+    // Check if shifted version has smaller span
+    let shiftedMin = Infinity, shiftedMax = -Infinity;
+    for (const [u, _v] of shiftedContinuous) {
+      shiftedMin = Math.min(shiftedMin, u);
+      shiftedMax = Math.max(shiftedMax, u);
+    }
+    const shiftedSpan = shiftedMax - shiftedMin;
+
+    if (shiftedSpan < currentSpan) {
+      return shiftedContinuous;
+    }
+  }
+
+  return continuous;
+}
+
+/**
  * Compute UV bounds for a cylinder from 3D boundary vertices
  */
 function computeCylinderUVBounds(
@@ -1654,8 +2273,8 @@ function computeCylinderUVBounds(
     vMax = Math.max(vMax, v);
   }
 
-  // Handle full circle case (if angle span is close to 2π)
-  if (uMax - uMin > Math.PI * 1.9) {
+  // Handle full circle case (if angle span covers most of 2π)
+  if (uMax - uMin > Math.PI * 1.6) {
     uMin = 0;
     uMax = Math.PI * 2;
   }
@@ -1700,7 +2319,27 @@ function computeSphereUVBounds(
     vMax = Math.max(vMax, v);
   }
 
+  // Handle wraparound case
   if (uMax - uMin > Math.PI * 1.9) {
+    uMin = 0;
+    uMax = Math.PI * 2;
+  }
+
+  const uRange = uMax - uMin;
+  const vRange = vMax - vMin;
+
+  // Check if latitude spans pole to pole (full sphere indicator)
+  const isFullLatitude = vRange > Math.PI * 0.9;
+
+  // If latitude is full (pole-to-pole) and longitude is ~π (half sphere from boundary),
+  // this is a complete sphere defined by two meridian arcs - expand to full 2π
+  if (isFullLatitude && uRange > Math.PI * 0.8 && uRange < Math.PI * 1.2) {
+    uMin = 0;
+    uMax = Math.PI * 2;
+  }
+
+  // Also handle degenerate case where all vertices are on same meridian
+  if (uRange < 0.1 && isFullLatitude) {
     uMin = 0;
     uMax = Math.PI * 2;
   }
@@ -1739,7 +2378,7 @@ function computeConeUVBounds(
     vMax = Math.max(vMax, v);
   }
 
-  if (uMax - uMin > Math.PI * 1.9) {
+  if (uMax - uMin > Math.PI * 1.6) {
     uMin = 0;
     uMax = Math.PI * 2;
   }
@@ -1786,11 +2425,15 @@ function computeTorusUVBounds(
     vMax = Math.max(vMax, v);
   }
 
-  if (uMax - uMin > Math.PI * 1.9) {
+  const uRange = uMax - uMin;
+  const vRange = vMax - vMin;
+
+  // Detect full torus: if range covers most of 2π (> 80%), expand to full range
+  if (uRange > Math.PI * 1.6) {
     uMin = 0;
     uMax = Math.PI * 2;
   }
-  if (vMax - vMin > Math.PI * 1.9) {
+  if (vRange > Math.PI * 1.6) {
     vMin = 0;
     vMax = Math.PI * 2;
   }
@@ -1888,7 +2531,6 @@ async function processSingleFace(
   // C2.4: Validate topology (holes inside outer, no intersections, simple loops)
   const topology = validateTopology(normalized.outer2d, normalized.holes2d);
   if (!topology.valid) {
-    console.warn(`[StepParser] Face ${faceIndex}: Topology validation failed`);
   }
 
   // C2.5: Bridge holes and triangulate
@@ -1960,14 +2602,14 @@ async function processSingleFace(
   const filtered2dAsVec3: Vec3[] = filteredMerged2d.map(p => [p[0], p[1], 0]);
 
   // Run ear clipping on the filtered (bridged) polygon
-  const triangles = await earClipping(filtered2dAsVec3);
+  const triangles = await runEarClipping(filtered2dAsVec3) as [number, number, number][];
 
   return { vertices, triangles };
 }
 
 export async function parseStepToMesh(stepText: string): Promise<Mesh> {
-  // This function is browser-safe: it expects the STEP file contents as a string,
-  // leaving file I/O (File API, fetch, Node fs, etc.) to the caller.
+  // Optimized version with Web Workers for CPU-intensive face processing
+  // and hybrid GPU/CPU triangulation. Supports planar and curved surfaces.
 
   const totalStart = performance.now();
   const parseStart = performance.now();
@@ -1978,28 +2620,93 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   }
 
   const faces = [...model.faces.values()];
-  console.log(`[StepParser] Processing ${faces.length} face(s)`);
+  const parseEnd = performance.now();
 
-  // C4: Process all faces and combine into single mesh
+  const triangulationStart = performance.now();
+
+  // Phase 1: Identify curved vs planar faces and extract bounds (main thread - needs model)
+  interface CurvedFaceData {
+    curvedResult: { vertices: Vec3[]; triangles: [number, number, number][] };
+  }
+
+  const curvedFaces: CurvedFaceData[] = [];
+  const planarFaceData: FaceData[] = [];
+
+  // Process each face to identify type and extract bounds
+  await Promise.all(faces.map(async (face, faceIndex) => {
+    try {
+      // Check for curved surfaces first (needs model access)
+      const curvedResult = await tryTessellateCurvedSurface(model, face);
+      if (curvedResult) {
+        curvedFaces.push({ curvedResult });
+        return;
+      }
+
+      // Planar face - extract bounds (needs model access)
+      const bounds = await extractFaceBoundsWithCurves(model, face);
+      const { outer, holes } = bounds;
+
+      // Compute basis (needs model access)
+      const basis = computeFaceBasisFromStepFace(model, face, outer);
+
+      // Queue for worker processing
+      planarFaceData.push({
+        faceIndex,
+        outer,
+        holes,
+        basis,
+      });
+    } catch {
+      // Skip failed faces
+    }
+  }));
+
+  // Phase 2: Process planar faces using Web Workers (CPU-intensive work)
+  // Workers handle: projection, winding normalization, hole bridging, duplicate filtering
+  const processedFaces = await processFacesParallel(planarFaceData);
+
+  // Filter successful results
+  const validPlanarFaces = processedFaces.filter(f => f.success && f.polygon2d && f.vertices3d);
+
+  // Phase 3: Triangulate planar polygons using hybrid GPU/CPU approach
+  const allPolygons: Vec2[][] = validPlanarFaces.map(f => f.polygon2d!);
+  const hybridResult = await triangulateHybrid(allPolygons);
+
+  // Map triangulation results back
+  const planarTriangles: Map<number, number[][]> = new Map();
+  for (let i = 0; i < validPlanarFaces.length; i++) {
+    planarTriangles.set(i, hybridResult.triangles[i]);
+  }
+
+  // Phase 4: Assemble final mesh
   const allVertices: Vec3[] = [];
   const allIndices: number[] = [];
   let vertexOffset = 0;
 
-  const parseEnd = performance.now();
-  const triangulationStart = performance.now();
+  // Add curved faces (already have triangles from surface tessellation)
+  for (const face of curvedFaces) {
+    for (const v of face.curvedResult.vertices) {
+      allVertices.push(v);
+    }
+    for (const tri of face.curvedResult.triangles) {
+      allIndices.push(
+        tri[0] + vertexOffset,
+        tri[1] + vertexOffset,
+        tri[2] + vertexOffset
+      );
+    }
+    vertexOffset += face.curvedResult.vertices.length;
+  }
 
-  for (let faceIndex = 0; faceIndex < faces.length; faceIndex++) {
-    const face = faces[faceIndex];
+  // Add planar faces (triangulated by hybrid approach)
+  for (let i = 0; i < validPlanarFaces.length; i++) {
+    const face = validPlanarFaces[i];
+    const triangles = planarTriangles.get(i);
 
-    try {
-      const { vertices, triangles } = await processSingleFace(model, face, faceIndex);
-
-      // Add vertices
-      for (const v of vertices) {
+    if (triangles && triangles.length > 0) {
+      for (const v of face.vertices3d!) {
         allVertices.push(v);
       }
-
-      // Add indices with offset
       for (const tri of triangles) {
         allIndices.push(
           tri[0] + vertexOffset,
@@ -2007,12 +2714,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
           tri[2] + vertexOffset
         );
       }
-
-      vertexOffset += vertices.length;
-
-      console.log(`[StepParser] Face ${faceIndex}: ${vertices.length} vertices, ${triangles.length} triangles`);
-    } catch (e) {
-      console.warn(`[StepParser] Failed to process face ${faceIndex}: ${e}`);
+      vertexOffset += face.vertices3d!.length;
     }
   }
 
@@ -2028,6 +2730,19 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
   const indices = new Uint32Array(allIndices);
 
+  // C7.3: Compute smooth vertex normals
+  const trianglesForNormals: [number, number, number][] = [];
+  for (let i = 0; i < allIndices.length; i += 3) {
+    trianglesForNormals.push([allIndices[i], allIndices[i + 1], allIndices[i + 2]]);
+  }
+  const smoothNormals = computeSmoothNormals(allVertices, trianglesForNormals);
+  const normals = new Float32Array(smoothNormals.length * 3);
+  smoothNormals.forEach((n, i) => {
+    normals[i * 3 + 0] = n[0];
+    normals[i * 3 + 1] = n[1];
+    normals[i * 3 + 2] = n[2];
+  });
+
   const totalEnd = performance.now();
 
   // Calculate timing
@@ -2035,11 +2750,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   const triangulationTime = triangulationEnd - triangulationStart;
   const totalTime = totalEnd - totalStart;
 
-  const triangleCount = allIndices.length / 3;
-  console.log(`[StepParser] Final mesh: ${allVertices.length} vertices, ${triangleCount} triangles from ${faces.length} faces`);
-  console.log(`[StepParser] Timing: parse=${parseTime.toFixed(2)}ms, triangulation=${triangulationTime.toFixed(2)}ms, total=${totalTime.toFixed(2)}ms`);
-
-  return { positions, indices, parseTime, triangulationTime, totalTime };
+  return { positions, indices, normals, parseTime, triangulationTime, totalTime };
 }
 
 /**
@@ -2069,7 +2780,6 @@ export async function parseStepToMeshSingleDispatch(stepText: string): Promise<M
 
   const topology = validateTopology(normalized.outer2d, normalized.holes2d);
   if (!topology.valid) {
-    console.warn("[StepParser] Topology validation failed");
   }
 
   const mergedPolygon2d = bridgeAllHoles(normalized.outer2d, normalized.holes2d);
@@ -2161,6 +2871,169 @@ export async function parseStepToMeshSingleDispatch(stepText: string): Promise<M
   const totalTime = totalEnd - totalStart;
 
   return { positions, indices, parseTime, triangulationTime, totalTime };
+}
+
+/**
+ * Parse STEP file using optimized GPU ear clipping.
+ * This version uses parallel processing within a single GPU workgroup.
+ * Limited to polygons with ≤256 vertices; falls back to single-dispatch for larger ones.
+ */
+export async function parseStepToMeshOptimized(stepText: string): Promise<Mesh> {
+  const totalStart = performance.now();
+  const parseStart = performance.now();
+
+  const model = parseStep(stepText);
+  if (model.faces.size === 0) {
+    throw new Error("No ADVANCED_FACE found in STEP file.");
+  }
+
+  const faces = [...model.faces.values()];
+
+  const allVertices: Vec3[] = [];
+  const allIndices: number[] = [];
+  let vertexOffset = 0;
+
+  const parseEnd = performance.now();
+  const triangulationStart = performance.now();
+
+  for (let faceIndex = 0; faceIndex < faces.length; faceIndex++) {
+    const face = faces[faceIndex];
+
+    try {
+      // Use optimized ear clipping algorithm
+      const { vertices, triangles } = await processSingleFaceOptimized(model, face, faceIndex);
+
+      for (const v of vertices) {
+        allVertices.push(v);
+      }
+
+      for (const tri of triangles) {
+        allIndices.push(
+          tri[0] + vertexOffset,
+          tri[1] + vertexOffset,
+          tri[2] + vertexOffset
+        );
+      }
+
+      vertexOffset += vertices.length;
+    } catch (e) {
+    }
+  }
+
+  const triangulationEnd = performance.now();
+
+  const positions = new Float32Array(allVertices.length * 3);
+  allVertices.forEach((p, i) => {
+    positions[i * 3 + 0] = p[0];
+    positions[i * 3 + 1] = p[1];
+    positions[i * 3 + 2] = p[2];
+  });
+
+  const indices = new Uint32Array(allIndices);
+  const totalEnd = performance.now();
+
+  const parseTime = parseEnd - parseStart;
+  const triangulationTime = triangulationEnd - triangulationStart;
+  const totalTime = totalEnd - totalStart;
+
+  const triangleCount = allIndices.length / 3;
+
+  return { positions, indices, parseTime, triangulationTime, totalTime };
+}
+
+/**
+ * Process a single face using optimized ear clipping.
+ */
+async function processSingleFaceOptimized(
+  model: StepModel,
+  face: AdvancedFace,
+  faceIndex: number
+): Promise<{ vertices: Vec3[]; triangles: number[][] }> {
+  const { outer, holes } = extractFaceBounds(model, face);
+  const basis = computeFaceBasisFromStepFace(model, face, outer);
+  const { outer2d, holes2d } = projectFaceLoopsTo2D({ outer, holes }, basis);
+  const normalized = normalizeWinding({ outer2d, holes2d });
+  const oriented3d = applyWindingTo3D(
+    { outer, holes },
+    normalized.outerReversed,
+    normalized.holesReversed
+  );
+
+  const topology = validateTopology(normalized.outer2d, normalized.holes2d);
+  if (!topology.valid) {
+  }
+
+  const mergedPolygon2d = bridgeAllHoles(normalized.outer2d, normalized.holes2d);
+
+  // Create lookup maps
+  const outer2dTo3d = new Map<string, Vec3>();
+  for (let i = 0; i < normalized.outer2d.length; i++) {
+    const key = `${normalized.outer2d[i][0].toFixed(9)},${normalized.outer2d[i][1].toFixed(9)}`;
+    outer2dTo3d.set(key, oriented3d.outer[i]);
+  }
+
+  const holes2dTo3d: Map<string, Vec3>[] = [];
+  for (let h = 0; h < normalized.holes2d.length; h++) {
+    const holeMap = new Map<string, Vec3>();
+    for (let i = 0; i < normalized.holes2d[h].length; i++) {
+      const key = `${normalized.holes2d[h][i][0].toFixed(9)},${normalized.holes2d[h][i][1].toFixed(9)}`;
+      holeMap.set(key, oriented3d.holes[h][i]);
+    }
+    holes2dTo3d.push(holeMap);
+  }
+
+  // Filter duplicates
+  const filteredMerged2d: Vec2[] = [];
+  for (let i = 0; i < mergedPolygon2d.length; i++) {
+    const curr = mergedPolygon2d[i];
+    const prev = filteredMerged2d.length > 0
+      ? filteredMerged2d[filteredMerged2d.length - 1]
+      : mergedPolygon2d[mergedPolygon2d.length - 1];
+    const dx = curr[0] - prev[0];
+    const dy = curr[1] - prev[1];
+    if (dx * dx + dy * dy > 1e-12) {
+      filteredMerged2d.push(curr);
+    }
+  }
+
+  if (filteredMerged2d.length > 1) {
+    const first = filteredMerged2d[0];
+    const last = filteredMerged2d[filteredMerged2d.length - 1];
+    const dx = first[0] - last[0];
+    const dy = first[1] - last[1];
+    if (dx * dx + dy * dy < 1e-12) {
+      filteredMerged2d.pop();
+    }
+  }
+
+  // Build 3D positions
+  const vertices: Vec3[] = [];
+  for (const pt2d of filteredMerged2d) {
+    const key = `${pt2d[0].toFixed(9)},${pt2d[1].toFixed(9)}`;
+    let pt3d = outer2dTo3d.get(key);
+    if (!pt3d) {
+      for (const holeMap of holes2dTo3d) {
+        pt3d = holeMap.get(key);
+        if (pt3d) break;
+      }
+    }
+    if (!pt3d) {
+      pt3d = [pt2d[0], pt2d[1], 0];
+    }
+    vertices.push(pt3d);
+  }
+
+  const filtered2dAsVec3: Vec3[] = filteredMerged2d.map(p => [p[0], p[1], 0]);
+
+  // Use optimized ear clipping (falls back to single-dispatch for large polygons)
+  let triangles: number[][];
+  if (filtered2dAsVec3.length <= OPTIMIZED_MAX_VERTICES) {
+    triangles = await earClippingOptimized(filtered2dAsVec3);
+  } else {
+    triangles = await earClippingSingleDispatch(filtered2dAsVec3);
+  }
+
+  return { vertices, triangles };
 }
 
 /**
@@ -2414,7 +3287,6 @@ async function extractLoopPointsWithCurves(
 
     // Resolve the curve geometry
     const curve = resolveCurve(model, edgeCurve.curveId);
-    console.log(`[extractLoopPointsWithCurves] Edge curve #${edgeCurve.curveId} resolved to:`, curve?.type || 'null');
 
     edgeInfos.push({
       startPoint: startPoint.coords,
@@ -2444,9 +3316,7 @@ async function extractLoopPointsWithCurves(
 
   // Sample curves on GPU (if any)
   let sampledCurves: Vec3[][] = [];
-  console.log(`[extractLoopPointsWithCurves] Found ${curvesToSample.length} curves to sample`);
   if (curvesToSample.length > 0) {
-    console.log('[extractLoopPointsWithCurves] Curves:', curvesToSample.map(c => c.type));
     // Dynamic import to avoid circular dependency
     const { sampleCurvesGPU } = await import('./curve-sampling');
     sampledCurves = await sampleCurvesGPU(
@@ -2456,14 +3326,9 @@ async function extractLoopPointsWithCurves(
       curveReversed,
       options
     );
-    console.log('[extractLoopPointsWithCurves] Sampled points per curve:', sampledCurves.map(s => s.length));
     // Debug: show first few sampled points with actual values
     for (let i = 0; i < sampledCurves.length; i++) {
       const samples = sampledCurves[i];
-      console.log(`[extractLoopPointsWithCurves] Curve ${i} sample 0:`, JSON.stringify(samples[0]));
-      console.log(`[extractLoopPointsWithCurves] Curve ${i} sample 1:`, JSON.stringify(samples[1]));
-      console.log(`[extractLoopPointsWithCurves] Curve ${i} sample mid:`, JSON.stringify(samples[Math.floor(samples.length/2)]));
-      console.log(`[extractLoopPointsWithCurves] Curve ${i} sample last:`, JSON.stringify(samples[samples.length-1]));
     }
   }
 
@@ -2488,12 +3353,6 @@ async function extractLoopPointsWithCurves(
     }
   }
 
-  console.log(`[extractLoopPointsWithCurves] Boundary points before closing: ${boundaryPoints.length}`);
-  console.log('[extractLoopPointsWithCurves] Boundary pt 0:', JSON.stringify(boundaryPoints[0]));
-  console.log('[extractLoopPointsWithCurves] Boundary pt 1:', JSON.stringify(boundaryPoints[1]));
-  console.log('[extractLoopPointsWithCurves] Boundary pt 2:', JSON.stringify(boundaryPoints[2]));
-  console.log('[extractLoopPointsWithCurves] Boundary pt 3:', JSON.stringify(boundaryPoints[3]));
-  console.log('[extractLoopPointsWithCurves] Boundary pt 4:', JSON.stringify(boundaryPoints[4]));
 
   // Close the loop explicitly if needed
   const first = boundaryPoints[0];
@@ -2504,7 +3363,6 @@ async function extractLoopPointsWithCurves(
 
   // Return unique points (without the closing duplicate)
   const result = boundaryPoints.slice(0, boundaryPoints.length - 1);
-  console.log(`[extractLoopPointsWithCurves] Returning ${result.length} points`);
   return result;
 }
 
@@ -2689,6 +3547,8 @@ function parseStep(stepText: string): StepModel {
     sphericalSurfaces: new Map(),
     conicalSurfaces: new Map(),
     toroidalSurfaces: new Map(),
+    // C5: B-spline surfaces
+    bSplineSurfaces: new Map(),
     // C3: Curve geometry
     vectors: new Map(),
     lines: new Map(),
@@ -2768,6 +3628,10 @@ function parseStep(stepText: string): StepModel {
         break;
       case "TOROIDAL_SURFACE":
         parseToroidalSurface(id, args, model);
+        break;
+      // C5: B-spline surfaces
+      case "B_SPLINE_SURFACE_WITH_KNOTS":
+        parseBSplineSurface(id, args, model);
         break;
       // C3: Curve geometry entities
       case "VECTOR":
@@ -3021,6 +3885,105 @@ function parseToroidalSurface(id: number, args: string, model: StepModel) {
 }
 
 // =============================================================================
+// C5: B-Spline Surface Parser
+// =============================================================================
+
+function parseBSplineSurface(id: number, args: string, model: StepModel) {
+  // B_SPLINE_SURFACE_WITH_KNOTS('name', u_degree, v_degree,
+  //   control_points_list,  // 2D array: ((#p1,#p2,...),(#p3,#p4,...),...)
+  //   surface_form, u_closed, v_closed, self_intersect,
+  //   u_multiplicities, v_multiplicities,
+  //   u_knots, v_knots,
+  //   knot_spec)
+
+  // Parse degrees
+  const degreeMatch = args.match(/'[^']*'\s*,\s*(\d+)\s*,\s*(\d+)\s*,/);
+  if (!degreeMatch) {
+    return;
+  }
+  const uDegree = parseInt(degreeMatch[1], 10);
+  const vDegree = parseInt(degreeMatch[2], 10);
+
+  // Parse 2D control points array: ((#1,#2,#3),(#4,#5,#6),...)
+  // Use a regex that matches nested parentheses
+  const cpArrayMatch = args.match(/\(\s*\([^)]+\)(?:\s*,\s*\([^)]+\))*\s*\)/);
+  if (!cpArrayMatch) {
+    return;
+  }
+
+  // Extract the 2D array content
+  const cpArrayStr = cpArrayMatch[0];
+  const controlPointIds: number[][] = [];
+
+  // Match each row: (#1,#2,#3,#4)
+  const rowRegex = /\(\s*(#[\d\s,#]+)\s*\)/g;
+  let rowMatch;
+  while ((rowMatch = rowRegex.exec(cpArrayStr)) !== null) {
+    const rowStr = rowMatch[1];
+    const pointIds: number[] = [];
+    const pointRegex = /#(\d+)/g;
+    let pointMatch;
+    while ((pointMatch = pointRegex.exec(rowStr)) !== null) {
+      pointIds.push(parseInt(pointMatch[1], 10));
+    }
+    if (pointIds.length > 0) {
+      controlPointIds.push(pointIds);
+    }
+  }
+
+  if (controlPointIds.length === 0) {
+    return;
+  }
+
+  // Parse logical flags: .F. or .T.
+  const flagsMatch = args.match(/\.\w+\.\s*,\s*\.([TF])\.\s*,\s*\.([TF])\.\s*,\s*\.([TF])\./);
+  const uClosed = flagsMatch ? flagsMatch[1] === 'T' : false;
+  const vClosed = flagsMatch ? flagsMatch[2] === 'T' : false;
+
+  // Parse multiplicities and knots from after the control points
+  // Structure: ...control_points, surface_form, u_closed, v_closed, self_intersect,
+  //            u_mults, v_mults, u_knots, v_knots, knot_spec)
+  const afterCp = args.substring(args.indexOf(cpArrayStr) + cpArrayStr.length);
+
+  // Find all parenthesized number lists
+  const allLists: { nums: number[], isFloat: boolean }[] = [];
+  const listRegex = /\(\s*([-0-9.Ee+\s,]+)\s*\)/g;
+  let listMatch;
+  while ((listMatch = listRegex.exec(afterCp)) !== null) {
+    const content = listMatch[1];
+    const nums = content.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+    if (nums.length > 0) {
+      // Check if it contains decimal points (float list) or all integers
+      const isFloat = content.includes('.');
+      allLists.push({ nums, isFloat });
+    }
+  }
+
+  // Separate into integer lists (multiplicities) and float lists (knots)
+  const intLists = allLists.filter(l => !l.isFloat).map(l => l.nums.map(n => Math.round(n)));
+  const realLists = allLists.filter(l => l.isFloat).map(l => l.nums);
+
+  // Assign parsed values (best effort)
+  const uKnotMultiplicities = intLists[0] || [];
+  const vKnotMultiplicities = intLists[1] || [];
+  const uKnots = realLists[0] || [];
+  const vKnots = realLists[1] || [];
+
+  model.bSplineSurfaces.set(id, {
+    id,
+    uDegree,
+    vDegree,
+    controlPointIds,
+    uKnotMultiplicities,
+    vKnotMultiplicities,
+    uKnots,
+    vKnots,
+    uClosed,
+    vClosed,
+  });
+}
+
+// =============================================================================
 // C3: Curve Entity Parsers
 // =============================================================================
 
@@ -3192,17 +4155,14 @@ function resolveCurve(model: StepModel, curveId: number): ResolvedCurve | null {
   if (line) {
     const originPoint = model.points.get(line.pointId);
     if (!originPoint) {
-      console.warn(`LINE #${curveId} origin point not found`);
       return null;
     }
     const vector = model.vectors.get(line.vectorId);
     if (!vector) {
-      console.warn(`LINE #${curveId} vector not found`);
       return null;
     }
     const dir = model.directions.get(vector.directionId);
     if (!dir) {
-      console.warn(`LINE #${curveId} direction not found`);
       return null;
     }
     return {
@@ -3247,7 +4207,6 @@ function resolveCurve(model: StepModel, curveId: number): ResolvedCurve | null {
     for (const cpId of bspline.controlPointIds) {
       const cp = model.points.get(cpId);
       if (!cp) {
-        console.warn(`B_SPLINE #${curveId} control point #${cpId} not found`);
         return null;
       }
       controlPoints.push(cp.coords);
@@ -3279,4 +4238,238 @@ function resolveCurve(model: StepModel, curveId: number): ResolvedCurve | null {
 /** Export curve resolution functions and types for use in curve-sampling.ts */
 export { resolveCurve, resolveAxis2Placement };
 export type { Vec3, Vec2, ResolvedCurve, ResolvedCircle, ResolvedEllipse, ResolvedBSpline, ResolvedLine };
+
+/** Export internal functions for profiling and testing */
+export {
+    parseStep,
+    extractFaceBounds,
+    extractFaceBoundsWithCurves,
+    computeFaceBasisFromStepFace,
+    projectFaceLoopsTo2D,
+    normalizeWinding,
+    applyWindingTo3D,
+    validateTopology,
+    bridgeAllHoles,
+    tryTessellateCurvedSurface,
+};
+
+// =============================================================================
+// Batched Processing (Most Efficient)
+// =============================================================================
+
+interface PreparedFace {
+  polygon2d: Vec2[];
+  vertices3d: Vec3[];
+  isCurved: boolean;
+  curvedResult?: { vertices: Vec3[]; triangles: [number, number, number][] };
+}
+
+/**
+ * Prepare a face for batched triangulation (extract polygon without triangulating).
+ */
+async function prepareFaceForBatch(
+  model: StepModel,
+  face: AdvancedFace,
+  faceIndex: number
+): Promise<PreparedFace> {
+  // Check for curved surfaces first
+  const curvedResult = await tryTessellateCurvedSurface(model, face);
+  if (curvedResult) {
+    return {
+      polygon2d: [],
+      vertices3d: [],
+      isCurved: true,
+      curvedResult,
+    };
+  }
+
+  // Extract and process face bounds
+  const { outer, holes } = await extractFaceBoundsWithCurves(model, face);
+  const basis = computeFaceBasisFromStepFace(model, face, outer);
+  const { outer2d, holes2d } = projectFaceLoopsTo2D({ outer, holes }, basis);
+  const normalized = normalizeWinding({ outer2d, holes2d });
+  const oriented3d = applyWindingTo3D(
+    { outer, holes },
+    normalized.outerReversed,
+    normalized.holesReversed
+  );
+
+  const topology = validateTopology(normalized.outer2d, normalized.holes2d);
+  if (!topology.valid) {
+  }
+
+  const mergedPolygon2d = bridgeAllHoles(normalized.outer2d, normalized.holes2d);
+
+  // Create 2D → 3D lookup
+  const outer2dTo3d = new Map<string, Vec3>();
+  for (let i = 0; i < normalized.outer2d.length; i++) {
+    const key = `${normalized.outer2d[i][0].toFixed(9)},${normalized.outer2d[i][1].toFixed(9)}`;
+    outer2dTo3d.set(key, oriented3d.outer[i]);
+  }
+
+  const holes2dTo3d: Map<string, Vec3>[] = [];
+  for (let h = 0; h < normalized.holes2d.length; h++) {
+    const holeMap = new Map<string, Vec3>();
+    for (let i = 0; i < normalized.holes2d[h].length; i++) {
+      const key = `${normalized.holes2d[h][i][0].toFixed(9)},${normalized.holes2d[h][i][1].toFixed(9)}`;
+      holeMap.set(key, oriented3d.holes[h][i]);
+    }
+    holes2dTo3d.push(holeMap);
+  }
+
+  // Filter duplicates
+  const filteredMerged2d: Vec2[] = [];
+  for (let i = 0; i < mergedPolygon2d.length; i++) {
+    const curr = mergedPolygon2d[i];
+    const prev = filteredMerged2d.length > 0
+      ? filteredMerged2d[filteredMerged2d.length - 1]
+      : mergedPolygon2d[mergedPolygon2d.length - 1];
+    const dx = curr[0] - prev[0];
+    const dy = curr[1] - prev[1];
+    if (dx * dx + dy * dy > 1e-12) {
+      filteredMerged2d.push(curr);
+    }
+  }
+
+  if (filteredMerged2d.length > 1) {
+    const first = filteredMerged2d[0];
+    const last = filteredMerged2d[filteredMerged2d.length - 1];
+    const dx = first[0] - last[0];
+    const dy = first[1] - last[1];
+    if (dx * dx + dy * dy < 1e-12) {
+      filteredMerged2d.pop();
+    }
+  }
+
+  // Build 3D positions
+  const vertices3d: Vec3[] = [];
+  for (const pt2d of filteredMerged2d) {
+    const key = `${pt2d[0].toFixed(9)},${pt2d[1].toFixed(9)}`;
+    let pt3d = outer2dTo3d.get(key);
+    if (!pt3d) {
+      for (const holeMap of holes2dTo3d) {
+        pt3d = holeMap.get(key);
+        if (pt3d) break;
+      }
+    }
+    if (!pt3d) {
+      pt3d = [pt2d[0], pt2d[1], 0];
+    }
+    vertices3d.push(pt3d);
+  }
+
+  return {
+    polygon2d: filteredMerged2d,
+    vertices3d,
+    isCurved: false,
+  };
+}
+
+/**
+ * Parse STEP file using batched GPU processing.
+ * This is the most efficient version - processes ALL faces in a single GPU dispatch.
+ */
+export async function parseStepToMeshBatched(stepText: string): Promise<Mesh> {
+  const totalStart = performance.now();
+  const parseStart = performance.now();
+
+  const model = parseStep(stepText);
+  if (model.faces.size === 0) {
+    throw new Error("No ADVANCED_FACE found in STEP file.");
+  }
+
+  const faces = [...model.faces.values()];
+
+  // Phase 1: Prepare all faces (extract polygons, but don't triangulate yet)
+  const preparedFaces: PreparedFace[] = [];
+  for (let i = 0; i < faces.length; i++) {
+    try {
+      const prepared = await prepareFaceForBatch(model, faces[i], i);
+      preparedFaces.push(prepared);
+    } catch (e) {
+      preparedFaces.push({ polygon2d: [], vertices3d: [], isCurved: false });
+    }
+  }
+
+  const parseEnd = performance.now();
+  const triangulationStart = performance.now();
+
+  // Phase 2: Batch triangulate all non-curved faces
+  const polygonsForBatch: BatchedPolygon[] = [];
+  const batchIndexToFaceIndex: number[] = [];
+
+  for (let i = 0; i < preparedFaces.length; i++) {
+    const face = preparedFaces[i];
+    if (!face.isCurved && face.polygon2d.length >= 3) {
+      polygonsForBatch.push({ points: face.polygon2d });
+      batchIndexToFaceIndex.push(i);
+    }
+  }
+
+  // Run batched ear clipping (single GPU dispatch for ALL polygons!)
+  const batchResult = await earClippingBatched(polygonsForBatch);
+
+  // Phase 3: Combine all results
+  const allVertices: Vec3[] = [];
+  const allIndices: number[] = [];
+  let vertexOffset = 0;
+
+  for (let i = 0; i < preparedFaces.length; i++) {
+    const face = preparedFaces[i];
+
+    if (face.isCurved && face.curvedResult) {
+      // Use pre-computed curved surface result
+      for (const v of face.curvedResult.vertices) {
+        allVertices.push(v);
+      }
+      for (const tri of face.curvedResult.triangles) {
+        allIndices.push(
+          tri[0] + vertexOffset,
+          tri[1] + vertexOffset,
+          tri[2] + vertexOffset
+        );
+      }
+      vertexOffset += face.curvedResult.vertices.length;
+    } else if (face.vertices3d.length >= 3) {
+      // Find the batch result for this face
+      const batchIdx = batchIndexToFaceIndex.indexOf(i);
+      if (batchIdx !== -1) {
+        const triangles = batchResult.triangles[batchIdx];
+
+        for (const v of face.vertices3d) {
+          allVertices.push(v);
+        }
+        for (const tri of triangles) {
+          allIndices.push(
+            tri[0] + vertexOffset,
+            tri[1] + vertexOffset,
+            tri[2] + vertexOffset
+          );
+        }
+        vertexOffset += face.vertices3d.length;
+      }
+    }
+  }
+
+  const triangulationEnd = performance.now();
+
+  // Build final mesh
+  const positions = new Float32Array(allVertices.length * 3);
+  allVertices.forEach((p, i) => {
+    positions[i * 3 + 0] = p[0];
+    positions[i * 3 + 1] = p[1];
+    positions[i * 3 + 2] = p[2];
+  });
+
+  const indices = new Uint32Array(allIndices);
+  const totalEnd = performance.now();
+
+  const parseTime = parseEnd - parseStart;
+  const triangulationTime = triangulationEnd - triangulationStart;
+  const totalTime = totalEnd - totalStart;
+
+  const triangleCount = allIndices.length / 3;
+
+  return { positions, indices, parseTime, triangulationTime, totalTime };
+}
 

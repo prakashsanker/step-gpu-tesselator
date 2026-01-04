@@ -6,15 +6,22 @@
  * 2. Triangulating in UV space using CDT
  * 3. Evaluating UV vertices back to 3D positions
  * 4. Computing surface normals
+ *
+ * C7 additions:
+ * - Adaptive refinement by curvature/chord error (C7.1)
+ * - Smooth vertex normals (C7.3)
+ * - Triangle aspect ratio control (C7.4)
  */
 
 import { constrainedDelaunayTriangulation } from "./cdt-gpu";
 import { evaluateSurface, surfaceNormal } from "./surfaces";
+import { createRectangularUVBoundary } from "./uv-extraction";
 import {
-    createCylinderUVBoundary,
-    createSphereUVBoundary,
-    createRectangularUVBoundary
-} from "./uv-extraction";
+    adaptiveRefineMesh,
+    computeAdaptiveSampleCount,
+    filterDegenerateTriangles,
+} from "./mesh-quality";
+import type { RefinementOptions } from "./mesh-quality";
 
 // Define surface types locally to avoid Vite import issues
 type Vec3 = [number, number, number];
@@ -56,12 +63,23 @@ interface ToroidalSurface {
     minorRadius: number;
 }
 
+interface BSplineSurfaceLocal {
+    type: "B_SPLINE_SURFACE";
+    controlPoints: Vec3[][];
+    uDegree: number;
+    vDegree: number;
+    uKnots: number[];
+    vKnots: number[];
+    weights?: number[][];
+}
+
 type Surface =
     | PlaneSurface
     | CylindricalSurface
     | SphericalSurface
     | ConicalSurface
-    | ToroidalSurface;
+    | ToroidalSurface
+    | BSplineSurfaceLocal;
 
 type Vec2 = [number, number];
 
@@ -81,26 +99,46 @@ export async function tessellateCylinder(
     angleEnd: number = Math.PI * 2,
     heightStart: number = 0,
     heightEnd: number = 1,
-    numAngleSamples: number = 16
+    numAngleSamples: number = 16,
+    numHeightSamples: number = 2
 ): Promise<TessellatedMesh> {
-    // Step 1: Create UV boundary
-    const uvBoundary = createCylinderUVBoundary(
-        angleStart,
-        angleEnd,
-        heightStart,
-        heightEnd,
-        numAngleSamples
-    );
+    // Create a full UV grid (not just boundary)
+    const uvVertices: [number, number][] = [];
+    const triangles: [number, number, number][] = [];
 
-    // Step 2: Triangulate in UV space
-    const triangles = await constrainedDelaunayTriangulation(uvBoundary, [], true);
+    const dAngle = (angleEnd - angleStart) / numAngleSamples;
+    const dHeight = (heightEnd - heightStart) / numHeightSamples;
 
-    // Step 3: Evaluate to 3D
-    return evaluateUVMesh(surface, uvBoundary, triangles);
+    // Generate grid vertices
+    for (let j = 0; j <= numHeightSamples; j++) {
+        const h = heightStart + j * dHeight;
+        for (let i = 0; i <= numAngleSamples; i++) {
+            const angle = angleStart + i * dAngle;
+            uvVertices.push([angle, h]);
+        }
+    }
+
+    // Generate triangles from grid
+    const cols = numAngleSamples + 1;
+    for (let j = 0; j < numHeightSamples; j++) {
+        for (let i = 0; i < numAngleSamples; i++) {
+            const topLeft = j * cols + i;
+            const topRight = j * cols + i + 1;
+            const bottomLeft = (j + 1) * cols + i;
+            const bottomRight = (j + 1) * cols + i + 1;
+
+            // Two triangles per quad
+            triangles.push([topLeft, bottomLeft, bottomRight]);
+            triangles.push([topLeft, bottomRight, topRight]);
+        }
+    }
+
+    // Evaluate to 3D
+    return evaluateUVMesh(surface, uvVertices, triangles);
 }
 
 /**
- * Tessellate a spherical surface patch
+ * Tessellate a spherical surface patch using a proper UV grid
  */
 export async function tessellateSphere(
     surface: SphericalSurface,
@@ -111,25 +149,43 @@ export async function tessellateSphere(
     numLonSamples: number = 16,
     numLatSamples: number = 8
 ): Promise<TessellatedMesh> {
-    // Step 1: Create UV boundary
-    const uvBoundary = createSphereUVBoundary(
-        lonStart,
-        lonEnd,
-        latStart,
-        latEnd,
-        numLonSamples,
-        numLatSamples
-    );
+    // Create a full UV grid (not just boundary)
+    const uvVertices: [number, number][] = [];
+    const triangles: [number, number, number][] = [];
 
-    // Step 2: Triangulate in UV space
-    const triangles = await constrainedDelaunayTriangulation(uvBoundary, [], true);
+    const dLon = (lonEnd - lonStart) / numLonSamples;
+    const dLat = (latEnd - latStart) / numLatSamples;
 
-    // Step 3: Evaluate to 3D
-    return evaluateUVMesh(surface, uvBoundary, triangles);
+    // Generate grid vertices
+    for (let j = 0; j <= numLatSamples; j++) {
+        const lat = latStart + j * dLat;
+        for (let i = 0; i <= numLonSamples; i++) {
+            const lon = lonStart + i * dLon;
+            uvVertices.push([lon, lat]);
+        }
+    }
+
+    // Generate triangles from grid
+    const cols = numLonSamples + 1;
+    for (let j = 0; j < numLatSamples; j++) {
+        for (let i = 0; i < numLonSamples; i++) {
+            const topLeft = j * cols + i;
+            const topRight = j * cols + i + 1;
+            const bottomLeft = (j + 1) * cols + i;
+            const bottomRight = (j + 1) * cols + i + 1;
+
+            // Two triangles per quad
+            triangles.push([topLeft, bottomLeft, bottomRight]);
+            triangles.push([topLeft, bottomRight, topRight]);
+        }
+    }
+
+    // Evaluate to 3D
+    return evaluateUVMesh(surface, uvVertices, triangles);
 }
 
 /**
- * Tessellate a conical surface patch
+ * Tessellate a conical surface patch using a proper UV grid
  */
 export async function tessellateCone(
     surface: ConicalSurface,
@@ -137,23 +193,46 @@ export async function tessellateCone(
     angleEnd: number = Math.PI * 2,
     heightStart: number = 0,
     heightEnd: number = 1,
-    numAngleSamples: number = 16
+    numAngleSamples: number = 16,
+    numHeightSamples: number = 2
 ): Promise<TessellatedMesh> {
-    // Use same UV layout as cylinder
-    const uvBoundary = createCylinderUVBoundary(
-        angleStart,
-        angleEnd,
-        heightStart,
-        heightEnd,
-        numAngleSamples
-    );
+    // Create a full UV grid (not just boundary)
+    const uvVertices: [number, number][] = [];
+    const triangles: [number, number, number][] = [];
 
-    const triangles = await constrainedDelaunayTriangulation(uvBoundary, [], true);
-    return evaluateUVMesh(surface, uvBoundary, triangles);
+    const dAngle = (angleEnd - angleStart) / numAngleSamples;
+    const dHeight = (heightEnd - heightStart) / numHeightSamples;
+
+    // Generate grid vertices
+    for (let j = 0; j <= numHeightSamples; j++) {
+        const h = heightStart + j * dHeight;
+        for (let i = 0; i <= numAngleSamples; i++) {
+            const angle = angleStart + i * dAngle;
+            uvVertices.push([angle, h]);
+        }
+    }
+
+    // Generate triangles from grid
+    const cols = numAngleSamples + 1;
+    for (let j = 0; j < numHeightSamples; j++) {
+        for (let i = 0; i < numAngleSamples; i++) {
+            const topLeft = j * cols + i;
+            const topRight = j * cols + i + 1;
+            const bottomLeft = (j + 1) * cols + i;
+            const bottomRight = (j + 1) * cols + i + 1;
+
+            // Two triangles per quad
+            triangles.push([topLeft, bottomLeft, bottomRight]);
+            triangles.push([topLeft, bottomRight, topRight]);
+        }
+    }
+
+    // Evaluate to 3D
+    return evaluateUVMesh(surface, uvVertices, triangles);
 }
 
 /**
- * Tessellate a toroidal surface patch
+ * Tessellate a toroidal surface patch using a proper UV grid
  */
 export async function tessellateTorus(
     surface: ToroidalSurface,
@@ -164,18 +243,91 @@ export async function tessellateTorus(
     numMajorSamples: number = 24,
     numMinorSamples: number = 12
 ): Promise<TessellatedMesh> {
-    // Use sphere-like UV layout for torus
-    const uvBoundary = createSphereUVBoundary(
-        majorAngleStart,
-        majorAngleEnd,
-        minorAngleStart,
-        minorAngleEnd,
-        numMajorSamples,
-        numMinorSamples
-    );
+    // Create a full UV grid (not just boundary)
+    const uvVertices: [number, number][] = [];
+    const triangles: [number, number, number][] = [];
 
-    const triangles = await constrainedDelaunayTriangulation(uvBoundary, [], true);
-    return evaluateUVMesh(surface, uvBoundary, triangles);
+    const dMajor = (majorAngleEnd - majorAngleStart) / numMajorSamples;
+    const dMinor = (minorAngleEnd - minorAngleStart) / numMinorSamples;
+
+    // Generate grid vertices
+    for (let j = 0; j <= numMinorSamples; j++) {
+        const minor = minorAngleStart + j * dMinor;
+        for (let i = 0; i <= numMajorSamples; i++) {
+            const major = majorAngleStart + i * dMajor;
+            uvVertices.push([major, minor]);
+        }
+    }
+
+    // Generate triangles from grid
+    const cols = numMajorSamples + 1;
+    for (let j = 0; j < numMinorSamples; j++) {
+        for (let i = 0; i < numMajorSamples; i++) {
+            const topLeft = j * cols + i;
+            const topRight = j * cols + i + 1;
+            const bottomLeft = (j + 1) * cols + i;
+            const bottomRight = (j + 1) * cols + i + 1;
+
+            // Two triangles per quad
+            triangles.push([topLeft, bottomLeft, bottomRight]);
+            triangles.push([topLeft, bottomRight, topRight]);
+        }
+    }
+
+    // Evaluate to 3D
+    return evaluateUVMesh(surface, uvVertices, triangles);
+}
+
+/**
+ * Tessellate a B-spline surface patch using a UV grid
+ */
+export async function tessellateBSplineSurface(
+    surface: BSplineSurfaceLocal,
+    numUSamples: number = 16,
+    numVSamples: number = 16
+): Promise<TessellatedMesh> {
+    // Get UV parameter range from knot vectors
+    const { uKnots, vKnots, uDegree, vDegree } = surface;
+
+    // Valid parameter range is [knots[degree], knots[n+1]] where n = numControlPoints - 1
+    const uMin = uKnots[uDegree];
+    const uMax = uKnots[uKnots.length - uDegree - 1];
+    const vMin = vKnots[vDegree];
+    const vMax = vKnots[vKnots.length - vDegree - 1];
+
+    // Create a full UV grid
+    const uvVertices: [number, number][] = [];
+    const triangles: [number, number, number][] = [];
+
+    const dU = (uMax - uMin) / numUSamples;
+    const dV = (vMax - vMin) / numVSamples;
+
+    // Generate grid vertices
+    for (let j = 0; j <= numVSamples; j++) {
+        const v = vMin + j * dV;
+        for (let i = 0; i <= numUSamples; i++) {
+            const u = uMin + i * dU;
+            uvVertices.push([u, v]);
+        }
+    }
+
+    // Generate triangles from grid
+    const cols = numUSamples + 1;
+    for (let j = 0; j < numVSamples; j++) {
+        for (let i = 0; i < numUSamples; i++) {
+            const topLeft = j * cols + i;
+            const topRight = j * cols + i + 1;
+            const bottomLeft = (j + 1) * cols + i;
+            const bottomRight = (j + 1) * cols + i + 1;
+
+            // Two triangles per quad
+            triangles.push([topLeft, bottomLeft, bottomRight]);
+            triangles.push([topLeft, bottomRight, topRight]);
+        }
+    }
+
+    // Evaluate to 3D
+    return evaluateUVMesh(surface, uvVertices, triangles);
 }
 
 /**
@@ -203,6 +355,271 @@ export async function tessellateSurface(
 ): Promise<TessellatedMesh> {
     const triangles = await constrainedDelaunayTriangulation(uvBoundary, [], useDelaunay);
     return evaluateUVMesh(surface, uvBoundary, triangles);
+}
+
+/**
+ * C6: Tessellate a surface using an arbitrary UV boundary polygon
+ * This handles trimmed surfaces where the boundary isn't rectangular
+ *
+ * C6.4: Now supports holes via the uvHoles parameter
+ *
+ * Uses grid-based tessellation clipped to the boundary for better quality
+ * on curved surfaces (avoids long-spanning triangles from ear clipping).
+ */
+export async function tessellateTrimmedSurface(
+    surface: Surface,
+    uvBoundary: Vec2[],
+    gridDensity: number = 16,
+    uvHoles: Vec2[][] = []
+): Promise<TessellatedMesh> {
+    if (uvBoundary.length < 3) {
+        throw new Error("UV boundary must have at least 3 points");
+    }
+
+    // Find UV bounding box
+    let uMin = Infinity, uMax = -Infinity;
+    let vMin = Infinity, vMax = -Infinity;
+
+    for (const [u, v] of uvBoundary) {
+        uMin = Math.min(uMin, u);
+        uMax = Math.max(uMax, u);
+        vMin = Math.min(vMin, v);
+        vMax = Math.max(vMax, v);
+    }
+
+    // Create a grid of UV vertices
+    const du = (uMax - uMin) / gridDensity;
+    const dv = (vMax - vMin) / gridDensity;
+
+    const uvVertices: Vec2[] = [];
+    const vertexGrid: (number | null)[][] = []; // Maps grid position to vertex index
+
+    for (let j = 0; j <= gridDensity; j++) {
+        vertexGrid[j] = [];
+        for (let i = 0; i <= gridDensity; i++) {
+            const u = uMin + i * du;
+            const v = vMin + j * dv;
+
+            // Check if this point is inside the boundary and outside holes
+            const insideBoundary = isPointInPolygon([u, v], uvBoundary);
+            const insideHole = uvHoles.some(hole => isPointInPolygon([u, v], hole));
+
+            if (insideBoundary && !insideHole) {
+                vertexGrid[j][i] = uvVertices.length;
+                uvVertices.push([u, v]);
+            } else {
+                vertexGrid[j][i] = null;
+            }
+        }
+    }
+
+    // Create triangles from the grid
+    const triangles: [number, number, number][] = [];
+
+    for (let j = 0; j < gridDensity; j++) {
+        for (let i = 0; i < gridDensity; i++) {
+            const v00 = vertexGrid[j][i];
+            const v10 = vertexGrid[j][i + 1];
+            const v01 = vertexGrid[j + 1][i];
+            const v11 = vertexGrid[j + 1][i + 1];
+
+            // Create triangles only if all vertices are valid
+            if (v00 !== null && v10 !== null && v01 !== null && v11 !== null) {
+                // Two triangles per quad
+                triangles.push([v00, v01, v11]);
+                triangles.push([v00, v11, v10]);
+            } else {
+                // Handle partial quads - create triangles where possible
+                if (v00 !== null && v01 !== null && v11 !== null) {
+                    triangles.push([v00, v01, v11]);
+                }
+                if (v00 !== null && v11 !== null && v10 !== null) {
+                    triangles.push([v00, v11, v10]);
+                }
+                if (v00 !== null && v01 !== null && v10 !== null) {
+                    triangles.push([v00, v01, v10]);
+                }
+                if (v01 !== null && v11 !== null && v10 !== null) {
+                    triangles.push([v01, v11, v10]);
+                }
+            }
+        }
+    }
+
+    console.log(`[tessellateTrimmedSurface] Grid: ${gridDensity}x${gridDensity}, vertices: ${uvVertices.length}, triangles: ${triangles.length}`);
+
+    return evaluateUVMesh(surface, uvVertices, triangles);
+}
+
+/**
+ * C6.4: Bridge holes into outer boundary in UV space.
+ * Uses the same algorithm as for planar faces.
+ */
+function bridgeAllHolesUV(outer: Vec2[], holes: Vec2[][]): Vec2[] {
+    if (holes.length === 0) {
+        return outer;
+    }
+
+    console.log(`[bridgeAllHolesUV] Outer: ${outer.length} points, Holes: ${holes.length}`);
+
+    // Ensure outer is CCW
+    let outerArea = 0;
+    for (let i = 0; i < outer.length; i++) {
+        const j = (i + 1) % outer.length;
+        outerArea += outer[i][0] * outer[j][1] - outer[j][0] * outer[i][1];
+    }
+    outerArea /= 2;
+    console.log(`[bridgeAllHolesUV] Outer area: ${outerArea.toFixed(4)}, ${outerArea > 0 ? 'CCW' : 'CW'}`);
+    let currentOuter = outerArea > 0 ? outer : [...outer].reverse();
+
+    // Ensure holes are CW
+    const normalizedHoles = holes.map(hole => {
+        let holeArea = 0;
+        for (let i = 0; i < hole.length; i++) {
+            const j = (i + 1) % hole.length;
+            holeArea += hole[i][0] * hole[j][1] - hole[j][0] * hole[i][1];
+        }
+        return holeArea < 0 ? hole : [...hole].reverse();
+    });
+
+    // Sort holes by rightmost X (descending)
+    const holesWithRightmost = normalizedHoles.map((hole, idx) => {
+        let maxU = -Infinity;
+        let maxUIndex = 0;
+        for (let i = 0; i < hole.length; i++) {
+            if (hole[i][0] > maxU) {
+                maxU = hole[i][0];
+                maxUIndex = i;
+            }
+        }
+        return { hole, idx, rightmostU: maxU, rightmostIndex: maxUIndex };
+    });
+
+    holesWithRightmost.sort((a, b) => b.rightmostU - a.rightmostU);
+
+    // Merge each hole
+    let merged = currentOuter;
+    for (const { hole, rightmostIndex } of holesWithRightmost) {
+        console.log(`[bridgeAllHolesUV] Hole rightmost: index=${rightmostIndex}, coords=(${hole[rightmostIndex][0].toFixed(3)}, ${hole[rightmostIndex][1].toFixed(3)})`);
+        merged = mergeHoleIntoOuterUV(merged, hole, rightmostIndex);
+    }
+
+    console.log(`[bridgeAllHolesUV] Merged polygon: ${merged.length} points`);
+    // Print UV range
+    let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+    for (const [u, v] of merged) {
+        uMin = Math.min(uMin, u);
+        uMax = Math.max(uMax, u);
+        vMin = Math.min(vMin, v);
+        vMax = Math.max(vMax, v);
+    }
+    console.log(`[bridgeAllHolesUV] Merged UV range: u=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], v=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+
+    return merged;
+}
+
+/**
+ * C6.4: Merge a single hole into the outer boundary.
+ */
+function mergeHoleIntoOuterUV(outer: Vec2[], hole: Vec2[], holeRightmostIndex: number): Vec2[] {
+    const holeVertex = hole[holeRightmostIndex];
+    console.log(`[mergeHoleIntoOuterUV] Hole vertex: (${holeVertex[0].toFixed(3)}, ${holeVertex[1].toFixed(3)})`);
+
+    // Cast a ray from holeVertex in the +U direction to find the closest edge on outer
+    let bestDist = Infinity;
+    let bestOuterIndex = 0;
+    let foundIntersection = false;
+
+    for (let i = 0; i < outer.length; i++) {
+        const j = (i + 1) % outer.length;
+        const p1 = outer[i];
+        const p2 = outer[j];
+
+        // Check if the edge crosses the horizontal ray from holeVertex
+        const minV = Math.min(p1[1], p2[1]);
+        const maxV = Math.max(p1[1], p2[1]);
+
+        if (holeVertex[1] >= minV && holeVertex[1] <= maxV && p1[1] !== p2[1]) {
+            // Find intersection point
+            const t = (holeVertex[1] - p1[1]) / (p2[1] - p1[1]);
+            const intersectU = p1[0] + t * (p2[0] - p1[0]);
+
+            // Must be to the right of holeVertex
+            if (intersectU >= holeVertex[0]) {
+                const dist = intersectU - holeVertex[0];
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    // Pick the endpoint closest to the intersection point in V
+                    // The intersection is at (intersectU, holeVertex[1])
+                    const distToP1 = Math.abs(p1[1] - holeVertex[1]);
+                    const distToP2 = Math.abs(p2[1] - holeVertex[1]);
+                    bestOuterIndex = distToP1 < distToP2 ? i : j;
+                    foundIntersection = true;
+                }
+            }
+        }
+    }
+
+    console.log(`[mergeHoleIntoOuterUV] Found intersection: ${foundIntersection}, bestDist: ${bestDist.toFixed(3)}, bestOuterIndex: ${bestOuterIndex}`);
+    console.log(`[mergeHoleIntoOuterUV] Target outer vertex: (${outer[bestOuterIndex][0].toFixed(3)}, ${outer[bestOuterIndex][1].toFixed(3)})`);
+
+    // Check if any reflex vertex on outer is visible and closer
+    for (let i = 0; i < outer.length; i++) {
+        const v = outer[i];
+        // Must be to the right of holeVertex and within V range
+        if (v[0] >= holeVertex[0] && Math.abs(v[1] - holeVertex[1]) < 0.001) {
+            const dist = v[0] - holeVertex[0];
+            if (dist < bestDist) {
+                bestDist = dist;
+                bestOuterIndex = i;
+            }
+        }
+    }
+
+    // Build merged polygon
+    const merged: Vec2[] = [];
+
+    // Part A: outer[0..bestOuterIndex]
+    for (let i = 0; i <= bestOuterIndex; i++) {
+        merged.push(outer[i]);
+    }
+
+    // Part B: all hole vertices starting from rightmost
+    for (let i = 0; i < hole.length; i++) {
+        const idx = (holeRightmostIndex + i) % hole.length;
+        merged.push(hole[idx]);
+    }
+
+    // Part C: bridge back
+    merged.push([...hole[holeRightmostIndex]]);
+    merged.push([...outer[bestOuterIndex]]);
+
+    // Part D: remaining outer
+    for (let i = bestOuterIndex + 1; i < outer.length; i++) {
+        merged.push(outer[i]);
+    }
+
+    return merged;
+}
+
+/**
+ * Point-in-polygon test using ray casting
+ */
+function isPointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
+    const [x, y] = point;
+    let inside = false;
+
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+        const [xi, yi] = polygon[i];
+        const [xj, yj] = polygon[j];
+
+        if (((yi > y) !== (yj > y)) &&
+            (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+            inside = !inside;
+        }
+    }
+
+    return inside;
 }
 
 /**
@@ -373,4 +790,250 @@ export async function createFullSphereMesh(
         numLonSegments,
         numLatSegments
     );
+}
+
+// ============================================================================
+// C7.1: Adaptive Tessellation Functions
+// ============================================================================
+
+/**
+ * Tessellation options with quality controls
+ */
+export interface TessellationQualityOptions {
+    /** Enable adaptive refinement based on chord error */
+    adaptiveRefinement: boolean;
+    /** Maximum chord error tolerance */
+    chordTolerance: number;
+    /** Maximum refinement depth */
+    maxRefinementDepth: number;
+    /** Minimum edge length (stop refining smaller edges) */
+    minEdgeLength: number;
+    /** Maximum triangle aspect ratio before filtering */
+    maxAspectRatio: number;
+}
+
+export const DEFAULT_TESSELLATION_QUALITY: TessellationQualityOptions = {
+    adaptiveRefinement: true,
+    chordTolerance: 0.01,
+    maxRefinementDepth: 5,
+    minEdgeLength: 0.001,
+    maxAspectRatio: 50.0,
+};
+
+/**
+ * Tessellate a cylindrical surface with adaptive refinement (C7.1)
+ */
+export async function tessellateCylinderAdaptive(
+    surface: CylindricalSurface,
+    angleStart: number = 0,
+    angleEnd: number = Math.PI * 2,
+    heightStart: number = 0,
+    heightEnd: number = 1,
+    options: TessellationQualityOptions = DEFAULT_TESSELLATION_QUALITY
+): Promise<TessellatedMesh> {
+    // Compute adaptive sample count based on curvature
+    const { uSamples, vSamples } = computeAdaptiveSampleCount(
+        surface,
+        angleStart,
+        angleEnd,
+        heightStart,
+        heightEnd,
+        options.chordTolerance
+    );
+
+    // Initial tessellation with adaptive sample counts
+    const mesh = await tessellateCylinder(
+        surface,
+        angleStart,
+        angleEnd,
+        heightStart,
+        heightEnd,
+        uSamples,
+        vSamples
+    );
+
+    if (!options.adaptiveRefinement) {
+        return mesh;
+    }
+
+    // Convert to refinable format
+    const uvVertices: Vec2[] = [];
+    const positions: Vec3[] = [];
+    const normals: Vec3[] = [];
+
+    for (let i = 0; i < mesh.positions.length / 3; i++) {
+        positions.push([
+            mesh.positions[i * 3],
+            mesh.positions[i * 3 + 1],
+            mesh.positions[i * 3 + 2],
+        ]);
+        normals.push([
+            mesh.normals[i * 3],
+            mesh.normals[i * 3 + 1],
+            mesh.normals[i * 3 + 2],
+        ]);
+        uvVertices.push([mesh.uvs[i * 2], mesh.uvs[i * 2 + 1]]);
+    }
+
+    const triangles: [number, number, number][] = [];
+    for (let i = 0; i < mesh.indices.length / 3; i++) {
+        triangles.push([
+            mesh.indices[i * 3],
+            mesh.indices[i * 3 + 1],
+            mesh.indices[i * 3 + 2],
+        ]);
+    }
+
+    // Apply adaptive refinement
+    const refinementOptions: RefinementOptions = {
+        chordTolerance: options.chordTolerance,
+        maxDepth: options.maxRefinementDepth,
+        minEdgeLength: options.minEdgeLength,
+        maxAspectRatio: options.maxAspectRatio,
+    };
+
+    const refined = adaptiveRefineMesh(
+        surface,
+        { uvVertices, positions, normals, triangles },
+        refinementOptions
+    );
+
+    // Filter degenerate triangles (C7.4)
+    const cleanTriangles = filterDegenerateTriangles(
+        refined.positions,
+        refined.triangles,
+        options.maxAspectRatio
+    );
+
+    // Convert back to TessellatedMesh format
+    return buildTessellatedMesh(refined.uvVertices, refined.positions, refined.normals, cleanTriangles);
+}
+
+/**
+ * Tessellate a spherical surface with adaptive refinement (C7.1)
+ */
+export async function tessellateSphereAdaptive(
+    surface: SphericalSurface,
+    lonStart: number = 0,
+    lonEnd: number = Math.PI * 2,
+    latStart: number = -Math.PI / 2,
+    latEnd: number = Math.PI / 2,
+    options: TessellationQualityOptions = DEFAULT_TESSELLATION_QUALITY
+): Promise<TessellatedMesh> {
+    // Compute adaptive sample count based on curvature
+    const { uSamples, vSamples } = computeAdaptiveSampleCount(
+        surface,
+        lonStart,
+        lonEnd,
+        latStart,
+        latEnd,
+        options.chordTolerance
+    );
+
+    // Initial tessellation with adaptive sample counts
+    const mesh = await tessellateSphere(
+        surface,
+        lonStart,
+        lonEnd,
+        latStart,
+        latEnd,
+        uSamples,
+        vSamples
+    );
+
+    if (!options.adaptiveRefinement) {
+        return mesh;
+    }
+
+    // Convert and refine (same as cylinder)
+    const uvVertices: Vec2[] = [];
+    const positions: Vec3[] = [];
+    const normals: Vec3[] = [];
+
+    for (let i = 0; i < mesh.positions.length / 3; i++) {
+        positions.push([
+            mesh.positions[i * 3],
+            mesh.positions[i * 3 + 1],
+            mesh.positions[i * 3 + 2],
+        ]);
+        normals.push([
+            mesh.normals[i * 3],
+            mesh.normals[i * 3 + 1],
+            mesh.normals[i * 3 + 2],
+        ]);
+        uvVertices.push([mesh.uvs[i * 2], mesh.uvs[i * 2 + 1]]);
+    }
+
+    const triangles: [number, number, number][] = [];
+    for (let i = 0; i < mesh.indices.length / 3; i++) {
+        triangles.push([
+            mesh.indices[i * 3],
+            mesh.indices[i * 3 + 1],
+            mesh.indices[i * 3 + 2],
+        ]);
+    }
+
+    const refinementOptions: RefinementOptions = {
+        chordTolerance: options.chordTolerance,
+        maxDepth: options.maxRefinementDepth,
+        minEdgeLength: options.minEdgeLength,
+        maxAspectRatio: options.maxAspectRatio,
+    };
+
+    const refined = adaptiveRefineMesh(
+        surface,
+        { uvVertices, positions, normals, triangles },
+        refinementOptions
+    );
+
+    const cleanTriangles = filterDegenerateTriangles(
+        refined.positions,
+        refined.triangles,
+        options.maxAspectRatio
+    );
+
+    return buildTessellatedMesh(refined.uvVertices, refined.positions, refined.normals, cleanTriangles);
+}
+
+/**
+ * Helper to build TessellatedMesh from arrays
+ */
+function buildTessellatedMesh(
+    uvVertices: Vec2[],
+    positions: Vec3[],
+    normals: Vec3[],
+    triangles: [number, number, number][]
+): TessellatedMesh {
+    const numVertices = positions.length;
+
+    const positionsArray = new Float32Array(numVertices * 3);
+    const normalsArray = new Float32Array(numVertices * 3);
+    const uvsArray = new Float32Array(numVertices * 2);
+
+    for (let i = 0; i < numVertices; i++) {
+        positionsArray[i * 3 + 0] = positions[i][0];
+        positionsArray[i * 3 + 1] = positions[i][1];
+        positionsArray[i * 3 + 2] = positions[i][2];
+
+        normalsArray[i * 3 + 0] = normals[i][0];
+        normalsArray[i * 3 + 1] = normals[i][1];
+        normalsArray[i * 3 + 2] = normals[i][2];
+
+        uvsArray[i * 2 + 0] = uvVertices[i][0];
+        uvsArray[i * 2 + 1] = uvVertices[i][1];
+    }
+
+    const indicesArray = new Uint32Array(triangles.length * 3);
+    for (let i = 0; i < triangles.length; i++) {
+        indicesArray[i * 3 + 0] = triangles[i][0];
+        indicesArray[i * 3 + 1] = triangles[i][1];
+        indicesArray[i * 3 + 2] = triangles[i][2];
+    }
+
+    return {
+        positions: positionsArray,
+        normals: normalsArray,
+        indices: indicesArray,
+        uvs: uvsArray,
+    };
 }

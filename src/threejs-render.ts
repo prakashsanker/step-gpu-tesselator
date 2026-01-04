@@ -5,19 +5,31 @@ import type {Mesh} from "./step-parser";
 export function createThreeMeshFromTesselation(mesh: Mesh): THREE.Mesh {
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
-        "position", 
+        "position",
         new THREE.BufferAttribute(mesh.positions, 3)
     );
+
+    // Use provided normals for smooth shading (C7.3), otherwise compute them
+    if (mesh.normals) {
+        geometry.setAttribute(
+            "normal",
+            new THREE.BufferAttribute(mesh.normals, 3)
+        );
+    } else {
+        // Fall back to computed normals
+        geometry.computeVertexNormals();
+    }
 
     geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
 
     const material = new THREE.MeshStandardMaterial({
-        color: 0x4fc3f7,  // Light cyan/teal - stands out against dark background
-        metalness: 0.3,
-        roughness: 0.4,
+        color: 0x6699ff,  // Bright blue - better visibility
+        metalness: 0.2,
+        roughness: 0.5,
         side: THREE.DoubleSide, // helpful for thin faces
+        flatShading: false,
       });
-    
+
       return new THREE.Mesh(geometry, material);
 }
 
@@ -29,7 +41,7 @@ export function render(threeMesh: THREE.Mesh) {
   renderer.setPixelRatio(window.devicePixelRatio);
 
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x1a1a2e);  // Dark blue-gray for better contrast
+  scene.background = new THREE.Color(0x404040);  // Medium gray for better contrast
 
   // Compute bounding box to center and frame the mesh
   threeMesh.geometry.computeBoundingBox();
@@ -64,10 +76,10 @@ export function render(threeMesh: THREE.Mesh) {
   controls.target.copy(center); // Orbit around the mesh center
 
   // Lights - brighter for better visibility
-  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 1.0);
+  const hemiLight = new THREE.HemisphereLight(0xffffff, 0x888888, 1.5);
   scene.add(hemiLight);
 
-  const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+  const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
   dirLight.position.set(
     center.x + cameraDistance,
     center.y + cameraDistance * 1.5,
