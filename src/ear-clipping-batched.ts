@@ -33,7 +33,7 @@ struct PolygonInfo {
     startVertex: u32,
     numVertices: u32,
     outputOffset: u32,
-    padding: u32,
+    maxTriangles: u32,  // Expected triangles (numVerts - 2)
 }
 
 // Input buffers
@@ -142,13 +142,21 @@ fn main(
     let outputOffset = info.outputOffset;
     let i = lid.x;
 
-    // Initialize workgroup memory
+    // Initialize ALL workgroup memory (not just vertices)
+    // Uninitialized entries could cause issues in edge cases
+    prevVertex[i] = 0u;
+    nextVertex[i] = 0u;
+    isActive[i] = 0u;
+    isEar[i] = 0u;
+    canClip[i] = 0u;
+
+    workgroupBarrier();
+
+    // Now initialize actual vertices
     if (i < numVerts) {
         prevVertex[i] = select(numVerts - 1u, i - 1u, i > 0u);
         nextVertex[i] = select(0u, i + 1u, i < numVerts - 1u);
         isActive[i] = 1u;
-        isEar[i] = 0u;
-        canClip[i] = 0u;
     }
 
     workgroupBarrier();
@@ -181,18 +189,24 @@ fn main(
         workgroupBarrier();
 
         // Phase 3: Clip selected ears
-        if (i < numVerts && canClip[i] == 1u) {
+        // Add redundant isActive check to prevent any race conditions
+        if (i < numVerts && canClip[i] == 1u && isActive[i] == 1u) {
             let p = prevVertex[i];
             let n = nextVertex[i];
 
-            // Write triangle (using global vertex indices)
+            // Atomically get triangle slot, but check if we've exceeded max
             let triIdx = atomicAdd(&triangleCounts[polygonIdx], 1u);
-            let outIdx = outputOffset + triIdx * 3u;
-            outputIndices[outIdx + 0u] = p;
-            outputIndices[outIdx + 1u] = i;
-            outputIndices[outIdx + 2u] = n;
 
-            // Update linked list
+            // CRITICAL: Only write if we haven't exceeded expected triangles
+            // This prevents buffer overflow into next polygon's space
+            if (triIdx < info.maxTriangles) {
+                let outIdx = outputOffset + triIdx * 3u;
+                outputIndices[outIdx + 0u] = p;
+                outputIndices[outIdx + 1u] = i;
+                outputIndices[outIdx + 2u] = n;
+            }
+
+            // Update linked list (even if we didn't write, to maintain consistency)
             nextVertex[p] = n;
             prevVertex[n] = p;
 
@@ -286,10 +300,13 @@ export async function earClippingBatched(polygons: BatchedPolygon[]): Promise<Ba
     let totalMaxTriangles = 0;
     const polygonInfos: number[] = [];
 
-    for (const poly of validPolygons) {
+    for (let polyIdx = 0; polyIdx < validPolygons.length; polyIdx++) {
+        const poly = validPolygons[polyIdx];
         const numVerts = poly.points.length;
         const maxTris = numVerts - 2;
-        polygonInfos.push(totalVertices, numVerts, totalMaxTriangles * 3, 0);
+        const outputOffset = totalMaxTriangles * 3;
+        // Pass maxTriangles so shader can prevent overflow
+        polygonInfos.push(totalVertices, numVerts, outputOffset, maxTris);
         totalVertices += numVerts;
         totalMaxTriangles += maxTris;
     }
@@ -324,8 +341,10 @@ export async function earClippingBatched(polygons: BatchedPolygon[]): Promise<Ba
 
     const outputIndicesBuffer = device.createBuffer({
         size: totalMaxTriangles * 3 * BYTE_SIZE,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST,
     });
+    // Initialize output buffer to zeros (prevents garbage from uninitialized memory)
+    device.queue.writeBuffer(outputIndicesBuffer, 0, new Uint32Array(totalMaxTriangles * 3));
 
     const triangleCountsBuffer = device.createBuffer({
         size: validPolygons.length * BYTE_SIZE,
@@ -385,16 +404,29 @@ export async function earClippingBatched(polygons: BatchedPolygon[]): Promise<Ba
     const allIndices = new Uint32Array(indicesStaging.getMappedRange().slice(0));
     indicesStaging.unmap();
 
-    // Parse results
+
+    // Parse results - no more overflow workaround needed, shader prevents it
     const gpuResults: Map<number, number[][]> = new Map();
     for (let p = 0; p < validPolygons.length; p++) {
         const numTris = triangleCounts[p];
         const outputOffset = polygonInfos[p * 4 + 2];
+        const numVerts = validPolygons[p].points.length;
+        const expectedTris = numVerts - 2;
         const triangles: number[][] = [];
 
-        for (let t = 0; t < numTris; t++) {
+        // Use actual triangle count (shader limits to maxTriangles internally)
+        const actualTris = Math.min(numTris, expectedTris);
+
+        for (let t = 0; t < actualTris; t++) {
             const idx = outputOffset + t * 3;
-            triangles.push([allIndices[idx], allIndices[idx + 1], allIndices[idx + 2]]);
+            const i0 = allIndices[idx];
+            const i1 = allIndices[idx + 1];
+            const i2 = allIndices[idx + 2];
+
+            // Validate indices (should always pass now, but keep as safety)
+            if (i0 < numVerts && i1 < numVerts && i2 < numVerts) {
+                triangles.push([i0, i1, i2]);
+            }
         }
 
         gpuResults.set(validPolygons[p].originalIndex, triangles);

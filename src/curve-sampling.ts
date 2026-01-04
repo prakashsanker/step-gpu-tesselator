@@ -287,7 +287,8 @@ function calculateArcSamples(
   endAngle: number,
   options: CurveSamplingOptions
 ): number {
-  const angularTolerance = options.angularTolerance ?? (5 * Math.PI / 180);
+  // Reduced from 5° to 2.5° for smoother curve sampling
+  const angularTolerance = options.angularTolerance ?? (2.5 * Math.PI / 180);
   const minSamples = options.minSamples ?? 3;
   const maxSamples = options.maxSamples ?? 128;
 
@@ -323,9 +324,17 @@ function normalizeAngleDiff(startAngle: number, endAngle: number, reversed: bool
 
 let conicPipeline: GPUComputePipeline | null = null;
 let bsplinePipeline: GPUComputePipeline | null = null;
+let pipelinesDevice: GPUDevice | null = null;
 
 /** Initialize GPU pipelines for curve sampling */
 async function initPipelines(device: GPUDevice): Promise<void> {
+  // Invalidate cached pipelines if device changed
+  if (pipelinesDevice !== device) {
+    conicPipeline = null;
+    bsplinePipeline = null;
+    pipelinesDevice = device;
+  }
+
   if (conicPipeline && bsplinePipeline) {
     return;
   }
@@ -371,7 +380,6 @@ async function sampleConicsGPU(
   }
 
   const numCurves = curves.length;
-  console.log(`[sampleConicsGPU] Sampling ${numCurves} conic curves`);
 
   // Build curve parameters buffer using DataView for proper type handling
   // Each curve: curveType(u32), numSamples(u32), startParam(f32), endParam(f32),
@@ -385,10 +393,6 @@ async function sampleConicsGPU(
     const byteOffset = i * 80;
 
     if (curve.type === 'CIRCLE') {
-      console.log(`[sampleConicsGPU] Circle ${i}: center=${JSON.stringify(curve.center)}, radius=${curve.radius}`);
-      console.log(`[sampleConicsGPU] Circle ${i}: normal=${JSON.stringify(curve.normal)}, refDir=${JSON.stringify(curve.refDirection)}`);
-      console.log(`[sampleConicsGPU] Circle ${i}: startParam=${startParam}, endParam=${endParam}, numSamples=${numSamples}`);
-
       view.setUint32(byteOffset + 0, 1, true);  // curveType = CIRCLE
       view.setUint32(byteOffset + 4, numSamples, true);
       view.setFloat32(byteOffset + 8, startParam, true);
@@ -487,8 +491,6 @@ async function sampleConicsGPU(
   await readBuffer.mapAsync(GPUMapMode.READ);
   const outputData = new Float32Array(readBuffer.getMappedRange().slice(0));
   readBuffer.unmap();
-
-  console.log(`[sampleConicsGPU] Output data first 20 values:`, Array.from(outputData.slice(0, 20)));
 
   // Parse results
   const results: Vec3[][] = [];

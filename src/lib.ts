@@ -1,4 +1,12 @@
-export async function getGPUDevice() {
+// Cache GPU device to avoid creating multiple devices
+let cachedDevice: GPUDevice | null = null;
+
+export async function getGPUDevice(): Promise<GPUDevice> {
+    // Return cached device if available
+    if (cachedDevice) {
+        return cachedDevice;
+    }
+
     if (!('gpu' in navigator)) {
         throw new Error("WebGPU not supported in this browser");
     }
@@ -9,9 +17,15 @@ export async function getGPUDevice() {
         throw new Error("Failed to get GPU adapter");
     }
 
-    const device = await adapter.requestDevice();
+    cachedDevice = await adapter.requestDevice();
 
-    return device;
+    // Handle device loss by clearing cache
+    cachedDevice.lost.then((info) => {
+        console.error(`WebGPU device lost: ${info.reason}`, info.message);
+        cachedDevice = null;
+    });
+
+    return cachedDevice;
 }
 
 export function normalizePoints(points: number[][]): number[][] {

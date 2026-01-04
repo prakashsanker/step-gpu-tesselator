@@ -376,16 +376,102 @@ export async function tessellateTrimmedSurface(
         throw new Error("UV boundary must have at least 3 points");
     }
 
-    // Find UV bounding box
+    // Check if UV boundary crosses the ±π discontinuity (for cylindrical surfaces)
+    // This happens when we have U values near both +π and -π
+    const PI = Math.PI;
+    const nearPosPI = uvBoundary.filter(([u]) => u > PI - 0.5).length;
+    const nearNegPI = uvBoundary.filter(([u]) => u < -PI + 0.5).length;
+    const hasDiscontinuity = nearPosPI > 0 && nearNegPI > 0;
+
+    // Create a continuous version of the boundary for polygon testing
+    let continuousBoundary: Vec2[];
+    let continuousHoles: Vec2[][];
+
+    if (hasDiscontinuity) {
+        // Determine which half of the circle the boundary is actually in
+        // by counting points in each half
+        const positiveHalf = uvBoundary.filter(([u]) => u >= 0).length;
+        const negativeHalf = uvBoundary.filter(([u]) => u < 0).length;
+
+        if (positiveHalf > negativeHalf) {
+            // Boundary is mostly in [0, π], move -π values to +π
+            continuousBoundary = uvBoundary.map(([u, v]) => {
+                if (u < -PI + 0.5) {
+                    return [u + 2 * PI, v] as Vec2;
+                }
+                return [u, v] as Vec2;
+            });
+            continuousHoles = uvHoles.map(hole =>
+                hole.map(([u, v]) => {
+                    if (u < -PI + 0.5) {
+                        return [u + 2 * PI, v] as Vec2;
+                    }
+                    return [u, v] as Vec2;
+                })
+            );
+        } else {
+            // Boundary is mostly in [-π, 0], move +π values to -π
+            continuousBoundary = uvBoundary.map(([u, v]) => {
+                if (u > PI - 0.5) {
+                    return [u - 2 * PI, v] as Vec2;
+                }
+                return [u, v] as Vec2;
+            });
+            continuousHoles = uvHoles.map(hole =>
+                hole.map(([u, v]) => {
+                    if (u > PI - 0.5) {
+                        return [u - 2 * PI, v] as Vec2;
+                    }
+                    return [u, v] as Vec2;
+                })
+            );
+        }
+    } else {
+        continuousBoundary = uvBoundary;
+        continuousHoles = uvHoles;
+    }
+
+    // DEBUG: Log UV boundary info
+    const origUVals = uvBoundary.map(([u]) => u);
+    const contUVals = continuousBoundary.map(([u]) => u);
+    console.log(`[UV DEBUG] Original U range: [${Math.min(...origUVals).toFixed(3)}, ${Math.max(...origUVals).toFixed(3)}]`);
+    console.log(`[UV DEBUG] Continuous U range: [${Math.min(...contUVals).toFixed(3)}, ${Math.max(...contUVals).toFixed(3)}]`);
+    console.log(`[UV DEBUG] Boundary points: ${continuousBoundary.length}`);
+
+    // Check if polygon is closed (first and last points should be close)
+    if (continuousBoundary.length > 0) {
+        const first = continuousBoundary[0];
+        const last = continuousBoundary[continuousBoundary.length - 1];
+        const gap = Math.sqrt((first[0] - last[0]) ** 2 + (first[1] - last[1]) ** 2);
+        console.log(`[UV DEBUG] Polygon closure gap: ${gap.toFixed(6)} (first=[${first[0].toFixed(3)}, ${first[1].toFixed(3)}], last=[${last[0].toFixed(3)}, ${last[1].toFixed(3)}])`);
+
+        // Check for large jumps in the boundary (potential discontinuities)
+        let maxJump = 0;
+        let maxJumpIdx = -1;
+        for (let i = 0; i < continuousBoundary.length; i++) {
+            const curr = continuousBoundary[i];
+            const next = continuousBoundary[(i + 1) % continuousBoundary.length];
+            const jump = Math.sqrt((curr[0] - next[0]) ** 2 + (curr[1] - next[1]) ** 2);
+            if (jump > maxJump) {
+                maxJump = jump;
+                maxJumpIdx = i;
+            }
+        }
+        console.log(`[UV DEBUG] Max jump in boundary: ${maxJump.toFixed(3)} at index ${maxJumpIdx}`);
+    }
+
+    // Find UV bounding box from the continuous boundary
     let uMin = Infinity, uMax = -Infinity;
     let vMin = Infinity, vMax = -Infinity;
 
-    for (const [u, v] of uvBoundary) {
+    for (const [u, v] of continuousBoundary) {
         uMin = Math.min(uMin, u);
         uMax = Math.max(uMax, u);
         vMin = Math.min(vMin, v);
         vMax = Math.max(vMax, v);
     }
+
+    console.log(`[UV DEBUG] Bounding box: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
 
     // Create a grid of UV vertices
     const du = (uMax - uMin) / gridDensity;
@@ -394,24 +480,33 @@ export async function tessellateTrimmedSurface(
     const uvVertices: Vec2[] = [];
     const vertexGrid: (number | null)[][] = []; // Maps grid position to vertex index
 
+    let insideCount = 0;
+    let outsideCount = 0;
+
     for (let j = 0; j <= gridDensity; j++) {
         vertexGrid[j] = [];
         for (let i = 0; i <= gridDensity; i++) {
             const u = uMin + i * du;
             const v = vMin + j * dv;
 
-            // Check if this point is inside the boundary and outside holes
-            const insideBoundary = isPointInPolygon([u, v], uvBoundary);
-            const insideHole = uvHoles.some(hole => isPointInPolygon([u, v], hole));
+            // Check if this point is inside the continuous boundary and outside holes
+            const insideBoundary = isPointInPolygon([u, v], continuousBoundary);
+            const insideHole = continuousHoles.some(hole => isPointInPolygon([u, v], hole));
 
             if (insideBoundary && !insideHole) {
                 vertexGrid[j][i] = uvVertices.length;
+                // Store the unwrapped UV for surface evaluation
+                // (cos/sin are 2π periodic, so values in [π, 2π] work correctly)
                 uvVertices.push([u, v]);
+                insideCount++;
             } else {
                 vertexGrid[j][i] = null;
+                outsideCount++;
             }
         }
     }
+
+    console.log(`[UV DEBUG] Grid: ${insideCount} inside, ${outsideCount} outside (total ${(gridDensity+1)*(gridDensity+1)})`);
 
     // Create triangles from the grid
     const triangles: [number, number, number][] = [];

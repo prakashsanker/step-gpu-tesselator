@@ -130,11 +130,18 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 `;
 
 async function initPipelines(): Promise<GPUDevice> {
-    if (device && accumulatePipeline && normalizePipeline) {
-        return device;
+    const currentDevice = await getGPUDevice();
+
+    // Invalidate cached pipelines if device changed
+    if (device !== currentDevice) {
+        accumulatePipeline = null;
+        normalizePipeline = null;
+        device = currentDevice;
     }
 
-    device = await getGPUDevice();
+    if (accumulatePipeline && normalizePipeline) {
+        return device;
+    }
 
     // Create accumulate pipeline
     const accumulateModule = device.createShaderModule({
