@@ -1133,6 +1133,51 @@ async function testHoleTriangulation(page) {
             expectedMergedVertices: 11,
             expectedTriangles: 9,
         },
+        {
+            name: 'Triangle with triangle hole',
+            path: 'step-examples/holes/triangle-with-triangle-hole.step',
+            expectedOuterVertices: 3,
+            expectedHoleVertices: 3,
+            // 3 outer + 3 hole + 2 bridge = 8
+            expectedMergedVertices: 8,
+            expectedTriangles: 6,
+        },
+        {
+            name: 'Pentagon with hole',
+            path: 'step-examples/holes/pentagon-with-hole.step',
+            expectedOuterVertices: 5,
+            expectedHoleVertices: 3,
+            // 5 outer + 3 hole + 2 bridge = 10
+            expectedMergedVertices: 10,
+            expectedTriangles: 8,
+        },
+        {
+            name: 'Concentric squares (washer)',
+            path: 'step-examples/holes/concentric-squares.step',
+            expectedOuterVertices: 4,
+            expectedHoleVertices: 4,
+            // 4 outer + 4 hole + 2 bridge = 10
+            expectedMergedVertices: 10,
+            expectedTriangles: 8,
+        },
+        {
+            name: 'Octagon with square hole',
+            path: 'step-examples/holes/octagon-with-square-hole.step',
+            expectedOuterVertices: 8,
+            expectedHoleVertices: 4,
+            // 8 outer + 4 hole + 2 bridge = 14
+            expectedMergedVertices: 14,
+            expectedTriangles: 12,
+        },
+        {
+            name: 'Thin rectangle with slot',
+            path: 'step-examples/holes/thin-rectangle-with-slot.step',
+            expectedOuterVertices: 4,
+            expectedHoleVertices: 4,
+            // 4 outer + 4 hole + 2 bridge = 10
+            expectedMergedVertices: 10,
+            expectedTriangles: 8,
+        },
     ];
 
     for (const test of tests) {

@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GPU vs OCCT Benchmark</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+        }
+        #status {
+            padding: 10px;
+            background: #16213e;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .ready { color: #4ade80; }
+        .loading { color: #fbbf24; }
+        .error { color: #f87171; }
+    </style>
+</head>
+<body>
+    <h1>GPU vs occt-import-js Benchmark</h1>
+    <div id="status" class="loading">Initializing...</div>
+    <div id="log"></div>
+
+    <script type="module">
+        import { parseStepToMesh } from '../src/step-parser.ts';
+        import { getGPUDevice } from '../src/lib.ts';
+        import occtimportjs from 'occt-import-js';
+
+        const statusEl = document.getElementById('status');
+        const logEl = document.getElementById('log');
+
+        function logMessage(msg) {
+            const div = document.createElement('div');
+            div.textContent = msg;
+            logEl.appendChild(div);
+            console.log(msg);
+        }
+
+        // Initialize OCCT
+        let occt = null;
+        let gpuDevice = null;
+
+        async function initialize() {
+            try {
+                statusEl.textContent = 'Loading occt-import-js WASM...';
+
+                // Initialize OCCT with custom locateFile to find WASM in public folder
+                occt = await occtimportjs({
+                    locateFile: (file) => {
+                        if (file.endsWith('.wasm')) {
+                            return '/occt-import-js.wasm';
+                        }
+                        return file;
+                    }
+                });
+                logMessage('✓ occt-import-js initialized');
+
+                // Initialize GPU
+                statusEl.textContent = 'Initializing WebGPU...';
+                gpuDevice = await getGPUDevice();
+                logMessage('✓ WebGPU initialized');
+
+                // Mark ready
+                statusEl.textContent = 'Ready for benchmarks';
+                statusEl.className = 'ready';
+                window.benchmarkReady = true;
+
+            } catch (e) {
+                statusEl.textContent = `Error: ${e.message}`;
+                statusEl.className = 'error';
+                console.error(e);
+            }
+        }
+
+        // Benchmark functions exposed to Puppeteer
+        window.benchmark = {
+            /**
+             * Run GPU-based triangulation
+             */
+            async runGPU(stepBase64) {
+                try {
+                    const stepText = atob(stepBase64);
+
+                    // Parse STEP and triangulate
+                    const result = await parseStepToMesh(stepText);
+
+                    if (!result || !result.positions) {
+                        return { success: false, error: 'No mesh returned' };
+                    }
+
+                    return {
+                        success: true,
+                        totalTime: result.totalTime || 0,
+                        parseTime: result.parseTime || 0,
+                        triangulationTime: result.triangulationTime || 0,
+                        vertexCount: result.positions.length / 3,
+                        triangleCount: result.indices.length / 3,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            /**
+             * Run OCCT-based triangulation
+             */
+            async runOCCT(stepBase64) {
+                try {
+                    // Decode base64 to Uint8Array
+                    const binaryString = atob(stepBase64);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+
+                    const startTotal = performance.now();
+
+                    // Use OCCT to parse and triangulate
+                    const result = occt.ReadStepFile(bytes, null);
+
+                    const endTotal = performance.now();
+
+                    if (!result.success) {
+                        console.error('OCCT result:', result);
+                        return { success: false, error: `OCCT failed: ${result.error || 'no meshes returned'}` };
+                    }
+
+                    if (!result.meshes || result.meshes.length === 0) {
+                        return { success: false, error: 'OCCT returned no meshes' };
+                    }
+
+                    // Count triangles and vertices across all meshes
+                    let totalVertices = 0;
+                    let totalTriangles = 0;
+
+                    for (const mesh of result.meshes) {
+                        if (mesh.attributes && mesh.attributes.position) {
+                            totalVertices += mesh.attributes.position.array.length / 3;
+                        }
+                        if (mesh.index) {
+                            totalTriangles += mesh.index.array.length / 3;
+                        }
+                    }
+
+                    return {
+                        success: true,
+                        totalTime: endTotal - startTotal,
+                        vertexCount: totalVertices,
+                        triangleCount: totalTriangles,
+                        meshCount: result.meshes.length,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            }
+        };
+
+        // Start initialization
+        initialize();
+    </script>
+</body>
+</html>

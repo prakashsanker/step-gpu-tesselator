@@ -1,0 +1,541 @@
+ISO-10303-21;
+HEADER;
+  FILE_DESCRIPTION(('Benchmark plate with 25 triangular holes (5x5 grid)'),'2;1');
+  FILE_NAME('benchmark_plate_5x5.stp','2026-01-04',(''),(''),'','','');
+  FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+
+#1 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+#2 = DIRECTION('', (0.0, 0.0, 1.0));
+#3 = DIRECTION('', (1.0, 0.0, 0.0));
+#4 = AXIS2_PLACEMENT_3D('', #1, #2, #3);
+#5 = PLANE('', #4);
+#6 = VECTOR('', #3, 1.0);
+
+/* ==== Outer rectangular boundary (CCW) ==== */
+#7 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+#8 = CARTESIAN_POINT('', (100.0, 0.0, 0.0));
+#9 = CARTESIAN_POINT('', (100.0, 100.0, 0.0));
+#10 = CARTESIAN_POINT('', (0.0, 100.0, 0.0));
+#11 = VERTEX_POINT('', #7);
+#12 = VERTEX_POINT('', #8);
+#13 = VERTEX_POINT('', #9);
+#14 = VERTEX_POINT('', #10);
+#15 = LINE('', #7, #6);
+#16 = LINE('', #8, #6);
+#17 = LINE('', #9, #6);
+#18 = LINE('', #10, #6);
+#19 = EDGE_CURVE('', #11, #12, #15, .T.);
+#20 = EDGE_CURVE('', #12, #13, #16, .T.);
+#21 = EDGE_CURVE('', #13, #14, #17, .T.);
+#22 = EDGE_CURVE('', #14, #11, #18, .T.);
+#23 = ORIENTED_EDGE('', *, *, #19, .T.);
+#24 = ORIENTED_EDGE('', *, *, #20, .T.);
+#25 = ORIENTED_EDGE('', *, *, #21, .T.);
+#26 = ORIENTED_EDGE('', *, *, #22, .T.);
+#27 = EDGE_LOOP('', (#23, #24, #25, #26));
+#28 = FACE_OUTER_BOUND('', #27, .T.);
+
+/* ==== Hole 1 (row 0, col 0) CW ==== */
+#29 = CARTESIAN_POINT('', (12.500, 12.500, 0.0));
+#30 = CARTESIAN_POINT('', (12.500, 15.500, 0.0));
+#31 = CARTESIAN_POINT('', (15.500, 14.000, 0.0));
+#32 = VERTEX_POINT('', #29);
+#33 = VERTEX_POINT('', #30);
+#34 = VERTEX_POINT('', #31);
+#35 = LINE('', #29, #6);
+#36 = LINE('', #30, #6);
+#37 = LINE('', #31, #6);
+#38 = EDGE_CURVE('', #32, #33, #35, .T.);
+#39 = EDGE_CURVE('', #33, #34, #36, .T.);
+#40 = EDGE_CURVE('', #34, #32, #37, .T.);
+#41 = ORIENTED_EDGE('', *, *, #38, .T.);
+#42 = ORIENTED_EDGE('', *, *, #39, .T.);
+#43 = ORIENTED_EDGE('', *, *, #40, .T.);
+#44 = EDGE_LOOP('', (#41, #42, #43));
+#45 = FACE_BOUND('', #44, .T.);
+
+/* ==== Hole 2 (row 0, col 1) CW ==== */
+#46 = CARTESIAN_POINT('', (30.500, 12.500, 0.0));
+#47 = CARTESIAN_POINT('', (30.500, 15.500, 0.0));
+#48 = CARTESIAN_POINT('', (33.500, 14.000, 0.0));
+#49 = VERTEX_POINT('', #46);
+#50 = VERTEX_POINT('', #47);
+#51 = VERTEX_POINT('', #48);
+#52 = LINE('', #46, #6);
+#53 = LINE('', #47, #6);
+#54 = LINE('', #48, #6);
+#55 = EDGE_CURVE('', #49, #50, #52, .T.);
+#56 = EDGE_CURVE('', #50, #51, #53, .T.);
+#57 = EDGE_CURVE('', #51, #49, #54, .T.);
+#58 = ORIENTED_EDGE('', *, *, #55, .T.);
+#59 = ORIENTED_EDGE('', *, *, #56, .T.);
+#60 = ORIENTED_EDGE('', *, *, #57, .T.);
+#61 = EDGE_LOOP('', (#58, #59, #60));
+#62 = FACE_BOUND('', #61, .T.);
+
+/* ==== Hole 3 (row 0, col 2) CW ==== */
+#63 = CARTESIAN_POINT('', (48.500, 12.500, 0.0));
+#64 = CARTESIAN_POINT('', (48.500, 15.500, 0.0));
+#65 = CARTESIAN_POINT('', (51.500, 14.000, 0.0));
+#66 = VERTEX_POINT('', #63);
+#67 = VERTEX_POINT('', #64);
+#68 = VERTEX_POINT('', #65);
+#69 = LINE('', #63, #6);
+#70 = LINE('', #64, #6);
+#71 = LINE('', #65, #6);
+#72 = EDGE_CURVE('', #66, #67, #69, .T.);
+#73 = EDGE_CURVE('', #67, #68, #70, .T.);
+#74 = EDGE_CURVE('', #68, #66, #71, .T.);
+#75 = ORIENTED_EDGE('', *, *, #72, .T.);
+#76 = ORIENTED_EDGE('', *, *, #73, .T.);
+#77 = ORIENTED_EDGE('', *, *, #74, .T.);
+#78 = EDGE_LOOP('', (#75, #76, #77));
+#79 = FACE_BOUND('', #78, .T.);
+
+/* ==== Hole 4 (row 0, col 3) CW ==== */
+#80 = CARTESIAN_POINT('', (66.500, 12.500, 0.0));
+#81 = CARTESIAN_POINT('', (66.500, 15.500, 0.0));
+#82 = CARTESIAN_POINT('', (69.500, 14.000, 0.0));
+#83 = VERTEX_POINT('', #80);
+#84 = VERTEX_POINT('', #81);
+#85 = VERTEX_POINT('', #82);
+#86 = LINE('', #80, #6);
+#87 = LINE('', #81, #6);
+#88 = LINE('', #82, #6);
+#89 = EDGE_CURVE('', #83, #84, #86, .T.);
+#90 = EDGE_CURVE('', #84, #85, #87, .T.);
+#91 = EDGE_CURVE('', #85, #83, #88, .T.);
+#92 = ORIENTED_EDGE('', *, *, #89, .T.);
+#93 = ORIENTED_EDGE('', *, *, #90, .T.);
+#94 = ORIENTED_EDGE('', *, *, #91, .T.);
+#95 = EDGE_LOOP('', (#92, #93, #94));
+#96 = FACE_BOUND('', #95, .T.);
+
+/* ==== Hole 5 (row 0, col 4) CW ==== */
+#97 = CARTESIAN_POINT('', (84.500, 12.500, 0.0));
+#98 = CARTESIAN_POINT('', (84.500, 15.500, 0.0));
+#99 = CARTESIAN_POINT('', (87.500, 14.000, 0.0));
+#100 = VERTEX_POINT('', #97);
+#101 = VERTEX_POINT('', #98);
+#102 = VERTEX_POINT('', #99);
+#103 = LINE('', #97, #6);
+#104 = LINE('', #98, #6);
+#105 = LINE('', #99, #6);
+#106 = EDGE_CURVE('', #100, #101, #103, .T.);
+#107 = EDGE_CURVE('', #101, #102, #104, .T.);
+#108 = EDGE_CURVE('', #102, #100, #105, .T.);
+#109 = ORIENTED_EDGE('', *, *, #106, .T.);
+#110 = ORIENTED_EDGE('', *, *, #107, .T.);
+#111 = ORIENTED_EDGE('', *, *, #108, .T.);
+#112 = EDGE_LOOP('', (#109, #110, #111));
+#113 = FACE_BOUND('', #112, .T.);
+
+/* ==== Hole 6 (row 1, col 0) CW ==== */
+#114 = CARTESIAN_POINT('', (12.500, 30.500, 0.0));
+#115 = CARTESIAN_POINT('', (12.500, 33.500, 0.0));
+#116 = CARTESIAN_POINT('', (15.500, 32.000, 0.0));
+#117 = VERTEX_POINT('', #114);
+#118 = VERTEX_POINT('', #115);
+#119 = VERTEX_POINT('', #116);
+#120 = LINE('', #114, #6);
+#121 = LINE('', #115, #6);
+#122 = LINE('', #116, #6);
+#123 = EDGE_CURVE('', #117, #118, #120, .T.);
+#124 = EDGE_CURVE('', #118, #119, #121, .T.);
+#125 = EDGE_CURVE('', #119, #117, #122, .T.);
+#126 = ORIENTED_EDGE('', *, *, #123, .T.);
+#127 = ORIENTED_EDGE('', *, *, #124, .T.);
+#128 = ORIENTED_EDGE('', *, *, #125, .T.);
+#129 = EDGE_LOOP('', (#126, #127, #128));
+#130 = FACE_BOUND('', #129, .T.);
+
+/* ==== Hole 7 (row 1, col 1) CW ==== */
+#131 = CARTESIAN_POINT('', (30.500, 30.500, 0.0));
+#132 = CARTESIAN_POINT('', (30.500, 33.500, 0.0));
+#133 = CARTESIAN_POINT('', (33.500, 32.000, 0.0));
+#134 = VERTEX_POINT('', #131);
+#135 = VERTEX_POINT('', #132);
+#136 = VERTEX_POINT('', #133);
+#137 = LINE('', #131, #6);
+#138 = LINE('', #132, #6);
+#139 = LINE('', #133, #6);
+#140 = EDGE_CURVE('', #134, #135, #137, .T.);
+#141 = EDGE_CURVE('', #135, #136, #138, .T.);
+#142 = EDGE_CURVE('', #136, #134, #139, .T.);
+#143 = ORIENTED_EDGE('', *, *, #140, .T.);
+#144 = ORIENTED_EDGE('', *, *, #141, .T.);
+#145 = ORIENTED_EDGE('', *, *, #142, .T.);
+#146 = EDGE_LOOP('', (#143, #144, #145));
+#147 = FACE_BOUND('', #146, .T.);
+
+/* ==== Hole 8 (row 1, col 2) CW ==== */
+#148 = CARTESIAN_POINT('', (48.500, 30.500, 0.0));
+#149 = CARTESIAN_POINT('', (48.500, 33.500, 0.0));
+#150 = CARTESIAN_POINT('', (51.500, 32.000, 0.0));
+#151 = VERTEX_POINT('', #148);
+#152 = VERTEX_POINT('', #149);
+#153 = VERTEX_POINT('', #150);
+#154 = LINE('', #148, #6);
+#155 = LINE('', #149, #6);
+#156 = LINE('', #150, #6);
+#157 = EDGE_CURVE('', #151, #152, #154, .T.);
+#158 = EDGE_CURVE('', #152, #153, #155, .T.);
+#159 = EDGE_CURVE('', #153, #151, #156, .T.);
+#160 = ORIENTED_EDGE('', *, *, #157, .T.);
+#161 = ORIENTED_EDGE('', *, *, #158, .T.);
+#162 = ORIENTED_EDGE('', *, *, #159, .T.);
+#163 = EDGE_LOOP('', (#160, #161, #162));
+#164 = FACE_BOUND('', #163, .T.);
+
+/* ==== Hole 9 (row 1, col 3) CW ==== */
+#165 = CARTESIAN_POINT('', (66.500, 30.500, 0.0));
+#166 = CARTESIAN_POINT('', (66.500, 33.500, 0.0));
+#167 = CARTESIAN_POINT('', (69.500, 32.000, 0.0));
+#168 = VERTEX_POINT('', #165);
+#169 = VERTEX_POINT('', #166);
+#170 = VERTEX_POINT('', #167);
+#171 = LINE('', #165, #6);
+#172 = LINE('', #166, #6);
+#173 = LINE('', #167, #6);
+#174 = EDGE_CURVE('', #168, #169, #171, .T.);
+#175 = EDGE_CURVE('', #169, #170, #172, .T.);
+#176 = EDGE_CURVE('', #170, #168, #173, .T.);
+#177 = ORIENTED_EDGE('', *, *, #174, .T.);
+#178 = ORIENTED_EDGE('', *, *, #175, .T.);
+#179 = ORIENTED_EDGE('', *, *, #176, .T.);
+#180 = EDGE_LOOP('', (#177, #178, #179));
+#181 = FACE_BOUND('', #180, .T.);
+
+/* ==== Hole 10 (row 1, col 4) CW ==== */
+#182 = CARTESIAN_POINT('', (84.500, 30.500, 0.0));
+#183 = CARTESIAN_POINT('', (84.500, 33.500, 0.0));
+#184 = CARTESIAN_POINT('', (87.500, 32.000, 0.0));
+#185 = VERTEX_POINT('', #182);
+#186 = VERTEX_POINT('', #183);
+#187 = VERTEX_POINT('', #184);
+#188 = LINE('', #182, #6);
+#189 = LINE('', #183, #6);
+#190 = LINE('', #184, #6);
+#191 = EDGE_CURVE('', #185, #186, #188, .T.);
+#192 = EDGE_CURVE('', #186, #187, #189, .T.);
+#193 = EDGE_CURVE('', #187, #185, #190, .T.);
+#194 = ORIENTED_EDGE('', *, *, #191, .T.);
+#195 = ORIENTED_EDGE('', *, *, #192, .T.);
+#196 = ORIENTED_EDGE('', *, *, #193, .T.);
+#197 = EDGE_LOOP('', (#194, #195, #196));
+#198 = FACE_BOUND('', #197, .T.);
+
+/* ==== Hole 11 (row 2, col 0) CW ==== */
+#199 = CARTESIAN_POINT('', (12.500, 48.500, 0.0));
+#200 = CARTESIAN_POINT('', (12.500, 51.500, 0.0));
+#201 = CARTESIAN_POINT('', (15.500, 50.000, 0.0));
+#202 = VERTEX_POINT('', #199);
+#203 = VERTEX_POINT('', #200);
+#204 = VERTEX_POINT('', #201);
+#205 = LINE('', #199, #6);
+#206 = LINE('', #200, #6);
+#207 = LINE('', #201, #6);
+#208 = EDGE_CURVE('', #202, #203, #205, .T.);
+#209 = EDGE_CURVE('', #203, #204, #206, .T.);
+#210 = EDGE_CURVE('', #204, #202, #207, .T.);
+#211 = ORIENTED_EDGE('', *, *, #208, .T.);
+#212 = ORIENTED_EDGE('', *, *, #209, .T.);
+#213 = ORIENTED_EDGE('', *, *, #210, .T.);
+#214 = EDGE_LOOP('', (#211, #212, #213));
+#215 = FACE_BOUND('', #214, .T.);
+
+/* ==== Hole 12 (row 2, col 1) CW ==== */
+#216 = CARTESIAN_POINT('', (30.500, 48.500, 0.0));
+#217 = CARTESIAN_POINT('', (30.500, 51.500, 0.0));
+#218 = CARTESIAN_POINT('', (33.500, 50.000, 0.0));
+#219 = VERTEX_POINT('', #216);
+#220 = VERTEX_POINT('', #217);
+#221 = VERTEX_POINT('', #218);
+#222 = LINE('', #216, #6);
+#223 = LINE('', #217, #6);
+#224 = LINE('', #218, #6);
+#225 = EDGE_CURVE('', #219, #220, #222, .T.);
+#226 = EDGE_CURVE('', #220, #221, #223, .T.);
+#227 = EDGE_CURVE('', #221, #219, #224, .T.);
+#228 = ORIENTED_EDGE('', *, *, #225, .T.);
+#229 = ORIENTED_EDGE('', *, *, #226, .T.);
+#230 = ORIENTED_EDGE('', *, *, #227, .T.);
+#231 = EDGE_LOOP('', (#228, #229, #230));
+#232 = FACE_BOUND('', #231, .T.);
+
+/* ==== Hole 13 (row 2, col 2) CW ==== */
+#233 = CARTESIAN_POINT('', (48.500, 48.500, 0.0));
+#234 = CARTESIAN_POINT('', (48.500, 51.500, 0.0));
+#235 = CARTESIAN_POINT('', (51.500, 50.000, 0.0));
+#236 = VERTEX_POINT('', #233);
+#237 = VERTEX_POINT('', #234);
+#238 = VERTEX_POINT('', #235);
+#239 = LINE('', #233, #6);
+#240 = LINE('', #234, #6);
+#241 = LINE('', #235, #6);
+#242 = EDGE_CURVE('', #236, #237, #239, .T.);
+#243 = EDGE_CURVE('', #237, #238, #240, .T.);
+#244 = EDGE_CURVE('', #238, #236, #241, .T.);
+#245 = ORIENTED_EDGE('', *, *, #242, .T.);
+#246 = ORIENTED_EDGE('', *, *, #243, .T.);
+#247 = ORIENTED_EDGE('', *, *, #244, .T.);
+#248 = EDGE_LOOP('', (#245, #246, #247));
+#249 = FACE_BOUND('', #248, .T.);
+
+/* ==== Hole 14 (row 2, col 3) CW ==== */
+#250 = CARTESIAN_POINT('', (66.500, 48.500, 0.0));
+#251 = CARTESIAN_POINT('', (66.500, 51.500, 0.0));
+#252 = CARTESIAN_POINT('', (69.500, 50.000, 0.0));
+#253 = VERTEX_POINT('', #250);
+#254 = VERTEX_POINT('', #251);
+#255 = VERTEX_POINT('', #252);
+#256 = LINE('', #250, #6);
+#257 = LINE('', #251, #6);
+#258 = LINE('', #252, #6);
+#259 = EDGE_CURVE('', #253, #254, #256, .T.);
+#260 = EDGE_CURVE('', #254, #255, #257, .T.);
+#261 = EDGE_CURVE('', #255, #253, #258, .T.);
+#262 = ORIENTED_EDGE('', *, *, #259, .T.);
+#263 = ORIENTED_EDGE('', *, *, #260, .T.);
+#264 = ORIENTED_EDGE('', *, *, #261, .T.);
+#265 = EDGE_LOOP('', (#262, #263, #264));
+#266 = FACE_BOUND('', #265, .T.);
+
+/* ==== Hole 15 (row 2, col 4) CW ==== */
+#267 = CARTESIAN_POINT('', (84.500, 48.500, 0.0));
+#268 = CARTESIAN_POINT('', (84.500, 51.500, 0.0));
+#269 = CARTESIAN_POINT('', (87.500, 50.000, 0.0));
+#270 = VERTEX_POINT('', #267);
+#271 = VERTEX_POINT('', #268);
+#272 = VERTEX_POINT('', #269);
+#273 = LINE('', #267, #6);
+#274 = LINE('', #268, #6);
+#275 = LINE('', #269, #6);
+#276 = EDGE_CURVE('', #270, #271, #273, .T.);
+#277 = EDGE_CURVE('', #271, #272, #274, .T.);
+#278 = EDGE_CURVE('', #272, #270, #275, .T.);
+#279 = ORIENTED_EDGE('', *, *, #276, .T.);
+#280 = ORIENTED_EDGE('', *, *, #277, .T.);
+#281 = ORIENTED_EDGE('', *, *, #278, .T.);
+#282 = EDGE_LOOP('', (#279, #280, #281));
+#283 = FACE_BOUND('', #282, .T.);
+
+/* ==== Hole 16 (row 3, col 0) CW ==== */
+#284 = CARTESIAN_POINT('', (12.500, 66.500, 0.0));
+#285 = CARTESIAN_POINT('', (12.500, 69.500, 0.0));
+#286 = CARTESIAN_POINT('', (15.500, 68.000, 0.0));
+#287 = VERTEX_POINT('', #284);
+#288 = VERTEX_POINT('', #285);
+#289 = VERTEX_POINT('', #286);
+#290 = LINE('', #284, #6);
+#291 = LINE('', #285, #6);
+#292 = LINE('', #286, #6);
+#293 = EDGE_CURVE('', #287, #288, #290, .T.);
+#294 = EDGE_CURVE('', #288, #289, #291, .T.);
+#295 = EDGE_CURVE('', #289, #287, #292, .T.);
+#296 = ORIENTED_EDGE('', *, *, #293, .T.);
+#297 = ORIENTED_EDGE('', *, *, #294, .T.);
+#298 = ORIENTED_EDGE('', *, *, #295, .T.);
+#299 = EDGE_LOOP('', (#296, #297, #298));
+#300 = FACE_BOUND('', #299, .T.);
+
+/* ==== Hole 17 (row 3, col 1) CW ==== */
+#301 = CARTESIAN_POINT('', (30.500, 66.500, 0.0));
+#302 = CARTESIAN_POINT('', (30.500, 69.500, 0.0));
+#303 = CARTESIAN_POINT('', (33.500, 68.000, 0.0));
+#304 = VERTEX_POINT('', #301);
+#305 = VERTEX_POINT('', #302);
+#306 = VERTEX_POINT('', #303);
+#307 = LINE('', #301, #6);
+#308 = LINE('', #302, #6);
+#309 = LINE('', #303, #6);
+#310 = EDGE_CURVE('', #304, #305, #307, .T.);
+#311 = EDGE_CURVE('', #305, #306, #308, .T.);
+#312 = EDGE_CURVE('', #306, #304, #309, .T.);
+#313 = ORIENTED_EDGE('', *, *, #310, .T.);
+#314 = ORIENTED_EDGE('', *, *, #311, .T.);
+#315 = ORIENTED_EDGE('', *, *, #312, .T.);
+#316 = EDGE_LOOP('', (#313, #314, #315));
+#317 = FACE_BOUND('', #316, .T.);
+
+/* ==== Hole 18 (row 3, col 2) CW ==== */
+#318 = CARTESIAN_POINT('', (48.500, 66.500, 0.0));
+#319 = CARTESIAN_POINT('', (48.500, 69.500, 0.0));
+#320 = CARTESIAN_POINT('', (51.500, 68.000, 0.0));
+#321 = VERTEX_POINT('', #318);
+#322 = VERTEX_POINT('', #319);
+#323 = VERTEX_POINT('', #320);
+#324 = LINE('', #318, #6);
+#325 = LINE('', #319, #6);
+#326 = LINE('', #320, #6);
+#327 = EDGE_CURVE('', #321, #322, #324, .T.);
+#328 = EDGE_CURVE('', #322, #323, #325, .T.);
+#329 = EDGE_CURVE('', #323, #321, #326, .T.);
+#330 = ORIENTED_EDGE('', *, *, #327, .T.);
+#331 = ORIENTED_EDGE('', *, *, #328, .T.);
+#332 = ORIENTED_EDGE('', *, *, #329, .T.);
+#333 = EDGE_LOOP('', (#330, #331, #332));
+#334 = FACE_BOUND('', #333, .T.);
+
+/* ==== Hole 19 (row 3, col 3) CW ==== */
+#335 = CARTESIAN_POINT('', (66.500, 66.500, 0.0));
+#336 = CARTESIAN_POINT('', (66.500, 69.500, 0.0));
+#337 = CARTESIAN_POINT('', (69.500, 68.000, 0.0));
+#338 = VERTEX_POINT('', #335);
+#339 = VERTEX_POINT('', #336);
+#340 = VERTEX_POINT('', #337);
+#341 = LINE('', #335, #6);
+#342 = LINE('', #336, #6);
+#343 = LINE('', #337, #6);
+#344 = EDGE_CURVE('', #338, #339, #341, .T.);
+#345 = EDGE_CURVE('', #339, #340, #342, .T.);
+#346 = EDGE_CURVE('', #340, #338, #343, .T.);
+#347 = ORIENTED_EDGE('', *, *, #344, .T.);
+#348 = ORIENTED_EDGE('', *, *, #345, .T.);
+#349 = ORIENTED_EDGE('', *, *, #346, .T.);
+#350 = EDGE_LOOP('', (#347, #348, #349));
+#351 = FACE_BOUND('', #350, .T.);
+
+/* ==== Hole 20 (row 3, col 4) CW ==== */
+#352 = CARTESIAN_POINT('', (84.500, 66.500, 0.0));
+#353 = CARTESIAN_POINT('', (84.500, 69.500, 0.0));
+#354 = CARTESIAN_POINT('', (87.500, 68.000, 0.0));
+#355 = VERTEX_POINT('', #352);
+#356 = VERTEX_POINT('', #353);
+#357 = VERTEX_POINT('', #354);
+#358 = LINE('', #352, #6);
+#359 = LINE('', #353, #6);
+#360 = LINE('', #354, #6);
+#361 = EDGE_CURVE('', #355, #356, #358, .T.);
+#362 = EDGE_CURVE('', #356, #357, #359, .T.);
+#363 = EDGE_CURVE('', #357, #355, #360, .T.);
+#364 = ORIENTED_EDGE('', *, *, #361, .T.);
+#365 = ORIENTED_EDGE('', *, *, #362, .T.);
+#366 = ORIENTED_EDGE('', *, *, #363, .T.);
+#367 = EDGE_LOOP('', (#364, #365, #366));
+#368 = FACE_BOUND('', #367, .T.);
+
+/* ==== Hole 21 (row 4, col 0) CW ==== */
+#369 = CARTESIAN_POINT('', (12.500, 84.500, 0.0));
+#370 = CARTESIAN_POINT('', (12.500, 87.500, 0.0));
+#371 = CARTESIAN_POINT('', (15.500, 86.000, 0.0));
+#372 = VERTEX_POINT('', #369);
+#373 = VERTEX_POINT('', #370);
+#374 = VERTEX_POINT('', #371);
+#375 = LINE('', #369, #6);
+#376 = LINE('', #370, #6);
+#377 = LINE('', #371, #6);
+#378 = EDGE_CURVE('', #372, #373, #375, .T.);
+#379 = EDGE_CURVE('', #373, #374, #376, .T.);
+#380 = EDGE_CURVE('', #374, #372, #377, .T.);
+#381 = ORIENTED_EDGE('', *, *, #378, .T.);
+#382 = ORIENTED_EDGE('', *, *, #379, .T.);
+#383 = ORIENTED_EDGE('', *, *, #380, .T.);
+#384 = EDGE_LOOP('', (#381, #382, #383));
+#385 = FACE_BOUND('', #384, .T.);
+
+/* ==== Hole 22 (row 4, col 1) CW ==== */
+#386 = CARTESIAN_POINT('', (30.500, 84.500, 0.0));
+#387 = CARTESIAN_POINT('', (30.500, 87.500, 0.0));
+#388 = CARTESIAN_POINT('', (33.500, 86.000, 0.0));
+#389 = VERTEX_POINT('', #386);
+#390 = VERTEX_POINT('', #387);
+#391 = VERTEX_POINT('', #388);
+#392 = LINE('', #386, #6);
+#393 = LINE('', #387, #6);
+#394 = LINE('', #388, #6);
+#395 = EDGE_CURVE('', #389, #390, #392, .T.);
+#396 = EDGE_CURVE('', #390, #391, #393, .T.);
+#397 = EDGE_CURVE('', #391, #389, #394, .T.);
+#398 = ORIENTED_EDGE('', *, *, #395, .T.);
+#399 = ORIENTED_EDGE('', *, *, #396, .T.);
+#400 = ORIENTED_EDGE('', *, *, #397, .T.);
+#401 = EDGE_LOOP('', (#398, #399, #400));
+#402 = FACE_BOUND('', #401, .T.);
+
+/* ==== Hole 23 (row 4, col 2) CW ==== */
+#403 = CARTESIAN_POINT('', (48.500, 84.500, 0.0));
+#404 = CARTESIAN_POINT('', (48.500, 87.500, 0.0));
+#405 = CARTESIAN_POINT('', (51.500, 86.000, 0.0));
+#406 = VERTEX_POINT('', #403);
+#407 = VERTEX_POINT('', #404);
+#408 = VERTEX_POINT('', #405);
+#409 = LINE('', #403, #6);
+#410 = LINE('', #404, #6);
+#411 = LINE('', #405, #6);
+#412 = EDGE_CURVE('', #406, #407, #409, .T.);
+#413 = EDGE_CURVE('', #407, #408, #410, .T.);
+#414 = EDGE_CURVE('', #408, #406, #411, .T.);
+#415 = ORIENTED_EDGE('', *, *, #412, .T.);
+#416 = ORIENTED_EDGE('', *, *, #413, .T.);
+#417 = ORIENTED_EDGE('', *, *, #414, .T.);
+#418 = EDGE_LOOP('', (#415, #416, #417));
+#419 = FACE_BOUND('', #418, .T.);
+
+/* ==== Hole 24 (row 4, col 3) CW ==== */
+#420 = CARTESIAN_POINT('', (66.500, 84.500, 0.0));
+#421 = CARTESIAN_POINT('', (66.500, 87.500, 0.0));
+#422 = CARTESIAN_POINT('', (69.500, 86.000, 0.0));
+#423 = VERTEX_POINT('', #420);
+#424 = VERTEX_POINT('', #421);
+#425 = VERTEX_POINT('', #422);
+#426 = LINE('', #420, #6);
+#427 = LINE('', #421, #6);
+#428 = LINE('', #422, #6);
+#429 = EDGE_CURVE('', #423, #424, #426, .T.);
+#430 = EDGE_CURVE('', #424, #425, #427, .T.);
+#431 = EDGE_CURVE('', #425, #423, #428, .T.);
+#432 = ORIENTED_EDGE('', *, *, #429, .T.);
+#433 = ORIENTED_EDGE('', *, *, #430, .T.);
+#434 = ORIENTED_EDGE('', *, *, #431, .T.);
+#435 = EDGE_LOOP('', (#432, #433, #434));
+#436 = FACE_BOUND('', #435, .T.);
+
+/* ==== Hole 25 (row 4, col 4) CW ==== */
+#437 = CARTESIAN_POINT('', (84.500, 84.500, 0.0));
+#438 = CARTESIAN_POINT('', (84.500, 87.500, 0.0));
+#439 = CARTESIAN_POINT('', (87.500, 86.000, 0.0));
+#440 = VERTEX_POINT('', #437);
+#441 = VERTEX_POINT('', #438);
+#442 = VERTEX_POINT('', #439);
+#443 = LINE('', #437, #6);
+#444 = LINE('', #438, #6);
+#445 = LINE('', #439, #6);
+#446 = EDGE_CURVE('', #440, #441, #443, .T.);
+#447 = EDGE_CURVE('', #441, #442, #444, .T.);
+#448 = EDGE_CURVE('', #442, #440, #445, .T.);
+#449 = ORIENTED_EDGE('', *, *, #446, .T.);
+#450 = ORIENTED_EDGE('', *, *, #447, .T.);
+#451 = ORIENTED_EDGE('', *, *, #448, .T.);
+#452 = EDGE_LOOP('', (#449, #450, #451));
+#453 = FACE_BOUND('', #452, .T.);
+
+/* ==== Advanced face with outer and all holes ==== */
+#454 = ADVANCED_FACE('', (#28, #45, #62, #79, #96, #113, #130, #147, #164, #181, #198, #215, #232, #249, #266, #283, #300, #317, #334, #351, #368, #385, #402, #419, #436, #453), #5, .T.);
+
+/* ==== Product structure for OCCT compatibility ==== */
+#455 = CLOSED_SHELL('', (#454));
+#456 = MANIFOLD_SOLID_BREP('', #455);
+#457 = SHAPE_REPRESENTATION('', (#456), #901);
+
+/* ==== Geometric context ==== */
+#900 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );
+#901 = ( GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#902)) GLOBAL_UNIT_ASSIGNED_CONTEXT((#900,#903,#904)) REPRESENTATION_CONTEXT('Context','3D Context') );
+#902 = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#900,'');
+#903 = ( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) );
+#904 = ( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() );
+
+/* ==== Product definition ==== */
+#910 = PRODUCT('benchmark_plate','benchmark_plate','',(#911));
+#911 = PRODUCT_CONTEXT('',#912,'mechanical');
+#912 = APPLICATION_CONTEXT('automotive_design');
+#913 = PRODUCT_DEFINITION_FORMATION('','',#910);
+#914 = PRODUCT_DEFINITION('design','',#913,#915);
+#915 = PRODUCT_DEFINITION_CONTEXT('part definition',#912,'design');
+#916 = PRODUCT_DEFINITION_SHAPE('','',#914);
+#917 = SHAPE_DEFINITION_REPRESENTATION(#916,#457);
+
+ENDSEC;
+END-ISO-10303-21;

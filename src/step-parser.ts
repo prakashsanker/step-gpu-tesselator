@@ -1163,6 +1163,10 @@ function debugVerifyProjection(
 export interface Mesh {
   positions: Float32Array;
   indices: Uint32Array;
+  // Timing information for benchmarking
+  parseTime?: number;         // Time spent parsing STEP file (ms)
+  triangulationTime?: number; // Time spent in GPU triangulation (ms)
+  totalTime?: number;         // Total time from start to finish (ms)
 }
 
 // --- Internal STEP structures we care about ---
@@ -1227,6 +1231,93 @@ interface Plane {
   placementId: number;  // AXIS2_PLACEMENT_3D
 }
 
+// =============================================================================
+// C3: Curve Geometry Types
+// =============================================================================
+
+/** Vector entity (direction + magnitude) */
+interface Vector {
+  id: number;
+  directionId: number;
+  magnitude: number;
+}
+
+/** Line curve: origin + direction */
+interface Line {
+  id: number;
+  pointId: number;      // Origin point
+  vectorId: number;     // Direction vector
+}
+
+/** Circle curve: center + radius */
+interface Circle {
+  id: number;
+  placementId: number;  // AXIS2_PLACEMENT_3D (center, normal, refDir)
+  radius: number;
+}
+
+/** Ellipse curve: center + major/minor radii */
+interface Ellipse {
+  id: number;
+  placementId: number;  // AXIS2_PLACEMENT_3D (center, normal, refDir=major axis)
+  majorRadius: number;
+  minorRadius: number;
+}
+
+/** B-Spline curve with knots */
+interface BSplineCurve {
+  id: number;
+  degree: number;
+  controlPointIds: number[];  // References to CARTESIAN_POINT
+  knotMultiplicities: number[];
+  knots: number[];
+  weights?: number[];         // For rational B-splines (NURBS)
+  closed: boolean;
+}
+
+/** Surface curve wrapper (references the 3D curve) */
+interface SurfaceCurve {
+  id: number;
+  curve3dId: number;  // Reference to LINE, CIRCLE, ELLIPSE, or B_SPLINE
+}
+
+/** Resolved curve geometry ready for sampling */
+type CurveType = 'LINE' | 'CIRCLE' | 'ELLIPSE' | 'B_SPLINE';
+
+interface ResolvedCircle {
+  type: 'CIRCLE';
+  center: Vec3;
+  normal: Vec3;
+  refDirection: Vec3;
+  radius: number;
+}
+
+interface ResolvedEllipse {
+  type: 'ELLIPSE';
+  center: Vec3;
+  normal: Vec3;
+  refDirection: Vec3;  // Major axis direction
+  majorRadius: number;
+  minorRadius: number;
+}
+
+interface ResolvedBSpline {
+  type: 'B_SPLINE';
+  degree: number;
+  controlPoints: Vec3[];
+  knots: number[];       // Expanded knot vector (with multiplicities)
+  weights?: number[];
+  closed: boolean;
+}
+
+interface ResolvedLine {
+  type: 'LINE';
+  origin: Vec3;
+  direction: Vec3;
+}
+
+type ResolvedCurve = ResolvedLine | ResolvedCircle | ResolvedEllipse | ResolvedBSpline;
+
 // Simple container to hold all parsed entities
 interface StepModel {
   points: Map<number, CartesianPoint>;
@@ -1239,6 +1330,13 @@ interface StepModel {
   directions: Map<number, Direction>;
   axis2Placements: Map<number, Axis2Placement3D>;
   planes: Map<number, Plane>;
+  // C3: Curve geometry
+  vectors: Map<number, Vector>;
+  lines: Map<number, Line>;
+  circles: Map<number, Circle>;
+  ellipses: Map<number, Ellipse>;
+  bsplines: Map<number, BSplineCurve>;
+  surfaceCurves: Map<number, SurfaceCurve>;
 }
 
 // --- Public API: parse STEP text into a Mesh (one face) ---
@@ -1246,6 +1344,9 @@ interface StepModel {
 export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // This function is browser-safe: it expects the STEP file contents as a string,
   // leaving file I/O (File API, fetch, Node fs, etc.) to the caller.
+
+  const totalStart = performance.now();
+  const parseStart = performance.now();
 
   const model = parseStep(stepText);
   if (model.faces.size === 0) {
@@ -1256,7 +1357,8 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   const face = [...model.faces.values()][0];
 
   // C2.1: Extract outer boundary and holes using helper functions
-  const { outer, holes } = extractFaceBounds(model, face);
+  // C3: Use async version that supports curved edges (GPU curve sampling)
+  const { outer, holes } = await extractFaceBoundsWithCurves(model, face);
 
   // C2.2: Compute face basis and project to 2D
   const basis = computeFaceBasisFromStepFace(model, face, outer);
@@ -1389,8 +1491,14 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // Convert 2D points to Vec3 with z=0 for ear clipping
   const filtered2dAsVec3: Vec3[] = filteredMerged2d.map(p => [p[0], p[1], 0]);
 
+  // End parsing phase, start triangulation phase
+  const parseEnd = performance.now();
+  const triangulationStart = performance.now();
+
   // Run ear clipping on the filtered (bridged) polygon
   const triangles = await earClipping(filtered2dAsVec3);
+
+  const triangulationEnd = performance.now();
 
   console.log("[StepParser] Triangulation complete:", triangles.length, "triangles");
 
@@ -1401,9 +1509,17 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   }
   const indices = new Uint32Array(indicesArray);
 
-  console.log("[StepParser] Final mesh:", filtered3d.length, "vertices,", triangles.length, "triangles");
+  const totalEnd = performance.now();
 
-  return { positions, indices };
+  // Calculate timing
+  const parseTime = parseEnd - parseStart;
+  const triangulationTime = triangulationEnd - triangulationStart;
+  const totalTime = totalEnd - totalStart;
+
+  console.log("[StepParser] Final mesh:", filtered3d.length, "vertices,", triangles.length, "triangles");
+  console.log(`[StepParser] Timing: parse=${parseTime.toFixed(2)}ms, triangulation=${triangulationTime.toFixed(2)}ms, total=${totalTime.toFixed(2)}ms`);
+
+  return { positions, indices, parseTime, triangulationTime, totalTime };
 }
 /**
  * Browser helper: take a `File` (e.g. from an `<input type="file">`) and
@@ -1597,6 +1713,142 @@ function vec3Equal(a: Vec3, b: Vec3): boolean {
  * Extract boundary points from an edge loop.
  * Walks the oriented edges in order and collects vertex coordinates.
  */
+/**
+ * Extract loop points with curve sampling (async, uses GPU for curves).
+ * This is the C3-enhanced version that handles CIRCLE, ELLIPSE, and B_SPLINE edges.
+ */
+async function extractLoopPointsWithCurves(
+  model: StepModel,
+  loopId: number,
+  options: { angularTolerance?: number; minSamples?: number; maxSamples?: number } = {}
+): Promise<Vec3[]> {
+  const loop = model.edgeLoops.get(loopId);
+  if (!loop) throw new Error(`EDGE_LOOP #${loopId} not found`);
+
+  // First pass: collect edge info and identify curves
+  const edgeInfos: Array<{
+    startPoint: Vec3;
+    endPoint: Vec3;
+    curve: ResolvedCurve | null;
+    reversed: boolean;
+  }> = [];
+
+  for (const orientedEdgeId of loop.orientedEdgeIds) {
+    const oedge = model.orientedEdges.get(orientedEdgeId);
+    if (!oedge) throw new Error(`ORIENTED_EDGE #${orientedEdgeId} not found`);
+
+    const edgeCurve = model.edgeCurves.get(oedge.edgeElementId);
+    if (!edgeCurve) throw new Error(`EDGE_CURVE #${oedge.edgeElementId} not found`);
+
+    // Figure out start/end vertex IDs depending on orientation
+    let startVertexId = edgeCurve.startVertexId;
+    let endVertexId = edgeCurve.endVertexId;
+    let reversed = false;
+
+    // If orientation is false (.F.), we reverse the direction
+    if (!oedge.orientation) {
+      [startVertexId, endVertexId] = [endVertexId, startVertexId];
+      reversed = true;
+    }
+
+    // Also consider edge curve's sameSense
+    if (!edgeCurve.sameSense) {
+      reversed = !reversed;
+    }
+
+    const startVertex = model.vertices.get(startVertexId);
+    const endVertex = model.vertices.get(endVertexId);
+    if (!startVertex || !endVertex) {
+      throw new Error(`VERTEX_POINT (#${startVertexId} or #${endVertexId}) not found`);
+    }
+
+    const startPoint = model.points.get(startVertex.pointId);
+    const endPoint = model.points.get(endVertex.pointId);
+    if (!startPoint || !endPoint) {
+      throw new Error(
+        `CARTESIAN_POINT (#${startVertex.pointId} or #${endVertex.pointId}) not found`
+      );
+    }
+
+    // Resolve the curve geometry
+    const curve = resolveCurve(model, edgeCurve.curveId);
+
+    edgeInfos.push({
+      startPoint: startPoint.coords,
+      endPoint: endPoint.coords,
+      curve,
+      reversed,
+    });
+  }
+
+  // Collect non-line curves for GPU sampling
+  const curvesToSample: ResolvedCurve[] = [];
+  const curveStartPoints: Vec3[] = [];
+  const curveEndPoints: Vec3[] = [];
+  const curveReversed: boolean[] = [];
+  const curveEdgeIndices: number[] = [];
+
+  for (let i = 0; i < edgeInfos.length; i++) {
+    const { curve, startPoint, endPoint, reversed } = edgeInfos[i];
+    if (curve && curve.type !== 'LINE') {
+      curvesToSample.push(curve);
+      curveStartPoints.push(startPoint);
+      curveEndPoints.push(endPoint);
+      curveReversed.push(reversed);
+      curveEdgeIndices.push(i);
+    }
+  }
+
+  // Sample curves on GPU (if any)
+  let sampledCurves: Vec3[][] = [];
+  if (curvesToSample.length > 0) {
+    // Dynamic import to avoid circular dependency
+    const { sampleCurvesGPU } = await import('./curve-sampling');
+    sampledCurves = await sampleCurvesGPU(
+      curvesToSample,
+      curveStartPoints,
+      curveEndPoints,
+      curveReversed,
+      options
+    );
+  }
+
+  // Build boundary points with sampled curve points
+  const boundaryPoints: Vec3[] = [];
+  let sampledCurveIdx = 0;
+
+  for (let i = 0; i < edgeInfos.length; i++) {
+    const { startPoint, curve } = edgeInfos[i];
+
+    // Always add start point
+    boundaryPoints.push(startPoint);
+
+    // If this edge has a curve, add intermediate sampled points
+    if (curve && curve.type !== 'LINE' && sampledCurveIdx < curveEdgeIndices.length && curveEdgeIndices[sampledCurveIdx] === i) {
+      const samples = sampledCurves[sampledCurveIdx];
+      // Add intermediate points (skip first and last - they are start/end vertices)
+      for (let j = 1; j < samples.length - 1; j++) {
+        boundaryPoints.push(samples[j]);
+      }
+      sampledCurveIdx++;
+    }
+  }
+
+  // Close the loop explicitly if needed
+  const first = boundaryPoints[0];
+  const last = boundaryPoints[boundaryPoints.length - 1];
+  if (!vec3Equal(first, last)) {
+    boundaryPoints.push(first);
+  }
+
+  // Return unique points (without the closing duplicate)
+  return boundaryPoints.slice(0, boundaryPoints.length - 1);
+}
+
+/**
+ * Extract loop points (synchronous, straight edges only).
+ * This is the legacy version for files without curves.
+ */
 function extractLoopPoints(model: StepModel, loopId: number): Vec3[] {
   const loop = model.edgeLoops.get(loopId);
   if (!loop) throw new Error(`EDGE_LOOP #${loopId} not found`);
@@ -1684,6 +1936,41 @@ function extractFaceBounds(model: StepModel, face: AdvancedFace): FaceBoundsResu
   return { outer, holes };
 }
 
+/**
+ * Extract face bounds with curve sampling (async, uses GPU).
+ * This is the C3-enhanced version for files with curved edges.
+ */
+async function extractFaceBoundsWithCurves(
+  model: StepModel,
+  face: AdvancedFace,
+  options: { angularTolerance?: number; minSamples?: number; maxSamples?: number } = {}
+): Promise<FaceBoundsResult> {
+  let outer: Vec3[] | null = null;
+  const holes: Vec3[][] = [];
+
+  for (const boundId of face.boundIds) {
+    const bound = model.faceBounds.get(boundId);
+    if (!bound) throw new Error(`Face bound #${boundId} not found`);
+
+    const points = await extractLoopPointsWithCurves(model, bound.loopId, options);
+
+    if (bound.isOuter) {
+      if (outer !== null) {
+        throw new Error(`Multiple outer bounds found for face #${face.id}`);
+      }
+      outer = points;
+    } else {
+      holes.push(points);
+    }
+  }
+
+  if (outer === null) {
+    throw new Error(`No outer bound found for face #${face.id}`);
+  }
+
+  return { outer, holes };
+}
+
 // --- STEP parsing (very constrained to our example) ---
 
 function parseStep(stepText: string): StepModel {
@@ -1698,6 +1985,13 @@ function parseStep(stepText: string): StepModel {
     directions: new Map(),
     axis2Placements: new Map(),
     planes: new Map(),
+    // C3: Curve geometry
+    vectors: new Map(),
+    lines: new Map(),
+    circles: new Map(),
+    ellipses: new Map(),
+    bsplines: new Map(),
+    surfaceCurves: new Map(),
   };
 
   // Remove comments (/* ... */, / ... */, and -- ... end-of-line)
@@ -1755,7 +2049,23 @@ function parseStep(stepText: string): StepModel {
       case "PLANE":
         parsePlane(id, args, model);
         break;
-      // We ignore other entity types (LINE, VECTOR, etc.) for now
+      // C3: Curve geometry entities
+      case "VECTOR":
+        parseVector(id, args, model);
+        break;
+      case "LINE":
+        parseLine(id, args, model);
+        break;
+      case "CIRCLE":
+        parseCircle(id, args, model);
+        break;
+      case "ELLIPSE":
+        parseEllipse(id, args, model);
+        break;
+      case "SURFACE_CURVE":
+        parseSurfaceCurve(id, args, model);
+        break;
+      // We ignore other entity types for now
     }
   }
 
@@ -1917,4 +2227,213 @@ function parsePlane(id: number, args: string, model: StepModel) {
 
   model.planes.set(id, { id, placementId });
 }
+
+// =============================================================================
+// C3: Curve Entity Parsers
+// =============================================================================
+
+function parseVector(id: number, args: string, model: StepModel) {
+  // VECTOR('', #direction, magnitude)
+  // Example: VECTOR('', #30, 1.)
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)\s*,\s*([-0-9.Ee+]+)/);
+  if (!m) throw new Error(`Failed to parse VECTOR args: ${args}`);
+  const directionId = parseInt(m[1], 10);
+  const magnitude = parseFloat(m[2]);
+
+  model.vectors.set(id, { id, directionId, magnitude });
+}
+
+function parseLine(id: number, args: string, model: StepModel) {
+  // LINE('', #point, #vector)
+  // Example: LINE('', #28, #29)
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)\s*,\s*#(\d+)/);
+  if (!m) throw new Error(`Failed to parse LINE args: ${args}`);
+  const pointId = parseInt(m[1], 10);
+  const vectorId = parseInt(m[2], 10);
+
+  model.lines.set(id, { id, pointId, vectorId });
+}
+
+function parseCircle(id: number, args: string, model: StepModel) {
+  // CIRCLE('', #axis2_placement, radius)
+  // Example: CIRCLE('', #224, 5.)
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)\s*,\s*([-0-9.Ee+]+)/);
+  if (!m) throw new Error(`Failed to parse CIRCLE args: ${args}`);
+  const placementId = parseInt(m[1], 10);
+  const radius = parseFloat(m[2]);
+
+  model.circles.set(id, { id, placementId, radius });
+}
+
+function parseEllipse(id: number, args: string, model: StepModel) {
+  // ELLIPSE('', #axis2_placement, major_radius, minor_radius)
+  // Example: ELLIPSE('', #189412, 545.26, 196.83)
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)/);
+  if (!m) throw new Error(`Failed to parse ELLIPSE args: ${args}`);
+  const placementId = parseInt(m[1], 10);
+  const majorRadius = parseFloat(m[2]);
+  const minorRadius = parseFloat(m[3]);
+
+  model.ellipses.set(id, { id, placementId, majorRadius, minorRadius });
+}
+
+function parseSurfaceCurve(id: number, args: string, model: StepModel) {
+  // SURFACE_CURVE('', #3d_curve, (#pcurve1, #pcurve2), .PCURVE_S1.)
+  // Example: SURFACE_CURVE('', #223, (#228, #239), .PCURVE_S1.)
+  // We only care about the 3D curve reference (first #id after the name)
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)/);
+  if (!m) throw new Error(`Failed to parse SURFACE_CURVE args: ${args}`);
+  const curve3dId = parseInt(m[1], 10);
+
+  model.surfaceCurves.set(id, { id, curve3dId });
+}
+
+// =============================================================================
+// C3: Curve Resolution (follow reference chain to get geometry)
+// =============================================================================
+
+/**
+ * Resolve an AXIS2_PLACEMENT_3D to get origin, Z-axis (normal), and X-axis (refDir).
+ * Used by circles and ellipses to define their coordinate system.
+ */
+function resolveAxis2Placement(
+  model: StepModel,
+  placementId: number
+): { origin: Vec3; normal: Vec3; refDirection: Vec3 } {
+  const placement = model.axis2Placements.get(placementId);
+  if (!placement) {
+    throw new Error(`AXIS2_PLACEMENT_3D #${placementId} not found`);
+  }
+
+  // Get origin
+  const originPoint = model.points.get(placement.locationId);
+  if (!originPoint) {
+    throw new Error(`Origin point #${placement.locationId} not found`);
+  }
+  const origin = originPoint.coords;
+
+  // Get normal (Z axis) - defaults to (0, 0, 1) if not specified
+  let normal: Vec3 = [0, 0, 1];
+  if (placement.axisId !== null) {
+    const axisDir = model.directions.get(placement.axisId);
+    if (axisDir) {
+      normal = axisDir.dir;
+    }
+  }
+
+  // Get ref direction (X axis) - defaults to (1, 0, 0) if not specified
+  let refDirection: Vec3 = [1, 0, 0];
+  if (placement.refDirectionId !== null) {
+    const refDir = model.directions.get(placement.refDirectionId);
+    if (refDir) {
+      refDirection = refDir.dir;
+    }
+  }
+
+  return { origin, normal, refDirection };
+}
+
+/**
+ * Resolve a curve ID to its full geometry.
+ * Follows SURFACE_CURVE → actual curve type → resolved geometry.
+ */
+function resolveCurve(model: StepModel, curveId: number): ResolvedCurve | null {
+  // Check if it's a SURFACE_CURVE wrapper
+  const surfaceCurve = model.surfaceCurves.get(curveId);
+  if (surfaceCurve) {
+    curveId = surfaceCurve.curve3dId;
+  }
+
+  // Check for LINE
+  const line = model.lines.get(curveId);
+  if (line) {
+    const originPoint = model.points.get(line.pointId);
+    if (!originPoint) {
+      console.warn(`LINE #${curveId} origin point not found`);
+      return null;
+    }
+    const vector = model.vectors.get(line.vectorId);
+    if (!vector) {
+      console.warn(`LINE #${curveId} vector not found`);
+      return null;
+    }
+    const dir = model.directions.get(vector.directionId);
+    if (!dir) {
+      console.warn(`LINE #${curveId} direction not found`);
+      return null;
+    }
+    return {
+      type: 'LINE',
+      origin: originPoint.coords,
+      direction: dir.dir,
+    };
+  }
+
+  // Check for CIRCLE
+  const circle = model.circles.get(curveId);
+  if (circle) {
+    const { origin, normal, refDirection } = resolveAxis2Placement(model, circle.placementId);
+    return {
+      type: 'CIRCLE',
+      center: origin,
+      normal,
+      refDirection,
+      radius: circle.radius,
+    };
+  }
+
+  // Check for ELLIPSE
+  const ellipse = model.ellipses.get(curveId);
+  if (ellipse) {
+    const { origin, normal, refDirection } = resolveAxis2Placement(model, ellipse.placementId);
+    return {
+      type: 'ELLIPSE',
+      center: origin,
+      normal,
+      refDirection,
+      majorRadius: ellipse.majorRadius,
+      minorRadius: ellipse.minorRadius,
+    };
+  }
+
+  // Check for B_SPLINE (not yet parsed - TODO in next phase)
+  const bspline = model.bsplines.get(curveId);
+  if (bspline) {
+    // Resolve control points
+    const controlPoints: Vec3[] = [];
+    for (const cpId of bspline.controlPointIds) {
+      const cp = model.points.get(cpId);
+      if (!cp) {
+        console.warn(`B_SPLINE #${curveId} control point #${cpId} not found`);
+        return null;
+      }
+      controlPoints.push(cp.coords);
+    }
+
+    // Expand knots with multiplicities
+    const expandedKnots: number[] = [];
+    for (let i = 0; i < bspline.knots.length; i++) {
+      const mult = bspline.knotMultiplicities[i] || 1;
+      for (let j = 0; j < mult; j++) {
+        expandedKnots.push(bspline.knots[i]);
+      }
+    }
+
+    return {
+      type: 'B_SPLINE',
+      degree: bspline.degree,
+      controlPoints,
+      knots: expandedKnots,
+      weights: bspline.weights,
+      closed: bspline.closed,
+    };
+  }
+
+  // Unknown curve type
+  return null;
+}
+
+/** Export curve resolution functions and types for use in curve-sampling.ts */
+export { resolveCurve, resolveAxis2Placement };
+export type { Vec3, Vec2, ResolvedCurve, ResolvedCircle, ResolvedEllipse, ResolvedBSpline, ResolvedLine };
 
