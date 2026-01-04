@@ -373,79 +373,79 @@ async function testStepFiles(page) {
     const stepFiles = [
         {
             name: 'Simple Triangle',
-            path: 'step-examples/basics/triangle.step',
+            path: 'step-examples/c1-triangulation/convex/triangle.step',
             expectedVertices: 3,
             expectedTriangles: 1,
         },
         {
             name: 'CCW Square',
-            path: 'step-examples/basics/ccw-square.step',
+            path: 'step-examples/c1-triangulation/convex/ccw-square.step',
             expectedVertices: 4,
             expectedTriangles: 2,
         },
         {
             name: 'CW Square (should auto-reverse)',
-            path: 'step-examples/basics/cw-square.step',
+            path: 'step-examples/c1-triangulation/convex/cw-square.step',
             expectedVertices: 4,
             expectedTriangles: 2,
         },
         {
             name: 'Convex Hexagon',
-            path: 'step-examples/basics/hexagon.step',
+            path: 'step-examples/c1-triangulation/convex/hexagon.step',
             expectedVertices: 6,
             expectedTriangles: 4,
         },
         {
             name: 'Convex Heptagon',
-            path: 'step-examples/basics/convex-heptagon.step',
+            path: 'step-examples/c1-triangulation/convex/convex-heptagon.step',
             expectedVertices: 7,
             expectedTriangles: 5,
         },
         {
             name: 'Regular Octagon',
-            path: 'step-examples/basics/octagon.step',
+            path: 'step-examples/c1-triangulation/convex/octagon.step',
             expectedVertices: 8,
             expectedTriangles: 6,
         },
         {
             name: 'CCW Concave Pentagon',
-            path: 'step-examples/basics/ccw-pentagon-concave.step',
+            path: 'step-examples/c1-triangulation/concave/ccw-pentagon-concave.step',
             expectedVertices: 5,
             expectedTriangles: 3,
         },
         {
             name: 'CW Concave Pentagon',
-            path: 'step-examples/basics/cw-pentagon-concave.step',
+            path: 'step-examples/c1-triangulation/concave/cw-pentagon-concave.step',
             expectedVertices: 5,
             expectedTriangles: 3,
         },
         {
             name: 'L-Shape (6 vertices)',
-            path: 'step-examples/basics/l-shape.step',
+            path: 'step-examples/c1-triangulation/concave/l-shape.step',
             expectedVertices: 6,
             expectedTriangles: 4,
         },
         {
             name: 'Arrow Shape (7 vertices)',
-            path: 'step-examples/basics/arrow.step',
+            path: 'step-examples/c1-triangulation/concave/arrow.step',
             expectedVertices: 7,
             expectedTriangles: 5,
         },
         {
             name: 'Tilted Rectangle',
-            path: 'step-examples/basics/tilted-rectangle.step',
+            path: 'step-examples/c1-triangulation/convex/tilted-rectangle.step',
             expectedVertices: 4,
             expectedTriangles: 2,
         },
         {
             name: 'Convex Pentagon (convexity test)',
-            path: 'step-examples/convexity-step-files/convex_pentagon_simple.step',
+            path: 'step-examples/c1-triangulation/convex/convex_pentagon_simple.step',
             expectedVertices: 5,
             expectedTriangles: 3,
         },
         {
             name: 'Concave Pentagon Single Reflex',
-            path: 'step-examples/convexity-step-files/concave_pentagon_single_reflex.step',
+            path: 'step-examples/c1-triangulation/concave/concave_pentagon_single_reflex.step',
             expectedVertices: 5,
             expectedTriangles: 3,
         },
@@ -629,28 +629,28 @@ async function testFaceBoundsParsing(page) {
     const stepFiles = [
         {
             name: 'Simple square (no holes)',
-            path: 'step-examples/basics/ccw-square.step',
+            path: 'step-examples/c1-triangulation/convex/ccw-square.step',
             expectedOuterVertices: 4,
             expectedHoleCount: 0,
             expectedHoleVertices: [],
         },
         {
             name: 'Triangle (no holes)',
-            path: 'step-examples/basics/triangle.step',
+            path: 'step-examples/c1-triangulation/convex/triangle.step',
             expectedOuterVertices: 3,
             expectedHoleCount: 0,
             expectedHoleVertices: [],
         },
         {
             name: 'Square with triangular hole',
-            path: 'step-examples/basics/square-with-triangle-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-triangle-hole.step',
             expectedOuterVertices: 4,
             expectedHoleCount: 1,
             expectedHoleVertices: [3],
         },
         {
             name: 'Square with two triangular holes',
-            path: 'step-examples/basics/square-with-two-holes.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-two-holes.step',
             expectedOuterVertices: 4,
             expectedHoleCount: 2,
             expectedHoleVertices: [3, 3],
@@ -720,7 +720,7 @@ async function testProjection(page) {
     const tests = [
         {
             name: 'Flat square on XY plane (z=0)',
-            path: 'step-examples/basics/ccw-square.step',
+            path: 'step-examples/c1-triangulation/convex/ccw-square.step',
             expectedVertices: 4,
             expectUsedStepPlane: true,
             expectPlanar: true,
@@ -728,7 +728,7 @@ async function testProjection(page) {
         },
         {
             name: 'Tilted square (45° around Y axis)',
-            path: 'step-examples/projection/tilted-square-45deg.step',
+            path: 'step-examples/c2-holes/2.2-projection/tilted-square-45deg.step',
             expectedVertices: 4,
             expectUsedStepPlane: true,
             expectPlanar: true,
@@ -736,7 +736,7 @@ async function testProjection(page) {
         },
         {
             name: 'Vertical wall on XZ plane',
-            path: 'step-examples/projection/vertical-wall-xz.step',
+            path: 'step-examples/c2-holes/2.2-projection/vertical-wall-xz.step',
             expectedVertices: 4,
             expectUsedStepPlane: true,
             expectPlanar: true,
@@ -744,7 +744,7 @@ async function testProjection(page) {
         },
         {
             name: 'Tilted hexagon (45° around X axis)',
-            path: 'step-examples/projection/tilted-hexagon.step',
+            path: 'step-examples/c2-holes/2.2-projection/tilted-hexagon.step',
             expectedVertices: 6,
             expectUsedStepPlane: true,
             expectPlanar: true,
@@ -752,7 +752,7 @@ async function testProjection(page) {
         },
         {
             name: 'Tilted triangle (no PLANE - geometric fallback)',
-            path: 'step-examples/projection/tilted-triangle-no-plane.step',
+            path: 'step-examples/c2-holes/2.2-projection/tilted-triangle-no-plane.step',
             expectedVertices: 3,
             expectUsedStepPlane: false,  // Should use geometric fallback
             expectPlanar: true,
@@ -760,7 +760,7 @@ async function testProjection(page) {
         },
         {
             name: 'Square with hole (projection preserves hole)',
-            path: 'step-examples/basics/square-with-triangle-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-triangle-hole.step',
             expectedVertices: 4,
             expectedHoles: 1,
             expectUsedStepPlane: true,
@@ -857,14 +857,14 @@ async function testWindingNormalization(page) {
     const tests = [
         {
             name: 'Square with CW winding (should reverse outer)',
-            path: 'step-examples/winding/square-cw.step',
+            path: 'step-examples/c2-holes/2.3-winding/square-cw.step',
             expectOuterReversed: true,
             expectHolesReversed: [],
             expectNormalizedOuterPositive: true,  // After normalization, outer should be CCW (positive area)
         },
         {
             name: 'Square with CCW hole (should reverse hole)',
-            path: 'step-examples/winding/square-with-ccw-hole.step',
+            path: 'step-examples/c2-holes/2.3-winding/square-with-ccw-hole.step',
             expectOuterReversed: false,
             expectHolesReversed: [true],  // Hole should be reversed to CW
             expectNormalizedOuterPositive: true,
@@ -872,7 +872,7 @@ async function testWindingNormalization(page) {
         },
         {
             name: 'Both wrong (CW outer + CCW hole)',
-            path: 'step-examples/winding/both-wrong.step',
+            path: 'step-examples/c2-holes/2.3-winding/both-wrong.step',
             expectOuterReversed: true,
             expectHolesReversed: [true],
             expectNormalizedOuterPositive: true,
@@ -880,7 +880,7 @@ async function testWindingNormalization(page) {
         },
         {
             name: 'Correct winding (CCW outer + CW hole)',
-            path: 'step-examples/winding/correct-winding.step',
+            path: 'step-examples/c2-holes/2.3-winding/correct-winding.step',
             expectOuterReversed: false,
             expectHolesReversed: [false],  // Already correct, no reversal needed
             expectNormalizedOuterPositive: true,
@@ -973,34 +973,34 @@ async function testTopologyValidation(page) {
     const tests = [
         {
             name: 'Valid: square with centered hole',
-            path: 'step-examples/topology/valid-square-with-hole.step',
+            path: 'step-examples/c2-holes/2.4-topology/valid-square-with-hole.step',
             expectValid: true,
         },
         {
             name: 'Valid: simple square (no holes)',
-            path: 'step-examples/basics/ccw-square.step',
+            path: 'step-examples/c1-triangulation/convex/ccw-square.step',
             expectValid: true,
         },
         {
             name: 'Valid: existing square with hole',
-            path: 'step-examples/basics/square-with-triangle-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-triangle-hole.step',
             expectValid: true,
         },
         {
             name: 'Invalid: hole outside outer boundary',
-            path: 'step-examples/topology/hole-outside-outer.step',
+            path: 'step-examples/c2-holes/2.4-topology/hole-outside-outer.step',
             expectValid: false,
             expectErrorContains: 'outside outer boundary',
         },
         {
             name: 'Invalid: holes intersect each other',
-            path: 'step-examples/topology/holes-intersect.step',
+            path: 'step-examples/c2-holes/2.4-topology/holes-intersect.step',
             expectValid: false,
             expectErrorContains: 'intersects',
         },
         {
             name: 'Invalid: self-intersecting outer loop',
-            path: 'step-examples/topology/self-intersecting-outer.step',
+            path: 'step-examples/c2-holes/2.4-topology/self-intersecting-outer.step',
             expectValid: false,
             expectErrorContains: 'Self-intersection',
         },
@@ -1081,7 +1081,7 @@ async function testHoleTriangulation(page) {
     const tests = [
         {
             name: 'Square with triangle hole (existing)',
-            path: 'step-examples/basics/square-with-triangle-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-triangle-hole.step',
             expectedOuterVertices: 4,
             expectedHoleVertices: 3,
             // After bridging: 4 outer + 3 hole + 2 bridge duplicates = 9
@@ -1091,7 +1091,7 @@ async function testHoleTriangulation(page) {
         },
         {
             name: 'Square with two holes',
-            path: 'step-examples/basics/square-with-two-holes.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-two-holes.step',
             expectedOuterVertices: 4,
             expectedHoles: 2,
             // 4 + 3 + 2 (first hole bridged) + 3 + 2 (second hole bridged) = 14
@@ -1100,7 +1100,7 @@ async function testHoleTriangulation(page) {
         },
         {
             name: 'Square with square hole',
-            path: 'step-examples/holes/square-with-square-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-square-hole.step',
             expectedOuterVertices: 4,
             expectedHoleVertices: 4,
             // 4 outer + 4 hole + 2 bridge = 10
@@ -1109,7 +1109,7 @@ async function testHoleTriangulation(page) {
         },
         {
             name: 'Square with right-side hole',
-            path: 'step-examples/holes/square-with-right-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-right-hole.step',
             expectedOuterVertices: 4,
             expectedHoleVertices: 3,
             expectedMergedVertices: 9,
@@ -1117,7 +1117,7 @@ async function testHoleTriangulation(page) {
         },
         {
             name: 'Square with three holes',
-            path: 'step-examples/holes/square-with-three-holes.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-three-holes.step',
             expectedOuterVertices: 4,
             expectedHoles: 3,
             // 4 + (3+2)*3 = 4 + 15 = 19
@@ -1126,7 +1126,7 @@ async function testHoleTriangulation(page) {
         },
         {
             name: 'Hexagon with triangle hole',
-            path: 'step-examples/holes/hexagon-with-triangle-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/hexagon-with-triangle-hole.step',
             expectedOuterVertices: 6,
             expectedHoleVertices: 3,
             // 6 outer + 3 hole + 2 bridge = 11
@@ -1135,7 +1135,7 @@ async function testHoleTriangulation(page) {
         },
         {
             name: 'Triangle with triangle hole',
-            path: 'step-examples/holes/triangle-with-triangle-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/triangle-with-triangle-hole.step',
             expectedOuterVertices: 3,
             expectedHoleVertices: 3,
             // 3 outer + 3 hole + 2 bridge = 8
@@ -1144,7 +1144,7 @@ async function testHoleTriangulation(page) {
         },
         {
             name: 'Pentagon with hole',
-            path: 'step-examples/holes/pentagon-with-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/pentagon-with-hole.step',
             expectedOuterVertices: 5,
             expectedHoleVertices: 3,
             // 5 outer + 3 hole + 2 bridge = 10
@@ -1153,7 +1153,7 @@ async function testHoleTriangulation(page) {
         },
         {
             name: 'Concentric squares (washer)',
-            path: 'step-examples/holes/concentric-squares.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/concentric-squares.step',
             expectedOuterVertices: 4,
             expectedHoleVertices: 4,
             // 4 outer + 4 hole + 2 bridge = 10
@@ -1162,7 +1162,7 @@ async function testHoleTriangulation(page) {
         },
         {
             name: 'Octagon with square hole',
-            path: 'step-examples/holes/octagon-with-square-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/octagon-with-square-hole.step',
             expectedOuterVertices: 8,
             expectedHoleVertices: 4,
             // 8 outer + 4 hole + 2 bridge = 14
@@ -1171,7 +1171,7 @@ async function testHoleTriangulation(page) {
         },
         {
             name: 'Thin rectangle with slot',
-            path: 'step-examples/holes/thin-rectangle-with-slot.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/thin-rectangle-with-slot.step',
             expectedOuterVertices: 4,
             expectedHoleVertices: 4,
             // 4 outer + 4 hole + 2 bridge = 10
@@ -1240,6 +1240,127 @@ async function testHoleTriangulation(page) {
 }
 
 /**
+ * Test Suite: Curve Sampling (C3)
+ * Tests GPU-accelerated curve sampling for circles, ellipses, and B-splines
+ */
+async function testCurveSampling(page) {
+    log('\n[Suite] Curve Sampling (C3)', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const tests = [
+        {
+            name: 'Quarter circle arc',
+            path: 'step-examples/c3-curves/quarter-circle.step',
+            // Quarter circle from (10,0,0) to (0,10,0), radius 10
+            expectedMinVertices: 10,  // Should have many vertices from sampling
+            expectedMaxVertices: 50,  // But not too many
+            // All sampled points should be at radius ~10 from origin
+            checkRadius: { center: [0, 0, 0], expectedRadius: 10, tolerance: 0.01 },
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            // Load STEP file
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            // Parse in browser and get detailed mesh info
+            const result = await page.evaluate(async (stepText) => {
+                const parseResult = await window.testHarness.parseStep(stepText);
+                if (!parseResult.success) return parseResult;
+
+                // Extract positions for analysis
+                const positions = parseResult.mesh.positions;
+                const vertices = [];
+                for (let i = 0; i < positions.length; i += 3) {
+                    vertices.push([positions[i], positions[i+1], positions[i+2]]);
+                }
+
+                return {
+                    success: true,
+                    vertexCount: parseResult.mesh.vertexCount,
+                    triangleCount: parseResult.mesh.triangleCount,
+                    vertices: vertices,
+                };
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            const issues = [];
+
+            // Check vertex count is in expected range
+            if (result.vertexCount < test.expectedMinVertices) {
+                issues.push(`too few vertices: ${result.vertexCount} < ${test.expectedMinVertices} (curve sampling may have failed)`);
+            }
+            if (result.vertexCount > test.expectedMaxVertices) {
+                issues.push(`too many vertices: ${result.vertexCount} > ${test.expectedMaxVertices}`);
+            }
+
+            // Check that sampled points are at correct radius (for circle test)
+            if (test.checkRadius) {
+                const { center, expectedRadius, tolerance } = test.checkRadius;
+                let radiusErrors = 0;
+                let allZero = true;
+
+                for (const v of result.vertices) {
+                    const dx = v[0] - center[0];
+                    const dy = v[1] - center[1];
+                    const dz = v[2] - center[2];
+                    const dist = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+                    // Check if any vertex is not at origin (to catch all-zero bug)
+                    if (Math.abs(v[0]) > 0.001 || Math.abs(v[1]) > 0.001 || Math.abs(v[2]) > 0.001) {
+                        allZero = false;
+                    }
+
+                    // For quarter circle, most points should be at radius 10, but corners are at origin or (10,0) or (0,10)
+                    // Skip the corner vertices when checking radius
+                    const isCorner = (Math.abs(dx) < 0.1 && Math.abs(dy) < 0.1) ||
+                                     (Math.abs(dx - 10) < 0.1 && Math.abs(dy) < 0.1) ||
+                                     (Math.abs(dx) < 0.1 && Math.abs(dy - 10) < 0.1);
+                    if (!isCorner && Math.abs(dist - expectedRadius) > tolerance * expectedRadius) {
+                        radiusErrors++;
+                    }
+                }
+
+                if (allZero) {
+                    issues.push('ALL vertices are at origin - GPU sampling returned zeros');
+                }
+
+                if (radiusErrors > 0) {
+                    issues.push(`${radiusErrors} vertices have wrong radius (expected ${expectedRadius})`);
+                }
+            }
+
+            if (issues.length === 0) {
+                logTest(test.name, true, `${result.vertexCount} vertices, ${result.triangleCount} triangles`);
+                passed++;
+            } else {
+                logTest(test.name, false, issues.join('; '));
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
+/**
  * Test Suite: Visual Hole Rendering with Screenshots
  */
 async function testVisualHoleRendering(page, browser) {
@@ -1269,23 +1390,23 @@ async function testVisualHoleRendering(page, browser) {
     const tests = [
         {
             name: 'square-with-triangle-hole',
-            path: 'step-examples/basics/square-with-triangle-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-triangle-hole.step',
         },
         {
             name: 'square-with-two-holes',
-            path: 'step-examples/basics/square-with-two-holes.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-two-holes.step',
         },
         {
             name: 'square-with-square-hole',
-            path: 'step-examples/holes/square-with-square-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-square-hole.step',
         },
         {
             name: 'square-with-three-holes',
-            path: 'step-examples/holes/square-with-three-holes.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/square-with-three-holes.step',
         },
         {
             name: 'hexagon-with-triangle-hole',
-            path: 'step-examples/holes/hexagon-with-triangle-hole.step',
+            path: 'step-examples/c2-holes/2.5-triangulation/hexagon-with-triangle-hole.step',
         },
     ];
 
@@ -1400,6 +1521,7 @@ async function main() {
             testWindingNormalization,
             testTopologyValidation,
             testHoleTriangulation,
+            testCurveSampling,
         ];
 
         for (const suite of suites) {

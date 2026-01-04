@@ -1,4 +1,6 @@
 import { earClipping } from "./ear-clipping";
+import { earClippingSingleDispatch } from "./ear-clipping-single-dispatch";
+
 // Minimal STEP → mesh parser for the square face example
 type Vec3 = [number, number, number];
 type Vec2 = [number, number];
@@ -1521,6 +1523,128 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
   return { positions, indices, parseTime, triangulationTime, totalTime };
 }
+
+/**
+ * Parse STEP file using single-dispatch GPU ear clipping.
+ * This version runs the entire ear clipping algorithm in one GPU dispatch,
+ * eliminating CPU-GPU synchronization overhead.
+ */
+export async function parseStepToMeshSingleDispatch(stepText: string): Promise<Mesh> {
+  const totalStart = performance.now();
+  const parseStart = performance.now();
+
+  const model = parseStep(stepText);
+  if (model.faces.size === 0) {
+    throw new Error("No ADVANCED_FACE found in STEP file.");
+  }
+
+  const face = [...model.faces.values()][0];
+  const { outer, holes } = extractFaceBounds(model, face);
+  const basis = computeFaceBasisFromStepFace(model, face, outer);
+  const { outer2d, holes2d } = projectFaceLoopsTo2D({ outer, holes }, basis);
+  const normalized = normalizeWinding({ outer2d, holes2d });
+  const oriented3d = applyWindingTo3D(
+    { outer, holes },
+    normalized.outerReversed,
+    normalized.holesReversed
+  );
+
+  const topology = validateTopology(normalized.outer2d, normalized.holes2d);
+  if (!topology.valid) {
+    console.warn("[StepParser] Topology validation failed");
+  }
+
+  const mergedPolygon2d = bridgeAllHoles(normalized.outer2d, normalized.holes2d);
+
+  // Create lookup maps
+  const outer2dTo3d = new Map<string, Vec3>();
+  for (let i = 0; i < normalized.outer2d.length; i++) {
+    const key = `${normalized.outer2d[i][0].toFixed(9)},${normalized.outer2d[i][1].toFixed(9)}`;
+    outer2dTo3d.set(key, oriented3d.outer[i]);
+  }
+
+  const holes2dTo3d: Map<string, Vec3>[] = [];
+  for (let h = 0; h < normalized.holes2d.length; h++) {
+    const holeMap = new Map<string, Vec3>();
+    for (let i = 0; i < normalized.holes2d[h].length; i++) {
+      const key = `${normalized.holes2d[h][i][0].toFixed(9)},${normalized.holes2d[h][i][1].toFixed(9)}`;
+      holeMap.set(key, oriented3d.holes[h][i]);
+    }
+    holes2dTo3d.push(holeMap);
+  }
+
+  // Filter duplicates
+  const filteredMerged2d: Vec2[] = [];
+  for (let i = 0; i < mergedPolygon2d.length; i++) {
+    const curr = mergedPolygon2d[i];
+    const prev = filteredMerged2d.length > 0
+      ? filteredMerged2d[filteredMerged2d.length - 1]
+      : mergedPolygon2d[mergedPolygon2d.length - 1];
+    const dx = curr[0] - prev[0];
+    const dy = curr[1] - prev[1];
+    if (dx * dx + dy * dy > 1e-12) {
+      filteredMerged2d.push(curr);
+    }
+  }
+
+  if (filteredMerged2d.length > 1) {
+    const first = filteredMerged2d[0];
+    const last = filteredMerged2d[filteredMerged2d.length - 1];
+    const dx = first[0] - last[0];
+    const dy = first[1] - last[1];
+    if (dx * dx + dy * dy < 1e-12) {
+      filteredMerged2d.pop();
+    }
+  }
+
+  // Build 3D positions
+  const filtered3d: Vec3[] = [];
+  for (const pt2d of filteredMerged2d) {
+    const key = `${pt2d[0].toFixed(9)},${pt2d[1].toFixed(9)}`;
+    let pt3d = outer2dTo3d.get(key);
+    if (!pt3d) {
+      for (const holeMap of holes2dTo3d) {
+        pt3d = holeMap.get(key);
+        if (pt3d) break;
+      }
+    }
+    if (!pt3d) {
+      pt3d = [pt2d[0], pt2d[1], 0];
+    }
+    filtered3d.push(pt3d);
+  }
+
+  const positions = new Float32Array(filtered3d.length * 3);
+  filtered3d.forEach((p, i) => {
+    positions[i * 3 + 0] = p[0];
+    positions[i * 3 + 1] = p[1];
+    positions[i * 3 + 2] = p[2];
+  });
+
+  const filtered2dAsVec3: Vec3[] = filteredMerged2d.map(p => [p[0], p[1], 0]);
+
+  const parseEnd = performance.now();
+  const triangulationStart = performance.now();
+
+  // Use single-dispatch ear clipping
+  const triangles = await earClippingSingleDispatch(filtered2dAsVec3);
+
+  const triangulationEnd = performance.now();
+  const totalEnd = performance.now();
+
+  const indicesArray: number[] = [];
+  for (const triangle of triangles) {
+    indicesArray.push(triangle[0], triangle[1], triangle[2]);
+  }
+  const indices = new Uint32Array(indicesArray);
+
+  const parseTime = parseEnd - parseStart;
+  const triangulationTime = triangulationEnd - triangulationStart;
+  const totalTime = totalEnd - totalStart;
+
+  return { positions, indices, parseTime, triangulationTime, totalTime };
+}
+
 /**
  * Browser helper: take a `File` (e.g. from an `<input type="file">`) and
  * parse it into a `Mesh`. Uses the standard `File.text()` API, so it works
@@ -1772,6 +1896,7 @@ async function extractLoopPointsWithCurves(
 
     // Resolve the curve geometry
     const curve = resolveCurve(model, edgeCurve.curveId);
+    console.log(`[extractLoopPointsWithCurves] Edge curve #${edgeCurve.curveId} resolved to:`, curve?.type || 'null');
 
     edgeInfos.push({
       startPoint: startPoint.coords,
@@ -1801,7 +1926,9 @@ async function extractLoopPointsWithCurves(
 
   // Sample curves on GPU (if any)
   let sampledCurves: Vec3[][] = [];
+  console.log(`[extractLoopPointsWithCurves] Found ${curvesToSample.length} curves to sample`);
   if (curvesToSample.length > 0) {
+    console.log('[extractLoopPointsWithCurves] Curves:', curvesToSample.map(c => c.type));
     // Dynamic import to avoid circular dependency
     const { sampleCurvesGPU } = await import('./curve-sampling');
     sampledCurves = await sampleCurvesGPU(
@@ -1811,6 +1938,15 @@ async function extractLoopPointsWithCurves(
       curveReversed,
       options
     );
+    console.log('[extractLoopPointsWithCurves] Sampled points per curve:', sampledCurves.map(s => s.length));
+    // Debug: show first few sampled points with actual values
+    for (let i = 0; i < sampledCurves.length; i++) {
+      const samples = sampledCurves[i];
+      console.log(`[extractLoopPointsWithCurves] Curve ${i} sample 0:`, JSON.stringify(samples[0]));
+      console.log(`[extractLoopPointsWithCurves] Curve ${i} sample 1:`, JSON.stringify(samples[1]));
+      console.log(`[extractLoopPointsWithCurves] Curve ${i} sample mid:`, JSON.stringify(samples[Math.floor(samples.length/2)]));
+      console.log(`[extractLoopPointsWithCurves] Curve ${i} sample last:`, JSON.stringify(samples[samples.length-1]));
+    }
   }
 
   // Build boundary points with sampled curve points
@@ -1834,6 +1970,13 @@ async function extractLoopPointsWithCurves(
     }
   }
 
+  console.log(`[extractLoopPointsWithCurves] Boundary points before closing: ${boundaryPoints.length}`);
+  console.log('[extractLoopPointsWithCurves] Boundary pt 0:', JSON.stringify(boundaryPoints[0]));
+  console.log('[extractLoopPointsWithCurves] Boundary pt 1:', JSON.stringify(boundaryPoints[1]));
+  console.log('[extractLoopPointsWithCurves] Boundary pt 2:', JSON.stringify(boundaryPoints[2]));
+  console.log('[extractLoopPointsWithCurves] Boundary pt 3:', JSON.stringify(boundaryPoints[3]));
+  console.log('[extractLoopPointsWithCurves] Boundary pt 4:', JSON.stringify(boundaryPoints[4]));
+
   // Close the loop explicitly if needed
   const first = boundaryPoints[0];
   const last = boundaryPoints[boundaryPoints.length - 1];
@@ -1842,7 +1985,9 @@ async function extractLoopPointsWithCurves(
   }
 
   // Return unique points (without the closing duplicate)
-  return boundaryPoints.slice(0, boundaryPoints.length - 1);
+  const result = boundaryPoints.slice(0, boundaryPoints.length - 1);
+  console.log(`[extractLoopPointsWithCurves] Returning ${result.length} points`);
+  return result;
 }
 
 /**
@@ -1947,12 +2092,14 @@ async function extractFaceBoundsWithCurves(
 ): Promise<FaceBoundsResult> {
   let outer: Vec3[] | null = null;
   const holes: Vec3[][] = [];
+  const allBounds: { points: Vec3[]; isOuter: boolean }[] = [];
 
   for (const boundId of face.boundIds) {
     const bound = model.faceBounds.get(boundId);
     if (!bound) throw new Error(`Face bound #${boundId} not found`);
 
     const points = await extractLoopPointsWithCurves(model, bound.loopId, options);
+    allBounds.push({ points, isOuter: bound.isOuter });
 
     if (bound.isOuter) {
       if (outer !== null) {
@@ -1964,8 +2111,42 @@ async function extractFaceBoundsWithCurves(
     }
   }
 
+  // If no explicit outer bound, determine it heuristically
   if (outer === null) {
-    throw new Error(`No outer bound found for face #${face.id}`);
+    if (allBounds.length === 1) {
+      // Single bound - it's the outer
+      outer = allBounds[0].points;
+      holes.length = 0; // Clear holes array
+    } else if (allBounds.length > 1) {
+      // Multiple bounds - use largest area as outer
+      // Project to 2D and compute signed areas
+      let maxArea = -Infinity;
+      let outerIdx = 0;
+      for (let i = 0; i < allBounds.length; i++) {
+        const pts = allBounds[i].points;
+        // Simple 2D area calculation (use x,y coordinates)
+        let area = 0;
+        for (let j = 0; j < pts.length; j++) {
+          const curr = pts[j];
+          const next = pts[(j + 1) % pts.length];
+          area += curr[0] * next[1] - next[0] * curr[1];
+        }
+        area = Math.abs(area / 2);
+        if (area > maxArea) {
+          maxArea = area;
+          outerIdx = i;
+        }
+      }
+      outer = allBounds[outerIdx].points;
+      holes.length = 0;
+      for (let i = 0; i < allBounds.length; i++) {
+        if (i !== outerIdx) {
+          holes.push(allBounds[i].points);
+        }
+      }
+    } else {
+      throw new Error(`No bounds found for face #${face.id}`);
+    }
   }
 
   return { outer, holes };
@@ -2075,16 +2256,25 @@ function parseStep(stepText: string): StepModel {
 // --- Individual entity parsers (all tailored to our example syntax) ---
 
 function parseCartesianPoint(id: number, args: string, model: StepModel) {
-  // CARTESIAN_POINT('', (x, y, z))
-  const coordMatch = args.match(/\(\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*\)\s*$/);
-  if (!coordMatch) {
-    throw new Error(`Failed to parse CARTESIAN_POINT args: ${args}`);
+  // CARTESIAN_POINT('', (x, y, z)) - 3D point
+  // CARTESIAN_POINT('', (x, y)) - 2D point (used in PCURVE, we skip these)
+  const coord3dMatch = args.match(/\(\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*\)\s*$/);
+  if (coord3dMatch) {
+    const x = parseFloat(coord3dMatch[1]);
+    const y = parseFloat(coord3dMatch[2]);
+    const z = parseFloat(coord3dMatch[3]);
+    model.points.set(id, { id, coords: [x, y, z] });
+    return;
   }
-  const x = parseFloat(coordMatch[1]);
-  const y = parseFloat(coordMatch[2]);
-  const z = parseFloat(coordMatch[3]);
 
-  model.points.set(id, { id, coords: [x, y, z] });
+  // Check for 2D point - we skip these as they're only used in PCURVE definitions
+  const coord2dMatch = args.match(/\(\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*\)\s*$/);
+  if (coord2dMatch) {
+    // 2D point - skip (not needed for 3D geometry)
+    return;
+  }
+
+  throw new Error(`Failed to parse CARTESIAN_POINT args: ${args}`);
 }
 
 function parseVertexPoint(id: number, args: string, model: StepModel) {
@@ -2177,16 +2367,24 @@ function parseAdvancedFace(id: number, args: string, model: StepModel) {
 }
 
 function parseDirection(id: number, args: string, model: StepModel) {
-  // DIRECTION('', (0.0, 0.0, 1.0))
-  const coordMatch = args.match(/\(\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*\)\s*$/);
-  if (!coordMatch) {
-    throw new Error(`Failed to parse DIRECTION args: ${args}`);
+  // DIRECTION('', (x, y, z)) - 3D direction
+  // DIRECTION('', (x, y)) - 2D direction (used in PCURVE, we skip these)
+  const coord3dMatch = args.match(/\(\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*\)\s*$/);
+  if (coord3dMatch) {
+    const x = parseFloat(coord3dMatch[1]);
+    const y = parseFloat(coord3dMatch[2]);
+    const z = parseFloat(coord3dMatch[3]);
+    model.directions.set(id, { id, dir: [x, y, z] });
+    return;
   }
-  const x = parseFloat(coordMatch[1]);
-  const y = parseFloat(coordMatch[2]);
-  const z = parseFloat(coordMatch[3]);
 
-  model.directions.set(id, { id, dir: [x, y, z] });
+  // Check for 2D direction - skip (only used in PCURVE definitions)
+  const coord2dMatch = args.match(/\(\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*\)\s*$/);
+  if (coord2dMatch) {
+    return;
+  }
+
+  throw new Error(`Failed to parse DIRECTION args: ${args}`);
 }
 
 function parseAxis2Placement3D(id: number, args: string, model: StepModel) {

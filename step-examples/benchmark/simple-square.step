@@ -1,0 +1,68 @@
+ISO-10303-21;
+HEADER;
+  FILE_DESCRIPTION(('Simple square - minimal benchmark'),'2;1');
+  FILE_NAME('simple_square.stp','2025-01-04',(''),(''),'','','');
+  FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+
+  /* ==== Geometric context ==== */
+  #1 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #2 = DIRECTION('', (0.0, 0.0, 1.0));
+  #3 = DIRECTION('', (1.0, 0.0, 0.0));
+  #4 = AXIS2_PLACEMENT_3D('', #1, #2, #3);
+  #5 = PLANE('', #4);
+  #6 = VECTOR('', #3, 1.0);
+
+  /* ==== Square vertices (0,0) to (10,10) CCW ==== */
+  #10 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #11 = CARTESIAN_POINT('', (10.0, 0.0, 0.0));
+  #12 = CARTESIAN_POINT('', (10.0, 10.0, 0.0));
+  #13 = CARTESIAN_POINT('', (0.0, 10.0, 0.0));
+
+  #20 = VERTEX_POINT('', #10);
+  #21 = VERTEX_POINT('', #11);
+  #22 = VERTEX_POINT('', #12);
+  #23 = VERTEX_POINT('', #13);
+
+  #40 = LINE('', #10, #6);
+  #41 = LINE('', #11, #6);
+  #42 = LINE('', #12, #6);
+  #43 = LINE('', #13, #6);
+
+  #30 = EDGE_CURVE('', #20, #21, #40, .T.);
+  #31 = EDGE_CURVE('', #21, #22, #41, .T.);
+  #32 = EDGE_CURVE('', #22, #23, #42, .T.);
+  #33 = EDGE_CURVE('', #23, #20, #43, .T.);
+
+  #50 = ORIENTED_EDGE('', *, *, #30, .T.);
+  #51 = ORIENTED_EDGE('', *, *, #31, .T.);
+  #52 = ORIENTED_EDGE('', *, *, #32, .T.);
+  #53 = ORIENTED_EDGE('', *, *, #33, .T.);
+
+  #60 = EDGE_LOOP('', (#50, #51, #52, #53));
+  #70 = FACE_OUTER_BOUND('', #60, .T.);
+  #80 = ADVANCED_FACE('', (#70), #5, .T.);
+
+  /* ==== Product structure for OCCT ==== */
+  #81 = CLOSED_SHELL('', (#80));
+  #82 = MANIFOLD_SOLID_BREP('', #81);
+  #83 = SHAPE_REPRESENTATION('', (#82), #901);
+
+  #900 = ( LENGTH_UNIT() NAMED_UNIT(*) SI_UNIT(.MILLI.,.METRE.) );
+  #901 = ( GEOMETRIC_REPRESENTATION_CONTEXT(3) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT((#902)) GLOBAL_UNIT_ASSIGNED_CONTEXT((#900,#903,#904)) REPRESENTATION_CONTEXT('Context','3D Context') );
+  #902 = UNCERTAINTY_MEASURE_WITH_UNIT(LENGTH_MEASURE(1.E-07),#900,'');
+  #903 = ( NAMED_UNIT(*) PLANE_ANGLE_UNIT() SI_UNIT($,.RADIAN.) );
+  #904 = ( NAMED_UNIT(*) SI_UNIT($,.STERADIAN.) SOLID_ANGLE_UNIT() );
+
+  #910 = PRODUCT('simple_square','simple_square','',(#911));
+  #911 = PRODUCT_CONTEXT('',#912,'mechanical');
+  #912 = APPLICATION_CONTEXT('automotive_design');
+  #913 = PRODUCT_DEFINITION_FORMATION('','',#910);
+  #914 = PRODUCT_DEFINITION('design','',#913,#915);
+  #915 = PRODUCT_DEFINITION_CONTEXT('part definition',#912,'design');
+  #916 = PRODUCT_DEFINITION_SHAPE('','',#914);
+  #917 = SHAPE_DEFINITION_REPRESENTATION(#916,#83);
+
+ENDSEC;
+END-ISO-10303-21;

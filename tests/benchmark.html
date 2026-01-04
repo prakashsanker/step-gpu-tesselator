@@ -28,7 +28,7 @@
     <div id="log"></div>
 
     <script type="module">
-        import { parseStepToMesh } from '../src/step-parser.ts';
+        import { parseStepToMesh, parseStepToMeshSingleDispatch } from '../src/step-parser.ts';
         import { getGPUDevice } from '../src/lib.ts';
         import occtimportjs from 'occt-import-js';
 
@@ -89,6 +89,33 @@
 
                     // Parse STEP and triangulate
                     const result = await parseStepToMesh(stepText);
+
+                    if (!result || !result.positions) {
+                        return { success: false, error: 'No mesh returned' };
+                    }
+
+                    return {
+                        success: true,
+                        totalTime: result.totalTime || 0,
+                        parseTime: result.parseTime || 0,
+                        triangulationTime: result.triangulationTime || 0,
+                        vertexCount: result.positions.length / 3,
+                        triangleCount: result.indices.length / 3,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            /**
+             * Run GPU-based triangulation (single dispatch - no sync overhead)
+             */
+            async runGPUSingleDispatch(stepBase64) {
+                try {
+                    const stepText = atob(stepBase64);
+
+                    // Parse STEP and triangulate with single-dispatch
+                    const result = await parseStepToMeshSingleDispatch(stepText);
 
                     if (!result || !result.positions) {
                         return { success: false, error: 'No mesh returned' };

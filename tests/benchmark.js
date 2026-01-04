@@ -110,11 +110,12 @@ function formatSpeedup(ratio) {
 
 async function runBenchmarks(page) {
     const benchmarkFiles = [
+        { name: 'Simple Square (no holes)', path: 'step-examples/benchmark/simple-square.step' },
         { name: 'Small (4 holes)', path: 'step-examples/benchmark/plate-small-2x2.step' },
         { name: 'Medium (25 holes)', path: 'step-examples/benchmark/plate-medium-5x5.step' },
         { name: 'Large (100 holes)', path: 'step-examples/benchmark/plate-large-10x10.step' },
         { name: 'XLarge (400 holes)', path: 'step-examples/benchmark/plate-xlarge-20x20.step' },
-        { name: 'XXLarge (900 holes)', path: 'step-examples/benchmark/plate-xxlarge-30x30.step' },
+        // { name: 'XXLarge (900 holes)', path: 'step-examples/benchmark/plate-xxlarge-30x30.step' },
     ];
 
     const results = [];
@@ -138,19 +139,29 @@ async function runBenchmarks(page) {
 
         // Benchmark runs
         const gpuTimes = [];
+        const gpuSingleTimes = [];
         const occtTimes = [];
-        let gpuResult, occtResult;
+        let gpuResult, gpuSingleResult, occtResult;
 
         for (let i = 0; i < CONFIG.benchmarkRuns; i++) {
             log(`  Run ${i + 1}/${CONFIG.benchmarkRuns}...`, 'dim');
 
-            // GPU implementation
+            // GPU implementation (multi-sync)
             gpuResult = await page.evaluate(async (base64) => {
                 return await window.benchmark.runGPU(base64);
             }, stepBase64);
 
             if (gpuResult.success) {
                 gpuTimes.push(gpuResult.totalTime);
+            }
+
+            // GPU implementation (single dispatch)
+            gpuSingleResult = await page.evaluate(async (base64) => {
+                return await window.benchmark.runGPUSingleDispatch(base64);
+            }, stepBase64);
+
+            if (gpuSingleResult.success) {
+                gpuSingleTimes.push(gpuSingleResult.totalTime);
             }
 
             // OCCT implementation
@@ -165,49 +176,68 @@ async function runBenchmarks(page) {
 
         // Calculate averages
         const gpuAvg = gpuTimes.length > 0 ? gpuTimes.reduce((a, b) => a + b) / gpuTimes.length : null;
+        const gpuSingleAvg = gpuSingleTimes.length > 0 ? gpuSingleTimes.reduce((a, b) => a + b) / gpuSingleTimes.length : null;
         const occtAvg = occtTimes.length > 0 ? occtTimes.reduce((a, b) => a + b) / occtTimes.length : null;
 
         // Output results
         log(`\n  Results:`, 'bold');
 
         if (gpuAvg !== null) {
-            log(`    GPU Implementation:`, 'green');
+            log(`    GPU (multi-sync):`, 'green');
             log(`      Total time: ${formatTime(gpuAvg)}`);
-            log(`      Parse time: ${formatTime(gpuResult.parseTime)}`);
             log(`      Triangulation: ${formatTime(gpuResult.triangulationTime)}`);
             log(`      Triangles: ${gpuResult.triangleCount}`);
-            log(`      Vertices: ${gpuResult.vertexCount}`);
         } else {
-            log(`    GPU Implementation: FAILED - ${gpuResult?.error}`, 'red');
+            log(`    GPU (multi-sync): FAILED - ${gpuResult?.error}`, 'red');
+        }
+
+        if (gpuSingleAvg !== null) {
+            log(`    GPU (single-dispatch):`, 'cyan');
+            log(`      Total time: ${formatTime(gpuSingleAvg)}`);
+            log(`      Triangulation: ${formatTime(gpuSingleResult.triangulationTime)}`);
+            log(`      Triangles: ${gpuSingleResult.triangleCount}`);
+        } else {
+            log(`    GPU (single-dispatch): FAILED - ${gpuSingleResult?.error}`, 'red');
         }
 
         if (occtAvg !== null) {
-            log(`    OCCT Implementation:`, 'yellow');
+            log(`    OCCT (WebAssembly):`, 'yellow');
             log(`      Total time: ${formatTime(occtAvg)}`);
             log(`      Triangles: ${occtResult.triangleCount}`);
-            log(`      Vertices: ${occtResult.vertexCount}`);
         } else {
-            log(`    OCCT Implementation: FAILED - ${occtResult?.error}`, 'red');
+            log(`    OCCT (WebAssembly): FAILED - ${occtResult?.error}`, 'red');
         }
 
+        // Comparison
+        log(`\n    Comparisons vs OCCT:`);
         if (gpuAvg !== null && occtAvg !== null) {
             const speedup = occtAvg / gpuAvg;
-            log(`\n    Comparison: GPU is ${formatSpeedup(speedup)}`);
+            log(`      Multi-sync: ${formatSpeedup(speedup)}`);
+        }
+        if (gpuSingleAvg !== null && occtAvg !== null) {
+            const speedup = occtAvg / gpuSingleAvg;
+            log(`      Single-dispatch: ${formatSpeedup(speedup)}`);
+        }
+        if (gpuAvg !== null && gpuSingleAvg !== null) {
+            const improvement = gpuAvg / gpuSingleAvg;
+            log(`    Single vs Multi: ${improvement.toFixed(2)}x ${improvement > 1 ? 'faster' : 'slower'}`);
         }
 
         results.push({
             name: file.name,
             gpu: gpuAvg !== null ? {
                 totalTime: gpuAvg,
-                parseTime: gpuResult.parseTime,
                 triangulationTime: gpuResult.triangulationTime,
                 triangleCount: gpuResult.triangleCount,
-                vertexCount: gpuResult.vertexCount,
+            } : null,
+            gpuSingle: gpuSingleAvg !== null ? {
+                totalTime: gpuSingleAvg,
+                triangulationTime: gpuSingleResult.triangulationTime,
+                triangleCount: gpuSingleResult.triangleCount,
             } : null,
             occt: occtAvg !== null ? {
                 totalTime: occtAvg,
                 triangleCount: occtResult.triangleCount,
-                vertexCount: occtResult.vertexCount,
             } : null,
         });
     }
@@ -216,41 +246,51 @@ async function runBenchmarks(page) {
 }
 
 function printSummary(results) {
-    log(`\n${'═'.repeat(80)}`, 'blue');
+    log(`\n${'═'.repeat(100)}`, 'blue');
     log(`  BENCHMARK SUMMARY`, 'bold');
-    log(`${'═'.repeat(80)}`, 'blue');
+    log(`${'═'.repeat(100)}`, 'blue');
 
     console.log('\n');
-    console.log('  File                  │ GPU Time    │ OCCT Time   │ Speedup     │ GPU Tris  │ OCCT Tris');
-    console.log('  ──────────────────────┼─────────────┼─────────────┼─────────────┼───────────┼───────────');
+    console.log('  File                  │ Multi-Sync  │ Single-Disp │ OCCT        │ Single vs OCCT │ Improvement');
+    console.log('  ──────────────────────┼─────────────┼─────────────┼─────────────┼────────────────┼────────────');
 
     for (const r of results) {
         const name = r.name.padEnd(20);
-        const gpuTime = r.gpu ? formatTime(r.gpu.totalTime).padEnd(11) : 'N/A'.padEnd(11);
+        const multiTime = r.gpu ? formatTime(r.gpu.totalTime).padEnd(11) : 'N/A'.padEnd(11);
+        const singleTime = r.gpuSingle ? formatTime(r.gpuSingle.totalTime).padEnd(11) : 'N/A'.padEnd(11);
         const occtTime = r.occt ? formatTime(r.occt.totalTime).padEnd(11) : 'N/A'.padEnd(11);
 
-        let speedup = 'N/A'.padEnd(11);
-        if (r.gpu && r.occt) {
-            const ratio = r.occt.totalTime / r.gpu.totalTime;
-            speedup = (ratio >= 1 ? `${ratio.toFixed(2)}x ▲` : `${(1/ratio).toFixed(2)}x ▼`).padEnd(11);
+        let singleVsOcct = 'N/A'.padEnd(14);
+        if (r.gpuSingle && r.occt) {
+            const ratio = r.occt.totalTime / r.gpuSingle.totalTime;
+            singleVsOcct = (ratio >= 1 ? `${ratio.toFixed(2)}x faster` : `${(1/ratio).toFixed(2)}x slower`).padEnd(14);
         }
 
-        const gpuTris = r.gpu ? String(r.gpu.triangleCount).padEnd(9) : 'N/A'.padEnd(9);
-        const occtTris = r.occt ? String(r.occt.triangleCount).padEnd(9) : 'N/A'.padEnd(9);
+        let improvement = 'N/A'.padEnd(10);
+        if (r.gpu && r.gpuSingle) {
+            const ratio = r.gpu.totalTime / r.gpuSingle.totalTime;
+            improvement = `${ratio.toFixed(1)}x`.padEnd(10);
+        }
 
-        console.log(`  ${name} │ ${gpuTime} │ ${occtTime} │ ${speedup} │ ${gpuTris} │ ${occtTris}`);
+        console.log(`  ${name} │ ${multiTime} │ ${singleTime} │ ${occtTime} │ ${singleVsOcct} │ ${improvement}`);
     }
 
     console.log('\n');
 
-    // Overall speedup
-    const validResults = results.filter(r => r.gpu && r.occt);
-    if (validResults.length > 0) {
-        const avgSpeedup = validResults.reduce((sum, r) => sum + r.occt.totalTime / r.gpu.totalTime, 0) / validResults.length;
-        log(`  Average speedup: GPU is ${formatSpeedup(avgSpeedup)}`, 'bold');
+    // Summary stats
+    const validSingle = results.filter(r => r.gpuSingle && r.occt);
+    if (validSingle.length > 0) {
+        const avgVsOcct = validSingle.reduce((sum, r) => sum + r.occt.totalTime / r.gpuSingle.totalTime, 0) / validSingle.length;
+        log(`  Single-dispatch vs OCCT average: ${formatSpeedup(avgVsOcct)}`, 'bold');
     }
 
-    log(`${'═'.repeat(80)}\n`, 'blue');
+    const validImprovement = results.filter(r => r.gpu && r.gpuSingle);
+    if (validImprovement.length > 0) {
+        const avgImprovement = validImprovement.reduce((sum, r) => sum + r.gpu.totalTime / r.gpuSingle.totalTime, 0) / validImprovement.length;
+        log(`  Single vs Multi-sync average improvement: ${avgImprovement.toFixed(2)}x`, 'bold');
+    }
+
+    log(`${'═'.repeat(100)}\n`, 'blue');
 }
 
 async function main() {

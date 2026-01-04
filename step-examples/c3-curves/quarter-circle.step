@@ -1,0 +1,82 @@
+ISO-10303-21;
+HEADER;
+  FILE_DESCRIPTION(('Quarter circle test - single face with one curved edge'),'2;1');
+  FILE_NAME('quarter_circle.stp','2025-01-04',(''),(''),'','','');
+  FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+ENDSEC;
+DATA;
+
+  /* ==== Geometric context ==== */
+  #1 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #2 = DIRECTION('', (0.0, 0.0, 1.0));
+  #3 = DIRECTION('', (1.0, 0.0, 0.0));
+  #4 = AXIS2_PLACEMENT_3D('', #1, #2, #3);
+  #5 = PLANE('', #4);
+
+  /* ==== Vertices ====
+     Shape: Square with one corner replaced by quarter circle
+
+         (0,10)--------(10,10)
+           |              |
+           |              |
+           |         arc  |
+         (0,0)-----(10,0) curved to (10,10)
+
+     Actually simpler: triangle with curved hypotenuse
+
+         (0,10)
+           |\
+           | \  (quarter circle arc)
+           |  \
+         (0,0)--(10,0)
+  */
+
+  #10 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #11 = CARTESIAN_POINT('', (10.0, 0.0, 0.0));
+  #12 = CARTESIAN_POINT('', (0.0, 10.0, 0.0));
+
+  #20 = VERTEX_POINT('', #10);
+  #21 = VERTEX_POINT('', #11);
+  #22 = VERTEX_POINT('', #12);
+
+  /* ==== Circle for the curved edge ==== */
+  /* Circle centered at origin, radius 10, in XY plane */
+  #30 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #31 = DIRECTION('', (0.0, 0.0, 1.0));
+  #32 = DIRECTION('', (1.0, 0.0, 0.0));
+  #33 = AXIS2_PLACEMENT_3D('', #30, #31, #32);
+  #34 = CIRCLE('', #33, 10.0);
+
+  /* ==== Lines for straight edges ==== */
+  #40 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #41 = DIRECTION('', (1.0, 0.0, 0.0));
+  #42 = VECTOR('', #41, 1.0);
+  #43 = LINE('', #40, #42);
+
+  #50 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
+  #51 = DIRECTION('', (0.0, 1.0, 0.0));
+  #52 = VECTOR('', #51, 1.0);
+  #53 = LINE('', #50, #52);
+
+  /* ==== Edge curves ==== */
+  /* Edge 1: (0,0) to (10,0) - straight line along X */
+  #60 = EDGE_CURVE('', #20, #21, #43, .T.);
+
+  /* Edge 2: (10,0) to (0,10) - quarter circle arc */
+  #61 = EDGE_CURVE('', #21, #22, #34, .T.);
+
+  /* Edge 3: (0,10) to (0,0) - straight line along Y */
+  #62 = EDGE_CURVE('', #22, #20, #53, .T.);
+
+  /* ==== Oriented edges ==== */
+  #70 = ORIENTED_EDGE('', *, *, #60, .T.);
+  #71 = ORIENTED_EDGE('', *, *, #61, .T.);
+  #72 = ORIENTED_EDGE('', *, *, #62, .T.);
+
+  /* ==== Edge loop and face ==== */
+  #80 = EDGE_LOOP('', (#70, #71, #72));
+  #81 = FACE_OUTER_BOUND('', #80, .T.);
+  #82 = ADVANCED_FACE('', (#81), #5, .T.);
+
+ENDSEC;
+END-ISO-10303-21;

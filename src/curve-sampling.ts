@@ -371,66 +371,76 @@ async function sampleConicsGPU(
   }
 
   const numCurves = curves.length;
+  console.log(`[sampleConicsGPU] Sampling ${numCurves} conic curves`);
 
-  // Build curve parameters buffer
-  // Each curve: curveType, numSamples, startParam, endParam, center(4), normal(4), refDir(4), radii(4)
-  // Total: 20 floats = 80 bytes per curve
-  const curveParamsData = new Float32Array(numCurves * 20);
+  // Build curve parameters buffer using DataView for proper type handling
+  // Each curve: curveType(u32), numSamples(u32), startParam(f32), endParam(f32),
+  //             center(4xf32), normal(4xf32), refDir(4xf32), radii(4xf32)
+  // Total: 20 x 4 bytes = 80 bytes per curve
+  const curveParamsBuffer = new ArrayBuffer(numCurves * 80);
+  const view = new DataView(curveParamsBuffer);
+
   for (let i = 0; i < numCurves; i++) {
     const { curve, startParam, endParam, numSamples } = curves[i];
-    const offset = i * 20;
+    const byteOffset = i * 80;
 
     if (curve.type === 'CIRCLE') {
-      curveParamsData[offset + 0] = 1; // CURVE_CIRCLE
-      curveParamsData[offset + 1] = numSamples;
-      curveParamsData[offset + 2] = startParam;
-      curveParamsData[offset + 3] = endParam;
-      curveParamsData[offset + 4] = curve.center[0];
-      curveParamsData[offset + 5] = curve.center[1];
-      curveParamsData[offset + 6] = curve.center[2];
-      curveParamsData[offset + 7] = 0; // padding
-      curveParamsData[offset + 8] = curve.normal[0];
-      curveParamsData[offset + 9] = curve.normal[1];
-      curveParamsData[offset + 10] = curve.normal[2];
-      curveParamsData[offset + 11] = 0; // padding
-      curveParamsData[offset + 12] = curve.refDirection[0];
-      curveParamsData[offset + 13] = curve.refDirection[1];
-      curveParamsData[offset + 14] = curve.refDirection[2];
-      curveParamsData[offset + 15] = 0; // padding
-      curveParamsData[offset + 16] = curve.radius;
-      curveParamsData[offset + 17] = 0; // minorRadius (unused for circle)
-      curveParamsData[offset + 18] = 0;
-      curveParamsData[offset + 19] = 0;
+      console.log(`[sampleConicsGPU] Circle ${i}: center=${JSON.stringify(curve.center)}, radius=${curve.radius}`);
+      console.log(`[sampleConicsGPU] Circle ${i}: normal=${JSON.stringify(curve.normal)}, refDir=${JSON.stringify(curve.refDirection)}`);
+      console.log(`[sampleConicsGPU] Circle ${i}: startParam=${startParam}, endParam=${endParam}, numSamples=${numSamples}`);
+
+      view.setUint32(byteOffset + 0, 1, true);  // curveType = CIRCLE
+      view.setUint32(byteOffset + 4, numSamples, true);
+      view.setFloat32(byteOffset + 8, startParam, true);
+      view.setFloat32(byteOffset + 12, endParam, true);
+      view.setFloat32(byteOffset + 16, curve.center[0], true);
+      view.setFloat32(byteOffset + 20, curve.center[1], true);
+      view.setFloat32(byteOffset + 24, curve.center[2], true);
+      view.setFloat32(byteOffset + 28, 0, true); // padding
+      view.setFloat32(byteOffset + 32, curve.normal[0], true);
+      view.setFloat32(byteOffset + 36, curve.normal[1], true);
+      view.setFloat32(byteOffset + 40, curve.normal[2], true);
+      view.setFloat32(byteOffset + 44, 0, true); // padding
+      view.setFloat32(byteOffset + 48, curve.refDirection[0], true);
+      view.setFloat32(byteOffset + 52, curve.refDirection[1], true);
+      view.setFloat32(byteOffset + 56, curve.refDirection[2], true);
+      view.setFloat32(byteOffset + 60, 0, true); // padding
+      view.setFloat32(byteOffset + 64, curve.radius, true);
+      view.setFloat32(byteOffset + 68, 0, true); // minorRadius
+      view.setFloat32(byteOffset + 72, 0, true);
+      view.setFloat32(byteOffset + 76, 0, true);
     } else if (curve.type === 'ELLIPSE') {
-      curveParamsData[offset + 0] = 2; // CURVE_ELLIPSE
-      curveParamsData[offset + 1] = numSamples;
-      curveParamsData[offset + 2] = startParam;
-      curveParamsData[offset + 3] = endParam;
-      curveParamsData[offset + 4] = curve.center[0];
-      curveParamsData[offset + 5] = curve.center[1];
-      curveParamsData[offset + 6] = curve.center[2];
-      curveParamsData[offset + 7] = 0;
-      curveParamsData[offset + 8] = curve.normal[0];
-      curveParamsData[offset + 9] = curve.normal[1];
-      curveParamsData[offset + 10] = curve.normal[2];
-      curveParamsData[offset + 11] = 0;
-      curveParamsData[offset + 12] = curve.refDirection[0];
-      curveParamsData[offset + 13] = curve.refDirection[1];
-      curveParamsData[offset + 14] = curve.refDirection[2];
-      curveParamsData[offset + 15] = 0;
-      curveParamsData[offset + 16] = curve.majorRadius;
-      curveParamsData[offset + 17] = curve.minorRadius;
-      curveParamsData[offset + 18] = 0;
-      curveParamsData[offset + 19] = 0;
+      view.setUint32(byteOffset + 0, 2, true);  // curveType = ELLIPSE
+      view.setUint32(byteOffset + 4, numSamples, true);
+      view.setFloat32(byteOffset + 8, startParam, true);
+      view.setFloat32(byteOffset + 12, endParam, true);
+      view.setFloat32(byteOffset + 16, curve.center[0], true);
+      view.setFloat32(byteOffset + 20, curve.center[1], true);
+      view.setFloat32(byteOffset + 24, curve.center[2], true);
+      view.setFloat32(byteOffset + 28, 0, true);
+      view.setFloat32(byteOffset + 32, curve.normal[0], true);
+      view.setFloat32(byteOffset + 36, curve.normal[1], true);
+      view.setFloat32(byteOffset + 40, curve.normal[2], true);
+      view.setFloat32(byteOffset + 44, 0, true);
+      view.setFloat32(byteOffset + 48, curve.refDirection[0], true);
+      view.setFloat32(byteOffset + 52, curve.refDirection[1], true);
+      view.setFloat32(byteOffset + 56, curve.refDirection[2], true);
+      view.setFloat32(byteOffset + 60, 0, true);
+      view.setFloat32(byteOffset + 64, curve.majorRadius, true);
+      view.setFloat32(byteOffset + 68, curve.minorRadius, true);
+      view.setFloat32(byteOffset + 72, 0, true);
+      view.setFloat32(byteOffset + 76, 0, true);
     }
   }
 
+  const curveParamsData = new Uint8Array(curveParamsBuffer);
+
   // Create buffers
-  const curveParamsBuffer = device.createBuffer({
+  const curveParamsGPUBuffer = device.createBuffer({
     size: curveParamsData.byteLength,
     usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
   });
-  device.queue.writeBuffer(curveParamsBuffer, 0, curveParamsData);
+  device.queue.writeBuffer(curveParamsGPUBuffer, 0, curveParamsData);
 
   const outputSize = numCurves * maxSamplesPerCurve * 16; // 4 floats per point
   const outputBuffer = device.createBuffer({
@@ -449,7 +459,7 @@ async function sampleConicsGPU(
   const bindGroup = device.createBindGroup({
     layout: conicPipeline.getBindGroupLayout(0),
     entries: [
-      { binding: 0, resource: { buffer: curveParamsBuffer } },
+      { binding: 0, resource: { buffer: curveParamsGPUBuffer } },
       { binding: 1, resource: { buffer: outputBuffer } },
       { binding: 2, resource: { buffer: paramsBuffer } },
     ],
@@ -478,6 +488,8 @@ async function sampleConicsGPU(
   const outputData = new Float32Array(readBuffer.getMappedRange().slice(0));
   readBuffer.unmap();
 
+  console.log(`[sampleConicsGPU] Output data first 20 values:`, Array.from(outputData.slice(0, 20)));
+
   // Parse results
   const results: Vec3[][] = [];
   for (let i = 0; i < numCurves; i++) {
@@ -491,7 +503,7 @@ async function sampleConicsGPU(
   }
 
   // Cleanup
-  curveParamsBuffer.destroy();
+  curveParamsGPUBuffer.destroy();
   outputBuffer.destroy();
   paramsBuffer.destroy();
   readBuffer.destroy();
