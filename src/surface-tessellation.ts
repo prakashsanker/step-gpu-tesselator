@@ -549,8 +549,31 @@ export async function tessellateTrimmedSurface(
         uvVertices.push(uv);
     }
 
-    // Create fan triangles from boundary vertices to nearby interior grid points
-    // This ensures the boundary edges are part of the mesh
+    // Helper to find the closest interior grid point to a UV coordinate
+    function findClosestInteriorPoint(u: number, v: number): number | null {
+        const gridI = Math.round((u - uMin) / du);
+        const gridJ = Math.round((v - vMin) / dv);
+
+        for (let searchRadius = 0; searchRadius <= 5; searchRadius++) {
+            for (let dj = -searchRadius; dj <= searchRadius; dj++) {
+                for (let di = -searchRadius; di <= searchRadius; di++) {
+                    if (Math.abs(di) !== searchRadius && Math.abs(dj) !== searchRadius) continue;
+                    const gi = gridI + di;
+                    const gj = gridJ + dj;
+                    if (gi >= 0 && gi <= gridDensity && gj >= 0 && gj <= gridDensity) {
+                        const idx = vertexGrid[gj]?.[gi];
+                        if (idx !== null && idx !== undefined) {
+                            return idx;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    // Create triangles connecting boundary to interior
+    // For each boundary edge, create a fan of triangles to nearby interior points
     for (let i = 0; i < continuousBoundary.length; i++) {
         const curr = continuousBoundary[i];
         const next = continuousBoundary[(i + 1) % continuousBoundary.length];
@@ -558,32 +581,26 @@ export async function tessellateTrimmedSurface(
         const currIdx = boundaryStartIdx + i;
         const nextIdx = boundaryStartIdx + ((i + 1) % continuousBoundary.length);
 
-        // Find the closest interior grid point to the midpoint of this boundary edge
-        const midU = (curr[0] + next[0]) / 2;
-        const midV = (curr[1] + next[1]) / 2;
+        // Find interior points near current and next boundary vertices
+        const interiorNearCurr = findClosestInteriorPoint(curr[0], curr[1]);
+        const interiorNearNext = findClosestInteriorPoint(next[0], next[1]);
 
-        // Convert to grid coordinates
-        const gridI = Math.round((midU - uMin) / du);
-        const gridJ = Math.round((midV - vMin) / dv);
-
-        // Search for a nearby interior point
-        let foundInterior = false;
-        for (let searchRadius = 0; searchRadius <= 3 && !foundInterior; searchRadius++) {
-            for (let dj = -searchRadius; dj <= searchRadius && !foundInterior; dj++) {
-                for (let di = -searchRadius; di <= searchRadius && !foundInterior; di++) {
-                    const gi = gridI + di;
-                    const gj = gridJ + dj;
-                    if (gi >= 0 && gi <= gridDensity && gj >= 0 && gj <= gridDensity) {
-                        const interiorIdx = vertexGrid[gj]?.[gi];
-                        if (interiorIdx !== null && interiorIdx !== undefined) {
-                            // Create a triangle: boundary edge + interior point
-                            triangles.push([currIdx, nextIdx, interiorIdx]);
-                            foundInterior = true;
-                        }
-                    }
-                }
+        // Create triangles based on what interior points we found
+        if (interiorNearCurr !== null && interiorNearNext !== null) {
+            if (interiorNearCurr === interiorNearNext) {
+                // Same interior point - create single triangle
+                triangles.push([currIdx, nextIdx, interiorNearCurr]);
+            } else {
+                // Different interior points - create two triangles (quad)
+                triangles.push([currIdx, nextIdx, interiorNearNext]);
+                triangles.push([currIdx, interiorNearNext, interiorNearCurr]);
             }
+        } else if (interiorNearCurr !== null) {
+            triangles.push([currIdx, nextIdx, interiorNearCurr]);
+        } else if (interiorNearNext !== null) {
+            triangles.push([currIdx, nextIdx, interiorNearNext]);
         }
+        // If no interior points found, skip this edge (shouldn't happen normally)
     }
 
     console.log(`[tessellateTrimmedSurface] After boundary: vertices: ${uvVertices.length}, triangles: ${triangles.length}`);
