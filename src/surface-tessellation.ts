@@ -363,13 +363,12 @@ export async function tessellateSurface(
  *
  * C6.4: Now supports holes via the uvHoles parameter
  *
- * Uses grid-based tessellation clipped to the boundary for better quality
- * on curved surfaces (avoids long-spanning triangles from ear clipping).
+ * Uses CDT (Constrained Delaunay Triangulation) for robust triangulation.
  */
 export async function tessellateTrimmedSurface(
     surface: Surface,
     uvBoundary: Vec2[],
-    gridDensity: number = 16,
+    _gridDensity: number = 16,
     uvHoles: Vec2[][] = []
 ): Promise<TessellatedMesh> {
     if (uvBoundary.length < 3) {
@@ -431,209 +430,11 @@ export async function tessellateTrimmedSurface(
         continuousHoles = uvHoles;
     }
 
-    // DEBUG: Log UV boundary info
-    const origUVals = uvBoundary.map(([u]) => u);
-    const contUVals = continuousBoundary.map(([u]) => u);
-    console.log(`[UV DEBUG] Original U range: [${Math.min(...origUVals).toFixed(3)}, ${Math.max(...origUVals).toFixed(3)}]`);
-    console.log(`[UV DEBUG] Continuous U range: [${Math.min(...contUVals).toFixed(3)}, ${Math.max(...contUVals).toFixed(3)}]`);
-    console.log(`[UV DEBUG] Boundary points: ${continuousBoundary.length}`);
+    console.log(`[tessellateTrimmedSurface] Using CDT for ${continuousBoundary.length} boundary points, ${continuousHoles.length} holes`);
 
-    // Check if polygon is closed (first and last points should be close)
-    if (continuousBoundary.length > 0) {
-        const first = continuousBoundary[0];
-        const last = continuousBoundary[continuousBoundary.length - 1];
-        const gap = Math.sqrt((first[0] - last[0]) ** 2 + (first[1] - last[1]) ** 2);
-        console.log(`[UV DEBUG] Polygon closure gap: ${gap.toFixed(6)} (first=[${first[0].toFixed(3)}, ${first[1].toFixed(3)}], last=[${last[0].toFixed(3)}, ${last[1].toFixed(3)}])`);
-
-        // Check for large jumps in the boundary (potential discontinuities)
-        let maxJump = 0;
-        let maxJumpIdx = -1;
-        for (let i = 0; i < continuousBoundary.length; i++) {
-            const curr = continuousBoundary[i];
-            const next = continuousBoundary[(i + 1) % continuousBoundary.length];
-            const jump = Math.sqrt((curr[0] - next[0]) ** 2 + (curr[1] - next[1]) ** 2);
-            if (jump > maxJump) {
-                maxJump = jump;
-                maxJumpIdx = i;
-            }
-        }
-        console.log(`[UV DEBUG] Max jump in boundary: ${maxJump.toFixed(3)} at index ${maxJumpIdx}`);
-    }
-
-    // Find UV bounding box from the continuous boundary
-    let uMin = Infinity, uMax = -Infinity;
-    let vMin = Infinity, vMax = -Infinity;
-
-    for (const [u, v] of continuousBoundary) {
-        uMin = Math.min(uMin, u);
-        uMax = Math.max(uMax, u);
-        vMin = Math.min(vMin, v);
-        vMax = Math.max(vMax, v);
-    }
-
-    console.log(`[UV DEBUG] Bounding box: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
-
-    // Create a grid of UV vertices
-    const du = (uMax - uMin) / gridDensity;
-    const dv = (vMax - vMin) / gridDensity;
-
-    const uvVertices: Vec2[] = [];
-    const vertexGrid: (number | null)[][] = []; // Maps grid position to vertex index
-
-    let insideCount = 0;
-    let outsideCount = 0;
-
-    for (let j = 0; j <= gridDensity; j++) {
-        vertexGrid[j] = [];
-        for (let i = 0; i <= gridDensity; i++) {
-            const u = uMin + i * du;
-            const v = vMin + j * dv;
-
-            // Check if this point is inside the continuous boundary and outside holes
-            const insideBoundary = isPointInPolygon([u, v], continuousBoundary);
-            const insideHole = continuousHoles.some(hole => isPointInPolygon([u, v], hole));
-
-            if (insideBoundary && !insideHole) {
-                vertexGrid[j][i] = uvVertices.length;
-                // Store the unwrapped UV for surface evaluation
-                // (cos/sin are 2π periodic, so values in [π, 2π] work correctly)
-                uvVertices.push([u, v]);
-                insideCount++;
-            } else {
-                vertexGrid[j][i] = null;
-                outsideCount++;
-            }
-        }
-    }
-
-    console.log(`[UV DEBUG] Grid: ${insideCount} inside, ${outsideCount} outside (total ${(gridDensity+1)*(gridDensity+1)})`);
-
-    // Create triangles from the grid
-    const triangles: [number, number, number][] = [];
-
-    for (let j = 0; j < gridDensity; j++) {
-        for (let i = 0; i < gridDensity; i++) {
-            const v00 = vertexGrid[j][i];
-            const v10 = vertexGrid[j][i + 1];
-            const v01 = vertexGrid[j + 1][i];
-            const v11 = vertexGrid[j + 1][i + 1];
-
-            // Create triangles only if all vertices are valid
-            if (v00 !== null && v10 !== null && v01 !== null && v11 !== null) {
-                // Two triangles per quad
-                triangles.push([v00, v01, v11]);
-                triangles.push([v00, v11, v10]);
-            } else {
-                // Handle partial quads - create triangles where possible
-                if (v00 !== null && v01 !== null && v11 !== null) {
-                    triangles.push([v00, v01, v11]);
-                }
-                if (v00 !== null && v11 !== null && v10 !== null) {
-                    triangles.push([v00, v11, v10]);
-                }
-                if (v00 !== null && v01 !== null && v10 !== null) {
-                    triangles.push([v00, v01, v10]);
-                }
-                if (v01 !== null && v11 !== null && v10 !== null) {
-                    triangles.push([v01, v11, v10]);
-                }
-            }
-        }
-    }
-
-    console.log(`[tessellateTrimmedSurface] Grid: ${gridDensity}x${gridDensity}, vertices: ${uvVertices.length}, triangles: ${triangles.length}`);
-
-    // Include boundary vertices to ensure adjacent faces share edges
-    const boundaryStartIdx = uvVertices.length;
-    for (const uv of continuousBoundary) {
-        uvVertices.push(uv);
-    }
-
-    // Helper to find the closest interior grid point to a UV coordinate
-    function findClosestInteriorPoint(u: number, v: number): number | null {
-        const gridI = Math.round((u - uMin) / du);
-        const gridJ = Math.round((v - vMin) / dv);
-
-        for (let searchRadius = 0; searchRadius <= 5; searchRadius++) {
-            for (let dj = -searchRadius; dj <= searchRadius; dj++) {
-                for (let di = -searchRadius; di <= searchRadius; di++) {
-                    if (Math.abs(di) !== searchRadius && Math.abs(dj) !== searchRadius) continue;
-                    const gi = gridI + di;
-                    const gj = gridJ + dj;
-                    if (gi >= 0 && gi <= gridDensity && gj >= 0 && gj <= gridDensity) {
-                        const idx = vertexGrid[gj]?.[gi];
-                        if (idx !== null && idx !== undefined) {
-                            return idx;
-                        }
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    // Determine boundary winding order (CCW = positive area)
-    let boundaryArea = 0;
-    for (let i = 0; i < continuousBoundary.length; i++) {
-        const j = (i + 1) % continuousBoundary.length;
-        boundaryArea += continuousBoundary[i][0] * continuousBoundary[j][1];
-        boundaryArea -= continuousBoundary[j][0] * continuousBoundary[i][1];
-    }
-    const boundaryCCW = boundaryArea > 0;
-
-    // Create triangles connecting boundary to interior
-    // For each boundary edge, create a fan of triangles to nearby interior points
-    for (let i = 0; i < continuousBoundary.length; i++) {
-        const curr = continuousBoundary[i];
-        const next = continuousBoundary[(i + 1) % continuousBoundary.length];
-
-        const currIdx = boundaryStartIdx + i;
-        const nextIdx = boundaryStartIdx + ((i + 1) % continuousBoundary.length);
-
-        // Find interior points near current and next boundary vertices
-        const interiorNearCurr = findClosestInteriorPoint(curr[0], curr[1]);
-        const interiorNearNext = findClosestInteriorPoint(next[0], next[1]);
-
-        // Create triangles based on what interior points we found
-        // Use consistent winding: boundary goes CCW, interior point is "inside"
-        if (interiorNearCurr !== null && interiorNearNext !== null) {
-            if (interiorNearCurr === interiorNearNext) {
-                // Same interior point - create single triangle
-                // Interior point should be on the "inside" of the boundary edge
-                if (boundaryCCW) {
-                    triangles.push([currIdx, nextIdx, interiorNearCurr]);
-                } else {
-                    triangles.push([nextIdx, currIdx, interiorNearCurr]);
-                }
-            } else {
-                // Different interior points - create two triangles (quad)
-                if (boundaryCCW) {
-                    triangles.push([currIdx, nextIdx, interiorNearNext]);
-                    triangles.push([currIdx, interiorNearNext, interiorNearCurr]);
-                } else {
-                    triangles.push([nextIdx, currIdx, interiorNearNext]);
-                    triangles.push([interiorNearNext, currIdx, interiorNearCurr]);
-                }
-            }
-        } else if (interiorNearCurr !== null) {
-            if (boundaryCCW) {
-                triangles.push([currIdx, nextIdx, interiorNearCurr]);
-            } else {
-                triangles.push([nextIdx, currIdx, interiorNearCurr]);
-            }
-        } else if (interiorNearNext !== null) {
-            if (boundaryCCW) {
-                triangles.push([currIdx, nextIdx, interiorNearNext]);
-            } else {
-                triangles.push([nextIdx, currIdx, interiorNearNext]);
-            }
-        }
-        // If no interior points found, skip this edge (shouldn't happen normally)
-    }
-
-    console.log(`[tessellateTrimmedSurface] After boundary: vertices: ${uvVertices.length}, triangles: ${triangles.length}`);
-
-    return evaluateUVMesh(surface, uvVertices, triangles);
+    // Use CDT for robust triangulation
+    const cdtTriangles = await constrainedDelaunayTriangulation(continuousBoundary, continuousHoles, true);
+    return evaluateUVMesh(surface, continuousBoundary, cdtTriangles);
 }
 
 /**
