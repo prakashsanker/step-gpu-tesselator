@@ -572,6 +572,15 @@ export async function tessellateTrimmedSurface(
         return null;
     }
 
+    // Determine boundary winding order (CCW = positive area)
+    let boundaryArea = 0;
+    for (let i = 0; i < continuousBoundary.length; i++) {
+        const j = (i + 1) % continuousBoundary.length;
+        boundaryArea += continuousBoundary[i][0] * continuousBoundary[j][1];
+        boundaryArea -= continuousBoundary[j][0] * continuousBoundary[i][1];
+    }
+    const boundaryCCW = boundaryArea > 0;
+
     // Create triangles connecting boundary to interior
     // For each boundary edge, create a fan of triangles to nearby interior points
     for (let i = 0; i < continuousBoundary.length; i++) {
@@ -586,19 +595,38 @@ export async function tessellateTrimmedSurface(
         const interiorNearNext = findClosestInteriorPoint(next[0], next[1]);
 
         // Create triangles based on what interior points we found
+        // Use consistent winding: boundary goes CCW, interior point is "inside"
         if (interiorNearCurr !== null && interiorNearNext !== null) {
             if (interiorNearCurr === interiorNearNext) {
                 // Same interior point - create single triangle
-                triangles.push([currIdx, nextIdx, interiorNearCurr]);
+                // Interior point should be on the "inside" of the boundary edge
+                if (boundaryCCW) {
+                    triangles.push([currIdx, nextIdx, interiorNearCurr]);
+                } else {
+                    triangles.push([nextIdx, currIdx, interiorNearCurr]);
+                }
             } else {
                 // Different interior points - create two triangles (quad)
-                triangles.push([currIdx, nextIdx, interiorNearNext]);
-                triangles.push([currIdx, interiorNearNext, interiorNearCurr]);
+                if (boundaryCCW) {
+                    triangles.push([currIdx, nextIdx, interiorNearNext]);
+                    triangles.push([currIdx, interiorNearNext, interiorNearCurr]);
+                } else {
+                    triangles.push([nextIdx, currIdx, interiorNearNext]);
+                    triangles.push([interiorNearNext, currIdx, interiorNearCurr]);
+                }
             }
         } else if (interiorNearCurr !== null) {
-            triangles.push([currIdx, nextIdx, interiorNearCurr]);
+            if (boundaryCCW) {
+                triangles.push([currIdx, nextIdx, interiorNearCurr]);
+            } else {
+                triangles.push([nextIdx, currIdx, interiorNearCurr]);
+            }
         } else if (interiorNearNext !== null) {
-            triangles.push([currIdx, nextIdx, interiorNearNext]);
+            if (boundaryCCW) {
+                triangles.push([currIdx, nextIdx, interiorNearNext]);
+            } else {
+                triangles.push([nextIdx, currIdx, interiorNearNext]);
+            }
         }
         // If no interior points found, skip this edge (shouldn't happen normally)
     }
