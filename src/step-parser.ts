@@ -12,7 +12,7 @@ import {
   tessellateTrimmedSurface,
 } from "./surface-tessellation";
 import { evaluateBSplineSurface, type BSplineSurface as BSplineSurfaceType } from "./surfaces";
-import { computeSmoothNormals } from "./mesh-quality";
+import { computeSmoothNormals, filterDegenerateTriangles } from "./mesh-quality";
 import { computeSmoothNormalsGPU } from "./smooth-normals-gpu";
 
 // Minimal STEP → mesh parser for the square face example
@@ -2979,7 +2979,8 @@ function getPlacementData(model: StepModel, placementId: number): {
 }
 
 /**
- * Convert TessellatedMesh to vertices and triangles format
+ * Convert TessellatedMesh to vertices and triangles format.
+ * Filters out degenerate triangles (zero area or high aspect ratio).
  */
 function meshToVerticesAndTriangles(mesh: {
   positions: Float32Array;
@@ -2990,10 +2991,13 @@ function meshToVerticesAndTriangles(mesh: {
     vertices.push([mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]]);
   }
 
-  const triangles: [number, number, number][] = [];
+  const rawTriangles: [number, number, number][] = [];
   for (let i = 0; i < mesh.indices.length; i += 3) {
-    triangles.push([mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]]);
+    rawTriangles.push([mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]]);
   }
+
+  // Filter out degenerate triangles (zero area, duplicate vertices, or very high aspect ratio)
+  const triangles = filterDegenerateTriangles(vertices, rawTriangles, 100.0);
 
   return { vertices, triangles };
 }
