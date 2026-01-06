@@ -483,6 +483,40 @@ export async function tessellateTrimmedSurface(
     let insideCount = 0;
     let outsideCount = 0;
 
+    // Helper: check if point is close to polygon boundary (within tolerance)
+    function isNearBoundary(point: Vec2, polygon: Vec2[], tolerance: number): boolean {
+        const [px, py] = point;
+        for (let i = 0; i < polygon.length; i++) {
+            const [x1, y1] = polygon[i];
+            const [x2, y2] = polygon[(i + 1) % polygon.length];
+
+            // Distance from point to line segment
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const lenSq = dx * dx + dy * dy;
+
+            if (lenSq < 1e-12) continue; // Skip degenerate edges
+
+            // Parameter t for closest point on line
+            let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+            t = Math.max(0, Math.min(1, t)); // Clamp to segment
+
+            // Closest point on segment
+            const closestX = x1 + t * dx;
+            const closestY = y1 + t * dy;
+
+            // Distance to closest point
+            const dist = Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
+            if (dist < tolerance) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Tolerance for including points near the boundary
+    const boundaryTolerance = Math.max(du, dv) * 0.5;
+
     for (let j = 0; j <= gridDensity; j++) {
         vertexGrid[j] = [];
         for (let i = 0; i <= gridDensity; i++) {
@@ -491,9 +525,11 @@ export async function tessellateTrimmedSurface(
 
             // Check if this point is inside the continuous boundary and outside holes
             const insideBoundary = isPointInPolygon([u, v], continuousBoundary);
+            const nearBoundary = isNearBoundary([u, v], continuousBoundary, boundaryTolerance);
             const insideHole = continuousHoles.some(hole => isPointInPolygon([u, v], hole));
 
-            if (insideBoundary && !insideHole) {
+            // Include points that are inside OR very close to the boundary
+            if ((insideBoundary || nearBoundary) && !insideHole) {
                 vertexGrid[j][i] = uvVertices.length;
                 // Store the unwrapped UV for surface evaluation
                 // (cos/sin are 2π periodic, so values in [π, 2π] work correctly)
@@ -542,6 +578,11 @@ export async function tessellateTrimmedSurface(
     }
 
     console.log(`[tessellateTrimmedSurface] Grid: ${gridDensity}x${gridDensity}, vertices: ${uvVertices.length}, triangles: ${triangles.length}`);
+
+    // Note: We do NOT add boundary stitching triangles here.
+    // The boundary stitching was causing visible spike artifacts on curved surfaces.
+    // The grid-based tessellation alone provides clean results, even if there are small gaps
+    // at the edges. This matches the approach used in the benchmark-research branch.
 
     return evaluateUVMesh(surface, uvVertices, triangles);
 }

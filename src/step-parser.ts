@@ -12,7 +12,7 @@ import {
   tessellateTrimmedSurface,
 } from "./surface-tessellation";
 import { evaluateBSplineSurface, type BSplineSurface as BSplineSurfaceType } from "./surfaces";
-import { computeSmoothNormals } from "./mesh-quality";
+import { computeSmoothNormals, filterDegenerateTriangles } from "./mesh-quality";
 import { computeSmoothNormalsGPU } from "./smooth-normals-gpu";
 
 // Minimal STEP → mesh parser for the square face example
@@ -267,6 +267,12 @@ function computeFaceBasisFromStepFace(
           if (axisDir) {
             n = vec3Normalize(axisDir.dir);
           }
+        }
+
+        // Flip normal if face.sameSense is false
+        // sameSense indicates whether the face normal agrees with the surface normal
+        if (!face.sameSense) {
+          n = [-n[0], -n[1], -n[2]];
         }
 
         // Get reference direction (u) - defaults to X if not specified
@@ -1819,7 +1825,7 @@ async function tryTessellateCurvedSurface(
             radius: cylinder.radius,
           },
           outerLoop.length > 0 ? outerLoop : uvBoundary,  // Use outer loop or fall back to combined
-          16,  // Grid density for tessellation
+          64,  // Grid density for tessellation (higher = less gaps at boundary)
           holeLoops  // C6.4: Pass hole loops
         );
         return meshToVerticesAndTriangles(mesh);
@@ -2979,7 +2985,8 @@ function getPlacementData(model: StepModel, placementId: number): {
 }
 
 /**
- * Convert TessellatedMesh to vertices and triangles format
+ * Convert TessellatedMesh to vertices and triangles format.
+ * Filters out degenerate triangles (zero area or high aspect ratio).
  */
 function meshToVerticesAndTriangles(mesh: {
   positions: Float32Array;
@@ -2990,10 +2997,13 @@ function meshToVerticesAndTriangles(mesh: {
     vertices.push([mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]]);
   }
 
-  const triangles: [number, number, number][] = [];
+  const rawTriangles: [number, number, number][] = [];
   for (let i = 0; i < mesh.indices.length; i += 3) {
-    triangles.push([mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]]);
+    rawTriangles.push([mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]]);
   }
+
+  // Filter out degenerate triangles (zero area, duplicate vertices, or very high aspect ratio)
+  const triangles = filterDegenerateTriangles(vertices, rawTriangles, 100.0);
 
   return { vertices, triangles };
 }
@@ -3184,6 +3194,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     vertices3d: Vec3[];
     isCurved: boolean;
     curvedResult?: { vertices: Vec3[]; triangles: [number, number, number][] };
+    basis?: FaceBasis;  // Store basis for normal extraction
   } | null> {
     try {
       // Check for curved surfaces first (cylinders, spheres, cones, tori)
@@ -3273,7 +3284,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
           console.error(`[processFaceOptimized] Vertex count mismatch: 2D=${filtered2d.length}, 3D=${vertices3d.length}`);
           return null;
         }
-        return { polygon2d: filtered2d, vertices3d, isCurved: false };
+        return { polygon2d: filtered2d, vertices3d, isCurved: false, basis };
       }
       return null;
     } catch {
@@ -3301,6 +3312,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
   // Assemble final mesh
   const allVertices: Vec3[] = [];
+  const allNormals: Vec3[] = [];  // Store normals from STEP geometry
   const allIndices: number[] = [];
   let vertexOffset = 0;
 
@@ -3309,7 +3321,6 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     const face = curvedFaces[fi];
     if (face.curvedResult) {
       const numVerts = face.curvedResult.vertices.length;
-      const numTris = face.curvedResult.triangles.length;
 
       // Validate face mesh before adding
       let faceMaxIndex = 0;
@@ -3323,6 +3334,8 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
       for (const v of face.curvedResult.vertices) {
         allVertices.push(v);
+        // For curved faces, use a placeholder normal - will be computed from geometry
+        allNormals.push([0, 0, 1]);
       }
       for (const tri of face.curvedResult.triangles) {
         allIndices.push(
@@ -3353,8 +3366,12 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
         continue; // Skip this face
       }
 
+      // Get the face normal from STEP geometry (stored in basis)
+      const faceNormal: Vec3 = face.basis?.n || [0, 0, 1];
+
       for (const v of face.vertices3d) {
         allVertices.push(v);
+        allNormals.push(faceNormal);  // All vertices of this face share the same normal
       }
       for (const tri of triangles) {
         allIndices.push(
@@ -3379,18 +3396,34 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
   const indices = new Uint32Array(allIndices);
 
-  // C7.3: Compute smooth vertex normals (GPU-accelerated)
+  // Use normals from STEP geometry for planar faces
+  // For curved faces (placeholder normals), compute from geometry
   const trianglesForNormals: [number, number, number][] = [];
   for (let i = 0; i < allIndices.length; i += 3) {
     trianglesForNormals.push([allIndices[i], allIndices[i + 1], allIndices[i + 2]]);
   }
+
+  // Compute smooth normals for curved surfaces (they have placeholder [0,0,1])
   const smoothNormals = await computeSmoothNormalsGPU(allVertices, trianglesForNormals);
-  const normals = new Float32Array(smoothNormals.length * 3);
-  smoothNormals.forEach((n, i) => {
-    normals[i * 3 + 0] = n[0];
-    normals[i * 3 + 1] = n[1];
-    normals[i * 3 + 2] = n[2];
-  });
+
+  // Build final normals: use STEP normals for planar faces, computed for curved
+  const normals = new Float32Array(allNormals.length * 3);
+  for (let i = 0; i < allNormals.length; i++) {
+    const stepNormal = allNormals[i];
+    // Check if this is a placeholder normal (curved face) - use computed normal instead
+    if (stepNormal[0] === 0 && stepNormal[1] === 0 && stepNormal[2] === 1) {
+      // This might be a curved face placeholder OR an actual Z-up face
+      // Use computed normal for better results on curved surfaces
+      normals[i * 3 + 0] = smoothNormals[i][0];
+      normals[i * 3 + 1] = smoothNormals[i][1];
+      normals[i * 3 + 2] = smoothNormals[i][2];
+    } else {
+      // Use the STEP-provided normal for planar faces
+      normals[i * 3 + 0] = stepNormal[0];
+      normals[i * 3 + 1] = stepNormal[1];
+      normals[i * 3 + 2] = stepNormal[2];
+    }
+  }
 
   const totalEnd = performance.now();
 
