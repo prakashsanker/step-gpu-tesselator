@@ -483,6 +483,40 @@ export async function tessellateTrimmedSurface(
     let insideCount = 0;
     let outsideCount = 0;
 
+    // Helper: check if point is close to polygon boundary (within tolerance)
+    function isNearBoundary(point: Vec2, polygon: Vec2[], tolerance: number): boolean {
+        const [px, py] = point;
+        for (let i = 0; i < polygon.length; i++) {
+            const [x1, y1] = polygon[i];
+            const [x2, y2] = polygon[(i + 1) % polygon.length];
+
+            // Distance from point to line segment
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const lenSq = dx * dx + dy * dy;
+
+            if (lenSq < 1e-12) continue; // Skip degenerate edges
+
+            // Parameter t for closest point on line
+            let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+            t = Math.max(0, Math.min(1, t)); // Clamp to segment
+
+            // Closest point on segment
+            const closestX = x1 + t * dx;
+            const closestY = y1 + t * dy;
+
+            // Distance to closest point
+            const dist = Math.sqrt((px - closestX) ** 2 + (py - closestY) ** 2);
+            if (dist < tolerance) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Tolerance for including points near the boundary
+    const boundaryTolerance = Math.max(du, dv) * 0.5;
+
     for (let j = 0; j <= gridDensity; j++) {
         vertexGrid[j] = [];
         for (let i = 0; i <= gridDensity; i++) {
@@ -491,9 +525,11 @@ export async function tessellateTrimmedSurface(
 
             // Check if this point is inside the continuous boundary and outside holes
             const insideBoundary = isPointInPolygon([u, v], continuousBoundary);
+            const nearBoundary = isNearBoundary([u, v], continuousBoundary, boundaryTolerance);
             const insideHole = continuousHoles.some(hole => isPointInPolygon([u, v], hole));
 
-            if (insideBoundary && !insideHole) {
+            // Include points that are inside OR very close to the boundary
+            if ((insideBoundary || nearBoundary) && !insideHole) {
                 vertexGrid[j][i] = uvVertices.length;
                 // Store the unwrapped UV for surface evaluation
                 // (cos/sin are 2π periodic, so values in [π, 2π] work correctly)
@@ -543,95 +579,10 @@ export async function tessellateTrimmedSurface(
 
     console.log(`[tessellateTrimmedSurface] Grid: ${gridDensity}x${gridDensity}, vertices: ${uvVertices.length}, triangles: ${triangles.length}`);
 
-    // Include boundary vertices to ensure adjacent faces share edges
-    const boundaryStartIdx = uvVertices.length;
-    for (const uv of continuousBoundary) {
-        uvVertices.push(uv);
-    }
-
-    // Helper to find the closest interior grid point to a UV coordinate
-    function findClosestInteriorPoint(u: number, v: number): number | null {
-        const gridI = Math.round((u - uMin) / du);
-        const gridJ = Math.round((v - vMin) / dv);
-
-        for (let searchRadius = 0; searchRadius <= 5; searchRadius++) {
-            for (let dj = -searchRadius; dj <= searchRadius; dj++) {
-                for (let di = -searchRadius; di <= searchRadius; di++) {
-                    if (Math.abs(di) !== searchRadius && Math.abs(dj) !== searchRadius) continue;
-                    const gi = gridI + di;
-                    const gj = gridJ + dj;
-                    if (gi >= 0 && gi <= gridDensity && gj >= 0 && gj <= gridDensity) {
-                        const idx = vertexGrid[gj]?.[gi];
-                        if (idx !== null && idx !== undefined) {
-                            return idx;
-                        }
-                    }
-                }
-            }
-        }
-        return null;
-    }
-
-    // Determine boundary winding order (CCW = positive area)
-    let boundaryArea = 0;
-    for (let i = 0; i < continuousBoundary.length; i++) {
-        const j = (i + 1) % continuousBoundary.length;
-        boundaryArea += continuousBoundary[i][0] * continuousBoundary[j][1];
-        boundaryArea -= continuousBoundary[j][0] * continuousBoundary[i][1];
-    }
-    const boundaryCCW = boundaryArea > 0;
-
-    // Create triangles connecting boundary to interior
-    // For each boundary edge, create a fan of triangles to nearby interior points
-    for (let i = 0; i < continuousBoundary.length; i++) {
-        const curr = continuousBoundary[i];
-        const next = continuousBoundary[(i + 1) % continuousBoundary.length];
-
-        const currIdx = boundaryStartIdx + i;
-        const nextIdx = boundaryStartIdx + ((i + 1) % continuousBoundary.length);
-
-        // Find interior points near current and next boundary vertices
-        const interiorNearCurr = findClosestInteriorPoint(curr[0], curr[1]);
-        const interiorNearNext = findClosestInteriorPoint(next[0], next[1]);
-
-        // Create triangles based on what interior points we found
-        // Use consistent winding: boundary goes CCW, interior point is "inside"
-        if (interiorNearCurr !== null && interiorNearNext !== null) {
-            if (interiorNearCurr === interiorNearNext) {
-                // Same interior point - create single triangle
-                // Interior point should be on the "inside" of the boundary edge
-                if (boundaryCCW) {
-                    triangles.push([currIdx, nextIdx, interiorNearCurr]);
-                } else {
-                    triangles.push([nextIdx, currIdx, interiorNearCurr]);
-                }
-            } else {
-                // Different interior points - create two triangles (quad)
-                if (boundaryCCW) {
-                    triangles.push([currIdx, nextIdx, interiorNearNext]);
-                    triangles.push([currIdx, interiorNearNext, interiorNearCurr]);
-                } else {
-                    triangles.push([nextIdx, currIdx, interiorNearNext]);
-                    triangles.push([interiorNearNext, currIdx, interiorNearCurr]);
-                }
-            }
-        } else if (interiorNearCurr !== null) {
-            if (boundaryCCW) {
-                triangles.push([currIdx, nextIdx, interiorNearCurr]);
-            } else {
-                triangles.push([nextIdx, currIdx, interiorNearCurr]);
-            }
-        } else if (interiorNearNext !== null) {
-            if (boundaryCCW) {
-                triangles.push([currIdx, nextIdx, interiorNearNext]);
-            } else {
-                triangles.push([nextIdx, currIdx, interiorNearNext]);
-            }
-        }
-        // If no interior points found, skip this edge (shouldn't happen normally)
-    }
-
-    console.log(`[tessellateTrimmedSurface] After boundary: vertices: ${uvVertices.length}, triangles: ${triangles.length}`);
+    // Note: We do NOT add boundary stitching triangles here.
+    // The boundary stitching was causing visible spike artifacts on curved surfaces.
+    // The grid-based tessellation alone provides clean results, even if there are small gaps
+    // at the edges. This matches the approach used in the benchmark-research branch.
 
     return evaluateUVMesh(surface, uvVertices, triangles);
 }

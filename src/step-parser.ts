@@ -1825,7 +1825,7 @@ async function tryTessellateCurvedSurface(
             radius: cylinder.radius,
           },
           outerLoop.length > 0 ? outerLoop : uvBoundary,  // Use outer loop or fall back to combined
-          16,  // Grid density for tessellation
+          64,  // Grid density for tessellation (higher = less gaps at boundary)
           holeLoops  // C6.4: Pass hole loops
         );
         return meshToVerticesAndTriangles(mesh);
