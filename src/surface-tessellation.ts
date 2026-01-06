@@ -543,6 +543,51 @@ export async function tessellateTrimmedSurface(
 
     console.log(`[tessellateTrimmedSurface] Grid: ${gridDensity}x${gridDensity}, vertices: ${uvVertices.length}, triangles: ${triangles.length}`);
 
+    // Include boundary vertices to ensure adjacent faces share edges
+    const boundaryStartIdx = uvVertices.length;
+    for (const uv of continuousBoundary) {
+        uvVertices.push(uv);
+    }
+
+    // Create fan triangles from boundary vertices to nearby interior grid points
+    // This ensures the boundary edges are part of the mesh
+    for (let i = 0; i < continuousBoundary.length; i++) {
+        const curr = continuousBoundary[i];
+        const next = continuousBoundary[(i + 1) % continuousBoundary.length];
+
+        const currIdx = boundaryStartIdx + i;
+        const nextIdx = boundaryStartIdx + ((i + 1) % continuousBoundary.length);
+
+        // Find the closest interior grid point to the midpoint of this boundary edge
+        const midU = (curr[0] + next[0]) / 2;
+        const midV = (curr[1] + next[1]) / 2;
+
+        // Convert to grid coordinates
+        const gridI = Math.round((midU - uMin) / du);
+        const gridJ = Math.round((midV - vMin) / dv);
+
+        // Search for a nearby interior point
+        let foundInterior = false;
+        for (let searchRadius = 0; searchRadius <= 3 && !foundInterior; searchRadius++) {
+            for (let dj = -searchRadius; dj <= searchRadius && !foundInterior; dj++) {
+                for (let di = -searchRadius; di <= searchRadius && !foundInterior; di++) {
+                    const gi = gridI + di;
+                    const gj = gridJ + dj;
+                    if (gi >= 0 && gi <= gridDensity && gj >= 0 && gj <= gridDensity) {
+                        const interiorIdx = vertexGrid[gj]?.[gi];
+                        if (interiorIdx !== null && interiorIdx !== undefined) {
+                            // Create a triangle: boundary edge + interior point
+                            triangles.push([currIdx, nextIdx, interiorIdx]);
+                            foundInterior = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    console.log(`[tessellateTrimmedSurface] After boundary: vertices: ${uvVertices.length}, triangles: ${triangles.length}`);
+
     return evaluateUVMesh(surface, uvVertices, triangles);
 }
 

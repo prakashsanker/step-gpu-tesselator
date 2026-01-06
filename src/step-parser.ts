@@ -2032,13 +2032,9 @@ function extractFaceBoundaryVertices(model: StepModel, face: AdvancedFace): Vec3
               vertices.push([x, y, z]);
             }
           } else {
-            // Partial arc - get start and end points respecting edge orientation
-            const edgeOrientation = orientedEdge.orientation;
-            const startVertexId = edgeOrientation ? edgeCurve.startVertexId : edgeCurve.endVertexId;
-            const endVertexId = edgeOrientation ? edgeCurve.endVertexId : edgeCurve.startVertexId;
-
-            const startVertex = model.vertices.get(startVertexId);
-            const endVertex = model.vertices.get(endVertexId);
+            // Partial arc - get start and end points, sample between them
+            const startVertex = model.vertices.get(edgeCurve.startVertexId);
+            const endVertex = model.vertices.get(edgeCurve.endVertexId);
 
             if (startVertex && endVertex) {
               const startPt = model.points.get(startVertex.pointId)?.coords;
@@ -2050,27 +2046,15 @@ function extractFaceBoundaryVertices(model: StepModel, face: AdvancedFace): Vec3
                 const d2: Vec3 = [endPt[0] - center[0], endPt[1] - center[1], endPt[2] - center[2]];
 
                 const angle1 = Math.atan2(vec3Dot(d1, yDir), vec3Dot(d1, refDir));
-                const angle2 = Math.atan2(vec3Dot(d2, yDir), vec3Dot(d2, refDir));
+                let angle2 = Math.atan2(vec3Dot(d2, yDir), vec3Dot(d2, refDir));
 
-                // Choose the shorter path around the circle (matching extractUVBoundaryLoop logic)
-                let ccwDist = angle2 - angle1;
-                if (ccwDist < 0) ccwDist += Math.PI * 2;
-                const cwDist = Math.PI * 2 - ccwDist;
-
-                let angleSpan: number;
-                if (ccwDist < cwDist) {
-                  angleSpan = ccwDist;
-                } else if (cwDist < ccwDist) {
-                  angleSpan = -cwDist;
-                } else {
-                  // Equal distance - default to CCW
-                  angleSpan = ccwDist;
-                }
+                // Ensure we go the right way around
+                if (angle2 < angle1) angle2 += Math.PI * 2;
 
                 // Sample 4 points along the arc
                 for (let i = 0; i <= 4; i++) {
                   const t = i / 4;
-                  const angle = angle1 + t * angleSpan;
+                  const angle = angle1 + t * (angle2 - angle1);
                   const x = center[0] + circle.radius * (Math.cos(angle) * refDir[0] + Math.sin(angle) * yDir[0]);
                   const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
                   const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
