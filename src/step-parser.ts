@@ -1293,12 +1293,13 @@ function debugVerifyProjection(
 export interface Mesh {
   positions: Float32Array;
   indices: Uint32Array;
-  normals?: Float32Array;     // Vertex normals for smooth shading (C7.3)
-  color?: ResolvedColor;      // Material color from STYLED_ITEM (C8.3)
+  normals?: Float32Array;       // Vertex normals for smooth shading (C7.3)
+  color?: ResolvedColor;        // Material color from STYLED_ITEM (C8.3) - single color fallback
+  vertexColors?: Float32Array;  // Per-vertex RGB colors for multi-colored models
   // Timing information for benchmarking
-  parseTime?: number;         // Time spent parsing STEP file (ms)
-  triangulationTime?: number; // Time spent in GPU triangulation (ms)
-  totalTime?: number;         // Total time from start to finish (ms)
+  parseTime?: number;           // Time spent parsing STEP file (ms)
+  triangulationTime?: number;   // Time spent in GPU triangulation (ms)
+  totalTime?: number;           // Total time from start to finish (ms)
 }
 
 /** Resolved color for rendering (C8.3) */
@@ -1489,6 +1490,50 @@ interface DefinitionalRepresentation {
 }
 
 // =============================================================================
+// 2D Geometry Types (for PCURVE UV boundaries)
+// =============================================================================
+
+/** 2D Cartesian point (in UV parameter space) */
+interface Point2D {
+  id: number;
+  coords: Vec2;
+}
+
+/** 2D Direction vector */
+interface Direction2D {
+  id: number;
+  dir: Vec2;
+}
+
+/** 2D Vector (direction + magnitude) */
+interface Vector2D {
+  id: number;
+  directionId: number;
+  magnitude: number;
+}
+
+/** 2D Line (in UV parameter space) */
+interface Line2D {
+  id: number;
+  pointId: number;      // Start point
+  vectorId: number;     // Direction vector
+}
+
+/** 2D Circle (in UV parameter space) */
+interface Circle2D {
+  id: number;
+  center: Vec2;         // Center point (resolved)
+  radius: number;
+}
+
+/** 2D Axis placement */
+interface Axis2Placement2D {
+  id: number;
+  locationId: number;
+  refDirectionId: number | null;
+}
+
+// =============================================================================
 // C8: Full Solids / Assemblies
 // =============================================================================
 
@@ -1670,6 +1715,13 @@ interface StepModel {
   // C4: PCURVE support
   pcurves: Map<number, PCurve>;
   definitionalRepresentations: Map<number, DefinitionalRepresentation>;
+  // 2D geometry (for PCURVE UV boundaries)
+  points2d: Map<number, Point2D>;
+  directions2d: Map<number, Direction2D>;
+  vectors2d: Map<number, Vector2D>;
+  lines2d: Map<number, Line2D>;
+  circles2d: Map<number, Circle2D>;
+  axis2Placements2d: Map<number, Axis2Placement2D>;
   // C8: Full solids / assemblies
   closedShells: Map<number, ClosedShell>;
   manifoldSolidBreps: Map<number, ManifoldSolidBrep>;
@@ -1970,17 +2022,155 @@ async function tryTessellateCurvedSurface(
       weights: bspline.weights,
     };
 
-    // C6b: Trimmed B-spline surface tessellation is disabled due to surface inversion issues.
-    // The Newton-Raphson method in pointToBSplineSurfaceUV doesn't converge properly,
-    // producing UV coordinates that map to 3D points 40+ units away from the original.
-    // For now, use full rectangular tessellation which doesn't require surface inversion.
-    // TODO: Fix surface inversion or use PCURVE data directly for UV boundaries.
-    const mesh = await tessellateBSplineSurface(surfaceObj, 16, 16);
+    // Try to extract UV boundary from PCURVE data (avoids surface inversion)
+    const uvBoundary = extractUVBoundaryFromPCurves(model, face, surfaceId, 16);
+
+    if (uvBoundary && uvBoundary.length >= 3) {
+      console.log(`[B-spline] Using PCURVE-based UV boundary with ${uvBoundary.length} points`);
+      // Use trimmed surface tessellation with actual UV boundary
+      const mesh = await tessellateTrimmedSurface(
+        surfaceObj,
+        uvBoundary,
+        32,  // Higher grid density for B-spline surfaces
+        []   // No holes for now
+      );
+      return meshToVerticesAndTriangles(mesh);
+    }
+
+    // Fallback: Use full rectangular tessellation (when no PCURVE data available)
+    console.log(`[B-spline] No PCURVE data, using full rectangular tessellation`);
+    const mesh = await tessellateBSplineSurface(surfaceObj, 32, 32);
     return meshToVerticesAndTriangles(mesh);
   }
 
   // Not a curved surface (probably a PLANE)
   return null;
+}
+
+/**
+ * Extract UV boundary from PCURVE data for a face on a specific surface.
+ * This avoids the need to invert surface parameterization (Newton-Raphson).
+ *
+ * @param model - The STEP model
+ * @param face - The face to extract UV boundary for
+ * @param surfaceId - The surface ID to find PCURVEs for
+ * @param samplesPerEdge - Number of samples for curved edges
+ * @returns Array of UV points forming the boundary, or null if no PCURVEs found
+ */
+function extractUVBoundaryFromPCurves(
+  model: StepModel,
+  face: AdvancedFace,
+  surfaceId: number,
+  samplesPerEdge: number = 16
+): Vec2[] | null {
+  const uvPoints: Vec2[] = [];
+  let foundAnyPcurve = false;
+
+  for (const boundId of face.boundIds) {
+    const bound = model.faceBounds.get(boundId);
+    if (!bound) continue;
+
+    const loop = model.edgeLoops.get(bound.loopId);
+    if (!loop) continue;
+
+    for (const orientedEdgeId of loop.orientedEdgeIds) {
+      const orientedEdge = model.orientedEdges.get(orientedEdgeId);
+      if (!orientedEdge) continue;
+
+      const edgeCurve = model.edgeCurves.get(orientedEdge.edgeElementId);
+      if (!edgeCurve) continue;
+
+      // Check if this edge's curve is a SURFACE_CURVE with PCURVEs
+      const surfaceCurve = model.surfaceCurves.get(edgeCurve.curveId);
+      if (!surfaceCurve) {
+        // Not a surface curve, can't extract PCURVE data
+        continue;
+      }
+
+      // Find the PCURVE for our target surface
+      let targetPcurve: PCurve | null = null;
+      for (const pcurveId of surfaceCurve.pcurveIds) {
+        const pcurve = model.pcurves.get(pcurveId);
+        if (pcurve && pcurve.surfaceId === surfaceId) {
+          targetPcurve = pcurve;
+          break;
+        }
+      }
+
+      if (!targetPcurve) {
+        // No PCURVE for this surface on this edge
+        continue;
+      }
+
+      foundAnyPcurve = true;
+
+      // Get the 2D curve from DEFINITIONAL_REPRESENTATION
+      const defRep = model.definitionalRepresentations.get(targetPcurve.representationId);
+      if (!defRep || defRep.curveIds.length === 0) {
+        continue;
+      }
+
+      // Sample the 2D curve
+      const curveId = defRep.curveIds[0]; // Usually just one curve per def rep
+      const edgeUvPoints = sample2DCurve(model, curveId, samplesPerEdge);
+
+      // Handle edge orientation
+      const effectiveOrientation = orientedEdge.orientation === edgeCurve.sameSense;
+      if (!effectiveOrientation) {
+        edgeUvPoints.reverse();
+      }
+
+      // Add points (skip last to avoid duplicates at edge boundaries)
+      for (let i = 0; i < edgeUvPoints.length - 1; i++) {
+        uvPoints.push(edgeUvPoints[i]);
+      }
+    }
+  }
+
+  if (!foundAnyPcurve || uvPoints.length < 3) {
+    return null;
+  }
+
+  return uvPoints;
+}
+
+/**
+ * Sample a 2D curve from model data.
+ * Supports LINE entities with 2D points.
+ */
+function sample2DCurve(model: StepModel, curveId: number, numSamples: number): Vec2[] {
+  const points: Vec2[] = [];
+
+  // Check if it's a 2D line
+  const line = model.lines2d.get(curveId);
+  if (line) {
+    const startPoint = model.points2d.get(line.pointId);
+    const vector = model.vectors2d.get(line.vectorId);
+
+    if (startPoint && vector) {
+      const direction = model.directions2d.get(vector.directionId);
+      if (direction) {
+        // For lines, we just need start and end points
+        // The parameter range is typically [0, 1] or based on vector magnitude
+        const start = startPoint.coords;
+        const dir = direction.dir;
+        const mag = vector.magnitude;
+
+        // Sample along the line
+        for (let i = 0; i <= numSamples; i++) {
+          const t = i / numSamples;
+          const u = start[0] + t * dir[0] * mag;
+          const v = start[1] + t * dir[1] * mag;
+          points.push([u, v]);
+        }
+        return points;
+      }
+    }
+  }
+
+  // If we couldn't sample the curve, return empty
+  console.warn(`[sample2DCurve] Could not sample curve #${curveId}`);
+  return points;
 }
 
 /**
@@ -3124,6 +3314,8 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // Optimized version with parallel face processing and hybrid GPU/CPU triangulation.
   // Supports both planar and curved surfaces (cylinders, spheres, cones, tori).
 
+  console.log("======= STEP PARSING STARTED =======");
+
   const totalStart = performance.now();
   const parseStart = performance.now();
 
@@ -3132,35 +3324,92 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     throw new Error("No ADVANCED_FACE found in STEP file.");
   }
 
+  // Debug: Log parsed model statistics
+  console.log(`[parseStepToMesh] Parsed model stats:`);
+  console.log(`  - faces: ${model.faces.size}`);
+  console.log(`  - manifoldSolidBreps: ${model.manifoldSolidBreps.size}`);
+  console.log(`  - closedShells: ${model.closedShells.size}`);
+  console.log(`  - styledItems: ${model.styledItems.size}`);
+
   // C8: Use CLOSED_SHELL face ordering when available for consistent rendering
   let faces: AdvancedFace[];
   let solidColor: ResolvedColor | undefined;
+
+  // Map from faceId -> color for per-face coloring
+  const faceColorMap = new Map<number, ResolvedColor>();
 
   // Check if we have solid structure (MANIFOLD_SOLID_BREP -> CLOSED_SHELL)
   if (model.manifoldSolidBreps.size > 0) {
     const solids = extractSolidsWithColors(model);
     if (solids.length > 0) {
-      // Use the first solid's face ordering and color
-      const firstSolid = solids[0];
-      faces = firstSolid.faceIds
+      // Collect faces from ALL solids and map each face to its solid's color
+      const allFaceIds = new Set<number>();
+      for (const solid of solids) {
+        for (const faceId of solid.faceIds) {
+          allFaceIds.add(faceId);
+          // Map this face to the solid's color (can be overridden by per-face color below)
+          if (solid.color) {
+            faceColorMap.set(faceId, solid.color);
+          }
+        }
+      }
+      faces = [...allFaceIds]
         .map(id => model.faces.get(id))
         .filter((f): f is AdvancedFace => f !== undefined);
-      solidColor = firstSolid.color;
+
+      // Use first solid's color as fallback for single-color mode
+      solidColor = solids[0].color;
+      console.log(`[parseStepToMesh] Processing ${solids.length} solids with ${faces.length} total faces`);
     } else {
       faces = [...model.faces.values()];
     }
   } else if (model.closedShells.size > 0) {
-    // Fallback: use CLOSED_SHELL directly
-    const shells = [...model.closedShells.values()];
-    const firstShell = shells[0];
-    faces = firstShell.faceIds
+    // Fallback: collect faces from ALL closed shells
+    const allFaceIds = new Set<number>();
+    for (const shell of model.closedShells.values()) {
+      const shellColor = resolveColorForItem(model, shell.id);
+      for (const faceId of shell.faceIds) {
+        allFaceIds.add(faceId);
+        if (shellColor) {
+          faceColorMap.set(faceId, shellColor);
+        }
+      }
+    }
+    faces = [...allFaceIds]
       .map(id => model.faces.get(id))
       .filter((f): f is AdvancedFace => f !== undefined);
-    // Try to get color for the shell
+    // Use first shell's color as fallback
+    const firstShell = [...model.closedShells.values()][0];
     solidColor = resolveColorForItem(model, firstShell.id);
+    console.log(`[parseStepToMesh] Processing ${model.closedShells.size} shells with ${faces.length} total faces`);
   } else {
     // Legacy: use all faces from model
     faces = [...model.faces.values()];
+  }
+
+  // IMPORTANT: Check for per-face colors (STYLED_ITEM referencing ADVANCED_FACE directly)
+  // This overrides any solid/shell level colors
+  let perFaceColorCount = 0;
+  for (const face of (faces.length > 0 ? faces : [...model.faces.values()])) {
+    const faceColor = resolveColorForItem(model, face.id);
+    if (faceColor) {
+      faceColorMap.set(face.id, faceColor);
+      perFaceColorCount++;
+    }
+  }
+  if (perFaceColorCount > 0) {
+    console.log(`[parseStepToMesh] Found ${perFaceColorCount} per-face colors (STYLED_ITEM -> ADVANCED_FACE)`);
+  }
+
+  // Log color distribution
+  const colorCounts = new Map<string, number>();
+  for (const [, color] of faceColorMap) {
+    const key = `${color.r.toFixed(2)},${color.g.toFixed(2)},${color.b.toFixed(2)}`;
+    colorCounts.set(key, (colorCounts.get(key) || 0) + 1);
+  }
+  console.log(`[parseStepToMesh] Color distribution across ${faceColorMap.size} faces:`);
+  for (const [color, count] of colorCounts) {
+    console.log(`  RGB(${color}): ${count} faces`);
   }
   const parseEnd = performance.now();
 
@@ -3190,6 +3439,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
   // Helper function to process a single face (runs in parallel)
   async function processFaceOptimized(face: AdvancedFace): Promise<{
+    faceId: number;  // Track face ID for color lookup
     polygon2d: Vec2[];
     vertices3d: Vec3[];
     isCurved: boolean;
@@ -3201,6 +3451,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
       const curvedResult = await tryTessellateCurvedSurface(model, face);
       if (curvedResult) {
         return {
+          faceId: face.id,
           polygon2d: [],
           vertices3d: [],
           isCurved: true,
@@ -3284,10 +3535,11 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
           console.error(`[processFaceOptimized] Vertex count mismatch: 2D=${filtered2d.length}, 3D=${vertices3d.length}`);
           return null;
         }
-        return { polygon2d: filtered2d, vertices3d, isCurved: false, basis };
+        return { faceId: face.id, polygon2d: filtered2d, vertices3d, isCurved: false, basis };
       }
       return null;
-    } catch {
+    } catch (err) {
+      console.error(`[processFaceOptimized] Face processing failed:`, err);
       return null; // Skip failed faces
     }
   }
@@ -3295,6 +3547,9 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // Process all faces in parallel
   const results = await Promise.all(faces.map(processFaceOptimized));
   const preparedFaces = results.filter((f): f is NonNullable<typeof f> => f !== null);
+
+  const failedCount = results.filter(f => f === null).length;
+  console.log(`[parseStepToMesh] Face processing: ${preparedFaces.length} succeeded, ${failedCount} failed out of ${faces.length} total`);
 
   // Separate curved and planar faces
   const planarFaces = preparedFaces.filter(f => !f.isCurved);
@@ -3313,8 +3568,12 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // Assemble final mesh
   const allVertices: Vec3[] = [];
   const allNormals: Vec3[] = [];  // Store normals from STEP geometry
+  const allColors: Vec3[] = [];   // Per-vertex RGB colors
   const allIndices: number[] = [];
   let vertexOffset = 0;
+
+  // Default color (light gray) for faces without color
+  const defaultColor: Vec3 = [0.7, 0.7, 0.7];
 
   // Add curved faces (already have triangles from surface tessellation)
   for (let fi = 0; fi < curvedFaces.length; fi++) {
@@ -3332,10 +3591,17 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
         continue; // Skip this face
       }
 
+      // Get color for this face
+      const faceColor = faceColorMap.get(face.faceId);
+      const colorVec: Vec3 = faceColor
+        ? [faceColor.r, faceColor.g, faceColor.b]
+        : defaultColor;
+
       for (const v of face.curvedResult.vertices) {
         allVertices.push(v);
         // For curved faces, use a placeholder normal - will be computed from geometry
         allNormals.push([0, 0, 1]);
+        allColors.push(colorVec);
       }
       for (const tri of face.curvedResult.triangles) {
         allIndices.push(
@@ -3369,9 +3635,16 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
       // Get the face normal from STEP geometry (stored in basis)
       const faceNormal: Vec3 = face.basis?.n || [0, 0, 1];
 
+      // Get color for this face
+      const faceColor = faceColorMap.get(face.faceId);
+      const colorVec: Vec3 = faceColor
+        ? [faceColor.r, faceColor.g, faceColor.b]
+        : defaultColor;
+
       for (const v of face.vertices3d) {
         allVertices.push(v);
         allNormals.push(faceNormal);  // All vertices of this face share the same normal
+        allColors.push(colorVec);
       }
       for (const tri of triangles) {
         allIndices.push(
@@ -3450,7 +3723,17 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   const triangulationTime = triangulationEnd - triangulationStart;
   const totalTime = totalEnd - totalStart;
 
-  return { positions, indices, normals, color: solidColor, parseTime, triangulationTime, totalTime };
+  // Build vertex colors array (RGB per vertex)
+  const vertexColors = new Float32Array(allColors.length * 3);
+  for (let i = 0; i < allColors.length; i++) {
+    vertexColors[i * 3 + 0] = allColors[i][0];
+    vertexColors[i * 3 + 1] = allColors[i][1];
+    vertexColors[i * 3 + 2] = allColors[i][2];
+  }
+
+  console.log(`[parseStepToMesh] Built mesh with ${allVertices.length} vertices, ${allColors.length} vertex colors`);
+
+  return { positions, indices, normals, color: solidColor, vertexColors, parseTime, triangulationTime, totalTime };
 }
 
 /**
@@ -4259,6 +4542,13 @@ function parseStep(stepText: string): StepModel {
     // C4: PCURVE support
     pcurves: new Map(),
     definitionalRepresentations: new Map(),
+    // 2D geometry (for PCURVE UV boundaries)
+    points2d: new Map(),
+    directions2d: new Map(),
+    vectors2d: new Map(),
+    lines2d: new Map(),
+    circles2d: new Map(),
+    axis2Placements2d: new Map(),
     // C8: Full solids / assemblies
     closedShells: new Map(),
     manifoldSolidBreps: new Map(),
@@ -4286,11 +4576,17 @@ function parseStep(stepText: string): StepModel {
   const entities: string[] = [];
   let currentEntity = "";
 
+  // Regex to detect start of a new entity: #number= or #number =
+  // This distinguishes entity starts from continuation lines containing references like #123,#456
+  const entityStartRegex = /^#\d+\s*=/;
+
   for (const line of rawLines) {
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    if (trimmed.startsWith("#")) {
+    // Check if this line starts a new entity (e.g., "#123=TYPE(...)" or "#123 = TYPE(...)")
+    // Not just "#..." which could be continuation lines like "#456,#789,..."
+    if (entityStartRegex.test(trimmed)) {
       // Start of a new entity - save previous if exists
       if (currentEntity) {
         entities.push(currentEntity);
@@ -4317,17 +4613,255 @@ function parseStep(stepText: string): StepModel {
   // - Spaces between entity type and opening paren: CARTESIAN_POINT ( 'NONE', ...)
   // - Spaces before semicolon: ...) ) ;
   const entityRegex = /^#(\d+)\s*=\s*([A-Z0-9_]+)\s*\(\s*(.*)\s*\)\s*;?\s*$/;
+  // Complex entity regex: #id=( TYPE1(...) TYPE2(...) ... );
+  const complexEntityRegex = /^#(\d+)\s*=\s*\(\s*([\s\S]*)\s*\)\s*;?\s*$/;
 
   for (const entity of entities) {
     const trimmed = entity.trim();
 
     if (!trimmed.startsWith("#")) continue;
-    const match = trimmed.match(entityRegex);
-    if (!match) continue;
 
-    const id = parseInt(match[1], 10);
-    const type = match[2];
-    const args = match[3]; // raw argument string inside (...)
+    // Try simple entity format first
+    const match = trimmed.match(entityRegex);
+    if (match) {
+      const id = parseInt(match[1], 10);
+      const type = match[2];
+      const args = match[3]; // raw argument string inside (...)
+      parseSimpleEntity(id, type, args, model);
+      continue;
+    }
+
+    // Try complex entity format: #id=( TYPE1(...) TYPE2(...) ... );
+    const complexMatch = trimmed.match(complexEntityRegex);
+    if (complexMatch) {
+      const id = parseInt(complexMatch[1], 10);
+      const content = complexMatch[2];
+      parseComplexEntity(id, content, model);
+      continue;
+    }
+  }
+
+  return model;
+}
+
+/**
+ * Parse a complex STEP entity that combines multiple types.
+ * Format: #id=( TYPE1(...) TYPE2(...) ... );
+ *
+ * Example for rational B-spline surface:
+ * #37682=(
+ *   BOUNDED_SURFACE()
+ *   B_SPLINE_SURFACE(3,2,((control_points...)),...)
+ *   B_SPLINE_SURFACE_WITH_KNOTS((u_mults),(v_mults),(u_knots),(v_knots),...)
+ *   RATIONAL_B_SPLINE_SURFACE((weights))
+ *   ...
+ * );
+ */
+function parseComplexEntity(id: number, content: string, model: StepModel): void {
+  // Extract all sub-entity types and their arguments
+  // Pattern: TYPE_NAME(...) or TYPE_NAME()
+  const subEntityRegex = /([A-Z][A-Z0-9_]*)\s*\(([^()]*(?:\([^()]*(?:\([^()]*\)[^()]*)*\)[^()]*)*)\)/g;
+
+  const subEntities: { type: string; args: string }[] = [];
+  let subMatch;
+  while ((subMatch = subEntityRegex.exec(content)) !== null) {
+    subEntities.push({
+      type: subMatch[1],
+      args: subMatch[2].trim()
+    });
+  }
+
+  if (subEntities.length === 0) {
+    return;
+  }
+
+  // Check what types are present
+  const types = new Set(subEntities.map(e => e.type));
+
+  // Handle complex B-spline surface (combines B_SPLINE_SURFACE + B_SPLINE_SURFACE_WITH_KNOTS + optional RATIONAL)
+  if (types.has('B_SPLINE_SURFACE') && types.has('B_SPLINE_SURFACE_WITH_KNOTS')) {
+    parseComplexBSplineSurface(id, subEntities, model);
+    return;
+  }
+
+  // Handle other complex entity types as needed
+  // For now, just try to parse any recognizable sub-entities
+  for (const sub of subEntities) {
+    // Some entities might be parseable directly
+    switch (sub.type) {
+      case 'REPRESENTATION_ITEM':
+      case 'GEOMETRIC_REPRESENTATION_ITEM':
+      case 'SURFACE':
+      case 'BOUNDED_SURFACE':
+        // These are abstract supertypes, skip them
+        break;
+      default:
+        // Could add more handlers here
+        break;
+    }
+  }
+}
+
+/**
+ * Parse a complex B-spline surface entity that combines:
+ * - B_SPLINE_SURFACE: degrees and control points
+ * - B_SPLINE_SURFACE_WITH_KNOTS: knot vectors and multiplicities
+ * - RATIONAL_B_SPLINE_SURFACE: weights (optional)
+ */
+function parseComplexBSplineSurface(
+  id: number,
+  subEntities: { type: string; args: string }[],
+  model: StepModel
+): void {
+  let uDegree = 0;
+  let vDegree = 0;
+  let controlPointIds: number[][] = [];
+  let uKnotMultiplicities: number[] = [];
+  let vKnotMultiplicities: number[] = [];
+  let uKnots: number[] = [];
+  let vKnots: number[] = [];
+  let weights: number[][] | undefined;
+  let uClosed = false;
+  let vClosed = false;
+
+  for (const sub of subEntities) {
+    if (sub.type === 'B_SPLINE_SURFACE') {
+      // B_SPLINE_SURFACE(u_degree, v_degree, control_points, surface_form, u_closed, v_closed, self_intersect)
+      // Example: B_SPLINE_SURFACE(3,2,((#cp1,#cp2),(#cp3,#cp4)),.UNSPECIFIED.,.F.,.F.,.F.)
+
+      const degreeMatch = sub.args.match(/^(\d+)\s*,\s*(\d+)\s*,/);
+      if (degreeMatch) {
+        uDegree = parseInt(degreeMatch[1], 10);
+        vDegree = parseInt(degreeMatch[2], 10);
+      }
+
+      // Extract control points array
+      const cpStart = sub.args.indexOf('((');
+      if (cpStart >= 0) {
+        // Find matching closing ))
+        let depth = 0;
+        let cpEnd = cpStart;
+        for (let i = cpStart; i < sub.args.length; i++) {
+          if (sub.args[i] === '(') depth++;
+          else if (sub.args[i] === ')') {
+            depth--;
+            if (depth === 0) {
+              cpEnd = i + 1;
+              break;
+            }
+          }
+        }
+
+        const cpArrayStr = sub.args.substring(cpStart, cpEnd);
+        // Parse rows: (#id1,#id2,...),(#id3,#id4,...)
+        const rowRegex = /\(\s*(#[\d\s,#]+)\s*\)/g;
+        let rowMatch;
+        while ((rowMatch = rowRegex.exec(cpArrayStr)) !== null) {
+          const rowStr = rowMatch[1];
+          const pointIds: number[] = [];
+          const pointRegex = /#(\d+)/g;
+          let pointMatch;
+          while ((pointMatch = pointRegex.exec(rowStr)) !== null) {
+            pointIds.push(parseInt(pointMatch[1], 10));
+          }
+          if (pointIds.length > 0) {
+            controlPointIds.push(pointIds);
+          }
+        }
+      }
+
+      // Parse closed flags
+      const flagsMatch = sub.args.match(/\.\w+\.\s*,\s*\.([TF])\.\s*,\s*\.([TF])\.\s*,\s*\.([TF])\./);
+      if (flagsMatch) {
+        uClosed = flagsMatch[1] === 'T';
+        vClosed = flagsMatch[2] === 'T';
+      }
+    }
+    else if (sub.type === 'B_SPLINE_SURFACE_WITH_KNOTS') {
+      // B_SPLINE_SURFACE_WITH_KNOTS(u_multiplicities, v_multiplicities, u_knots, v_knots, knot_spec)
+      // Example: B_SPLINE_SURFACE_WITH_KNOTS((4,1,1,4),(3,3),(0.,0.5,0.75,1.),(0.,1.),.UNSPECIFIED.)
+
+      // Find all parenthesized lists
+      const listRegex = /\(\s*([-0-9.Ee+\s,]+)\s*\)/g;
+      const allLists: { nums: number[], isFloat: boolean }[] = [];
+      let listMatch;
+      while ((listMatch = listRegex.exec(sub.args)) !== null) {
+        const content = listMatch[1];
+        const nums = content.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+        if (nums.length > 0) {
+          const isFloat = content.includes('.');
+          allLists.push({ nums, isFloat });
+        }
+      }
+
+      // Separate into integer lists (multiplicities) and float lists (knots)
+      const intLists = allLists.filter(l => !l.isFloat).map(l => l.nums.map(n => Math.round(n)));
+      const realLists = allLists.filter(l => l.isFloat).map(l => l.nums);
+
+      uKnotMultiplicities = intLists[0] || [];
+      vKnotMultiplicities = intLists[1] || [];
+      uKnots = realLists[0] || [];
+      vKnots = realLists[1] || [];
+    }
+    else if (sub.type === 'RATIONAL_B_SPLINE_SURFACE') {
+      // RATIONAL_B_SPLINE_SURFACE(weights_array)
+      // Example: RATIONAL_B_SPLINE_SURFACE(((1.,0.707,1.),(1.,0.707,1.)))
+
+      const weightsStart = sub.args.indexOf('((');
+      if (weightsStart >= 0) {
+        // Find matching ))
+        let depth = 0;
+        let weightsEnd = weightsStart;
+        for (let i = weightsStart; i < sub.args.length; i++) {
+          if (sub.args[i] === '(') depth++;
+          else if (sub.args[i] === ')') {
+            depth--;
+            if (depth === 0) {
+              weightsEnd = i + 1;
+              break;
+            }
+          }
+        }
+
+        const weightsStr = sub.args.substring(weightsStart, weightsEnd);
+        weights = [];
+
+        // Parse rows of weights
+        const rowRegex = /\(\s*([-0-9.Ee+\s,]+)\s*\)/g;
+        let rowMatch;
+        while ((rowMatch = rowRegex.exec(weightsStr)) !== null) {
+          const rowStr = rowMatch[1];
+          const rowWeights = rowStr.split(',').map(s => parseFloat(s.trim())).filter(n => !isNaN(n));
+          if (rowWeights.length > 0) {
+            weights.push(rowWeights);
+          }
+        }
+      }
+    }
+  }
+
+  // Only store if we got valid data
+  if (controlPointIds.length > 0 && uKnots.length > 0 && vKnots.length > 0) {
+    model.bSplineSurfaces.set(id, {
+      id,
+      uDegree,
+      vDegree,
+      controlPointIds,
+      uKnotMultiplicities,
+      vKnotMultiplicities,
+      uKnots,
+      vKnots,
+      uClosed,
+      vClosed,
+      weights,
+    });
+  }
+}
+
+/**
+ * Parse a simple STEP entity (single type).
+ */
+function parseSimpleEntity(id: number, type: string, args: string, model: StepModel): void {
 
     switch (type) {
       case "CARTESIAN_POINT":
@@ -4375,6 +4909,10 @@ function parseStep(stepText: string): StepModel {
         break;
       case "TOROIDAL_SURFACE":
         parseToroidalSurface(id, args, model);
+        break;
+      case "DEGENERATE_TOROIDAL_SURFACE":
+        // Degenerate torus - treat similarly to regular torus for rendering
+        parseDegenerateToroidalSurface(id, args, model);
         break;
       // C5: B-spline surfaces
       case "B_SPLINE_SURFACE_WITH_KNOTS":
@@ -4444,9 +4982,6 @@ function parseStep(stepText: string): StepModel {
         break;
       // We ignore other entity types for now
     }
-  }
-
-  return model;
 }
 
 // --- Individual entity parsers (all tailored to our example syntax) ---
@@ -4463,10 +4998,12 @@ function parseCartesianPoint(id: number, args: string, model: StepModel) {
     return;
   }
 
-  // Check for 2D point - we skip these as they're only used in PCURVE definitions
+  // Check for 2D point - store in points2d for PCURVE UV boundary extraction
   const coord2dMatch = args.match(/\(\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*\)\s*$/);
   if (coord2dMatch) {
-    // 2D point - skip (not needed for 3D geometry)
+    const u = parseFloat(coord2dMatch[1]);
+    const v = parseFloat(coord2dMatch[2]);
+    model.points2d.set(id, { id, coords: [u, v] });
     return;
   }
 
@@ -4574,9 +5111,12 @@ function parseDirection(id: number, args: string, model: StepModel) {
     return;
   }
 
-  // Check for 2D direction - skip (only used in PCURVE definitions)
+  // Check for 2D direction - store in directions2d for PCURVE UV boundary extraction
   const coord2dMatch = args.match(/\(\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*\)\s*$/);
   if (coord2dMatch) {
+    const u = parseFloat(coord2dMatch[1]);
+    const v = parseFloat(coord2dMatch[2]);
+    model.directions2d.set(id, { id, dir: [u, v] });
     return;
   }
 
@@ -4667,6 +5207,20 @@ function parseToroidalSurface(id: number, args: string, model: StepModel) {
   const majorRadius = parseFloat(m[2]);
   const minorRadius = parseFloat(m[3]);
 
+  model.toroidalSurfaces.set(id, { id, placementId, majorRadius, minorRadius });
+}
+
+function parseDegenerateToroidalSurface(id: number, args: string, model: StepModel) {
+  // DEGENERATE_TOROIDAL_SURFACE('', #placement, major_radius, minor_radius, .T./.F.)
+  // The last parameter indicates if it's a self-intersecting apple torus
+  // We treat it the same as a regular torus for rendering purposes
+  const m = args.match(/'[^']*'\s*,\s*#(\d+)\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)/);
+  if (!m) throw new Error(`Failed to parse DEGENERATE_TOROIDAL_SURFACE args: ${args}`);
+  const placementId = parseInt(m[1], 10);
+  const majorRadius = parseFloat(m[2]);
+  const minorRadius = parseFloat(m[3]);
+
+  // Store in the same toroidalSurfaces map - the tessellation will handle it the same way
   model.toroidalSurfaces.set(id, { id, placementId, majorRadius, minorRadius });
 }
 
@@ -4781,7 +5335,10 @@ function parseVector(id: number, args: string, model: StepModel) {
   const directionId = parseInt(m[1], 10);
   const magnitude = parseFloat(m[2]);
 
+  // Store in 3D vectors - we'll determine 2D vs 3D based on referenced direction later
   model.vectors.set(id, { id, directionId, magnitude });
+  // Also store as 2D vector if the direction is 2D
+  model.vectors2d.set(id, { id, directionId, magnitude });
 }
 
 function parseLine(id: number, args: string, model: StepModel) {
@@ -4792,7 +5349,10 @@ function parseLine(id: number, args: string, model: StepModel) {
   const pointId = parseInt(m[1], 10);
   const vectorId = parseInt(m[2], 10);
 
+  // Store in 3D lines - we'll determine 2D vs 3D based on referenced point later
   model.lines.set(id, { id, pointId, vectorId });
+  // Also store as 2D line (will be used if the point is 2D)
+  model.lines2d.set(id, { id, pointId, vectorId });
 }
 
 function parseCircle(id: number, args: string, model: StepModel) {
@@ -5141,7 +5701,9 @@ function resolveColorFromStyledItem(model: StepModel, styledItem: StyledItem): R
     const psa = model.presentationStyleAssignments.get(styleId);
     if (psa) {
       const color = resolveColorFromPSA(model, psa);
-      if (color) return color;
+      if (color) {
+        return color;
+      }
     }
   }
   return undefined;

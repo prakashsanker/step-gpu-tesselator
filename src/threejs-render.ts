@@ -6,15 +6,6 @@ export function createThreeMeshFromTesselation(mesh: Mesh): THREE.Mesh {
     // DEBUG: Check what we received
     console.log(`[Three.js] Received mesh: ${mesh.positions.length / 3} vertices, ${mesh.indices.length / 3} triangles`);
 
-    // DEBUG: Check for z=-315 (Face #356 cap) vertices in positions
-    let zMinus315Count = 0;
-    for (let i = 0; i < mesh.positions.length; i += 3) {
-        if (Math.abs(mesh.positions[i + 2] - (-315)) < 2) {
-            zMinus315Count++;
-        }
-    }
-    console.log(`[Three.js] Vertices at z≈-315 (cap): ${zMinus315Count}`);
-
     // DEBUG: Check index range
     let maxIdx = 0;
     for (let i = 0; i < mesh.indices.length; i++) {
@@ -22,17 +13,37 @@ export function createThreeMeshFromTesselation(mesh: Mesh): THREE.Mesh {
     }
     console.log(`[Three.js] Index range: 0 to ${maxIdx}`);
 
+    // Convert from Z-up (CAD convention) to Y-up (Three.js convention)
+    // Rotate -90 degrees around X axis: (x, y, z) -> (x, z, -y)
+    const convertedPositions = new Float32Array(mesh.positions.length);
+    for (let i = 0; i < mesh.positions.length; i += 3) {
+        convertedPositions[i] = mesh.positions[i];          // x stays the same
+        convertedPositions[i + 1] = mesh.positions[i + 2];  // y = old z
+        convertedPositions[i + 2] = -mesh.positions[i + 1]; // z = -old y
+    }
+
+    // Also convert normals if present
+    let convertedNormals: Float32Array | undefined;
+    if (mesh.normals) {
+        convertedNormals = new Float32Array(mesh.normals.length);
+        for (let i = 0; i < mesh.normals.length; i += 3) {
+            convertedNormals[i] = mesh.normals[i];          // x stays the same
+            convertedNormals[i + 1] = mesh.normals[i + 2];  // y = old z
+            convertedNormals[i + 2] = -mesh.normals[i + 1]; // z = -old y
+        }
+    }
+
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
         "position",
-        new THREE.BufferAttribute(mesh.positions, 3)
+        new THREE.BufferAttribute(convertedPositions, 3)
     );
 
     // Use provided normals for smooth shading (C7.3), otherwise compute them
-    if (mesh.normals) {
+    if (convertedNormals) {
         geometry.setAttribute(
             "normal",
-            new THREE.BufferAttribute(mesh.normals, 3)
+            new THREE.BufferAttribute(convertedNormals, 3)
         );
     } else {
         // Fall back to computed normals
@@ -45,27 +56,60 @@ export function createThreeMeshFromTesselation(mesh: Mesh): THREE.Mesh {
     console.log(`[Three.js] Geometry index count: ${geometry.index?.count}`);
     console.log(`[Three.js] Geometry position count: ${geometry.attributes.position.count}`);
 
-    // C8.3: Use color from STYLED_ITEM if available
-    let materialColor: THREE.Color | number = 0x6699ff; // Default: bright blue
-    if (mesh.color) {
-        materialColor = new THREE.Color(mesh.color.r, mesh.color.g, mesh.color.b);
+    // Check if we have per-vertex colors
+    const hasVertexColors = mesh.vertexColors && mesh.vertexColors.length > 0;
+    console.log(`[Three.js] Has vertex colors: ${hasVertexColors}, length: ${mesh.vertexColors?.length || 0}`);
+
+    if (hasVertexColors && mesh.vertexColors) {
+        // Add vertex colors to geometry
+        geometry.setAttribute(
+            "color",
+            new THREE.BufferAttribute(mesh.vertexColors, 3)
+        );
+        console.log(`[Three.js] Added vertex colors attribute`);
     }
 
-    const material = new THREE.MeshStandardMaterial({
-        color: materialColor,
-        metalness: 0.2,
-        roughness: 0.5,
-        side: THREE.DoubleSide, // helpful for thin faces
-        flatShading: false,  // Smooth shading for better appearance
-      });
+    // Create material - use vertex colors if available, otherwise fallback to single color
+    let material: THREE.MeshStandardMaterial;
 
-      return new THREE.Mesh(geometry, material);
+    if (hasVertexColors) {
+        // Use vertex colors
+        material = new THREE.MeshStandardMaterial({
+            vertexColors: true,
+            metalness: 0.2,
+            roughness: 0.5,
+            side: THREE.DoubleSide,
+            flatShading: false,
+        });
+        console.log(`[Three.js] Using vertex colors material`);
+    } else {
+        // Fallback: Use single color from STYLED_ITEM if available
+        let materialColor: THREE.Color | number = 0x6699ff; // Default: bright blue
+        if (mesh.color) {
+            materialColor = new THREE.Color(mesh.color.r, mesh.color.g, mesh.color.b);
+        }
+        material = new THREE.MeshStandardMaterial({
+            color: materialColor,
+            metalness: 0.2,
+            roughness: 0.5,
+            side: THREE.DoubleSide,
+            flatShading: false,
+        });
+        console.log(`[Three.js] Using single color material`);
+    }
+
+    return new THREE.Mesh(geometry, material);
 }
 
 export function render(threeMesh: THREE.Mesh) {
   const canvas = document.getElementById("canvas") as HTMLCanvasElement;
 
-  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  // Use logarithmic depth buffer to reduce z-fighting in large scenes
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: true,
+    logarithmicDepthBuffer: true
+  });
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.setPixelRatio(window.devicePixelRatio);
 
@@ -85,11 +129,16 @@ export function render(threeMesh: THREE.Mesh) {
   const fov = 45;
   const cameraDistance = maxDim / (2 * Math.tan((fov * Math.PI) / 360)) * 1.5;
 
+  // Use better near/far ratio to reduce z-fighting
+  // Near plane should be as large as possible while still showing the model
+  const nearPlane = Math.max(0.1, maxDim * 0.001);
+  const farPlane = Math.max(1000, cameraDistance * 5);
+
   const camera = new THREE.PerspectiveCamera(
     fov,
     window.innerWidth / window.innerHeight,
-    0.01,
-    Math.max(1000, cameraDistance * 10)
+    nearPlane,
+    farPlane
   );
 
   // Position camera to look at center from an angle
