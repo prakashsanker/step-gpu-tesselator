@@ -1,77 +1,78 @@
 ISO-10303-21;
 HEADER;
-  FILE_DESCRIPTION(('Unit square face example'),'2;1');
-  FILE_NAME('square_face.stp','20250101',(''),(''),'','ChatGPT','');
-  FILE_SCHEMA(('CONFIG_CONTROL_DESIGN'));
+FILE_DESCRIPTION (( 'STEP AP214' ), '1' );
+FILE_NAME ('square.step', '2024-01-04T00:00:00', ( '' ), ( '' ), 'STEP Test', 'Test Generator', '' );
+FILE_SCHEMA (( 'AUTOMOTIVE_DESIGN' ));
 ENDSEC;
+
 DATA;
+/* ============================================ */
+/* AP214 Required Product Structure             */
+/* ============================================ */
+#1 = APPLICATION_CONTEXT ( 'automotive_design' );
+#2 = APPLICATION_PROTOCOL_DEFINITION ( 'draft international standard', 'automotive_design', 1998, #1 );
+#3 = PRODUCT_CONTEXT ( 'NONE', #1, 'mechanical' );
+#4 = PRODUCT ( 'square', 'square', '', ( #3 ) );
+#5 = PRODUCT_DEFINITION_FORMATION_WITH_SPECIFIED_SOURCE ( 'ANY', '', #4, .NOT_KNOWN. );
+#6 = PRODUCT_DEFINITION_CONTEXT ( 'detailed design', #1, 'design' );
+#7 = PRODUCT_DEFINITION ( 'UNKNOWN', '', #5, #6 );
+#8 = PRODUCT_DEFINITION_SHAPE ( 'NONE', 'NONE', #7 );
+#9 = PRODUCT_RELATED_PRODUCT_CATEGORY ( 'part', '', ( #4 ) );
 
-  /* ==== Geometric context: 3D, plane in XY with Z up ==== */
+/* Units and context */
+#10 = ( GEOMETRIC_REPRESENTATION_CONTEXT ( 3 ) GLOBAL_UNCERTAINTY_ASSIGNED_CONTEXT ( ( #13 ) ) GLOBAL_UNIT_ASSIGNED_CONTEXT ( ( #14, #15, #16 ) ) REPRESENTATION_CONTEXT ( 'NONE', 'WORKASPACE' ) );
+#13 = UNCERTAINTY_MEASURE_WITH_UNIT ( LENGTH_MEASURE( 1.0E-05 ), #14, 'distance_accuracy_value', 'NONE' );
+#14 = ( LENGTH_UNIT ( ) NAMED_UNIT ( * ) SI_UNIT ( .MILLI., .METRE. ) );
+#15 = ( NAMED_UNIT ( * ) PLANE_ANGLE_UNIT ( ) SI_UNIT ( $, .RADIAN. ) );
+#16 = ( NAMED_UNIT ( * ) SOLID_ANGLE_UNIT ( ) SI_UNIT ( $, .STERADIAN. ) );
 
-  #1 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));              /* origin */
-  #2 = DIRECTION('', (0.0, 0.0, 1.0));                    /* Z axis */
-  #3 = DIRECTION('', (1.0, 0.0, 0.0));                    /* X axis */
-  #4 = AXIS2_PLACEMENT_3D('', #1, #2, #3);                /* placement for plane */
-  #5 = PLANE('', #4);                                     /* supporting plane for the face */
+/* Origin placement */
+#20 = CARTESIAN_POINT ( 'NONE', ( 0.0, 0.0, 0.0 ) );
+#21 = DIRECTION ( 'NONE', ( 0.0, 0.0, 1.0 ) );
+#22 = DIRECTION ( 'NONE', ( 1.0, 0.0, 0.0 ) );
+#23 = AXIS2_PLACEMENT_3D ( 'NONE', #20, #21, #22 );
 
-  /* ==== Corner points of the square ==== */
+/* ============================================ */
+/* Geometry (remapped from original file)       */
+/* ============================================ */
+#25 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));              /* origin */
+#26 = DIRECTION('', (0.0, 0.0, 1.0));                    /* Z axis */
+#27 = DIRECTION('', (1.0, 0.0, 0.0));                    /* X axis */
+#28 = AXIS2_PLACEMENT_3D('', #25, #26, #27);                /* placement for plane */
+#29 = PLANE('', #28);                                     /* supporting plane for the face */
+#34 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));             /* P0 */
+#35 = CARTESIAN_POINT('', (1.0, 0.0, 0.0));             /* P1 */
+#36 = CARTESIAN_POINT('', (1.0, 1.0, 0.0));             /* P2 */
+#37 = CARTESIAN_POINT('', (0.0, 1.0, 0.0));             /* P3 */
+#44 = VERTEX_POINT('', #34);                            /* V0 */
+#45 = VERTEX_POINT('', #35);                            /* V1 */
+#46 = VERTEX_POINT('', #36);                            /* V2 */
+#47 = VERTEX_POINT('', #37);                            /* V3 */
+#54 = DIRECTION('', (1.0, 0.0, 0.0));                   /* +X  */
+#55 = DIRECTION('', (0.0, 1.0, 0.0));                   /* +Y  */
+#56 = DIRECTION('', (-1.0, 0.0, 0.0));                  /* -X  */
+#57 = DIRECTION('', (0.0, -1.0, 0.0));                  /* -Y  */
+#64 = LINE('', #34, #54);                               /* edge P0->P1 lies on this line */
+#65 = LINE('', #35, #55);                               /* edge P1->P2 lies on this line */
+#66 = LINE('', #36, #56);                               /* edge P2->P3 lies on this line */
+#67 = LINE('', #37, #57);                               /* edge P3->P0 lies on this line */
+#74 = EDGE_CURVE('', #44, #45, #64, .T.);               /* V0 -> V1 */
+#75 = EDGE_CURVE('', #45, #46, #65, .T.);               /* V1 -> V2 */
+#76 = EDGE_CURVE('', #46, #47, #66, .T.);               /* V2 -> V3 */
+#77 = EDGE_CURVE('', #47, #44, #67, .T.);               /* V3 -> V0 */
+#84 = ORIENTED_EDGE('', *, *, #74, .T.);                /* V0 -> V1 */
+#85 = ORIENTED_EDGE('', *, *, #75, .T.);                /* V1 -> V2 */
+#86 = ORIENTED_EDGE('', *, *, #76, .T.);                /* V2 -> V3 */
+#87 = ORIENTED_EDGE('', *, *, #77, .T.);                /* V3 -> V0 */
+#94 = EDGE_LOOP('', (#84, #85, #86, #87));
+#104 = FACE_OUTER_BOUND('', #94, .T.);
+#114 = ADVANCED_FACE('', (#104), #29, .T.);
 
-  #10 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));             /* P0 */
-  #11 = CARTESIAN_POINT('', (1.0, 0.0, 0.0));             /* P1 */
-  #12 = CARTESIAN_POINT('', (1.0, 1.0, 0.0));             /* P2 */
-  #13 = CARTESIAN_POINT('', (0.0, 1.0, 0.0));             /* P3 */
-
-  /* ==== Topological vertices (wrap the points) ==== */
-
-  #20 = VERTEX_POINT('', #10);                            /* V0 */
-  #21 = VERTEX_POINT('', #11);                            /* V1 */
-  #22 = VERTEX_POINT('', #12);                            /* V2 */
-  #23 = VERTEX_POINT('', #13);                            /* V3 */
-
-  /* ==== Directions for edge lines ==== */
-
-  #30 = DIRECTION('', (1.0, 0.0, 0.0));                   /* +X  */
-  #31 = DIRECTION('', (0.0, 1.0, 0.0));                   /* +Y  */
-  #32 = DIRECTION('', (-1.0, 0.0, 0.0));                  /* -X  */
-  #33 = DIRECTION('', (0.0, -1.0, 0.0));                  /* -Y  */
-
-  /* ==== Geometric curves for edges (unbounded lines) ==== */
-
-  #40 = LINE('', #10, #30);                               /* edge P0->P1 lies on this line */
-  #41 = LINE('', #11, #31);                               /* edge P1->P2 lies on this line */
-  #42 = LINE('', #12, #32);                               /* edge P2->P3 lies on this line */
-  #43 = LINE('', #13, #33);                               /* edge P3->P0 lies on this line */
-
-  /* ==== Edge_curves: connect two vertices along a curve ==== */
-  /* EDGE_CURVE(name, vertex_start, vertex_end, edge_geometry, same_sense); */
-
-  #50 = EDGE_CURVE('', #20, #21, #40, .T.);               /* V0 -> V1 */
-  #51 = EDGE_CURVE('', #21, #22, #41, .T.);               /* V1 -> V2 */
-  #52 = EDGE_CURVE('', #22, #23, #42, .T.);               /* V2 -> V3 */
-  #53 = EDGE_CURVE('', #23, #20, #43, .T.);               /* V3 -> V0 */
-
-  /* ==== Oriented edges: specify traversal direction around the face ==== */
-  /* ORIENTED_EDGE(name, edge_start, edge_end, edge_element, orientation); */
-  /* We let STEP infer start/end (use *), and just orient the underlying edges. */
-
-  #60 = ORIENTED_EDGE('', *, *, #50, .T.);                /* V0 -> V1 */
-  #61 = ORIENTED_EDGE('', *, *, #51, .T.);                /* V1 -> V2 */
-  #62 = ORIENTED_EDGE('', *, *, #52, .T.);                /* V2 -> V3 */
-  #63 = ORIENTED_EDGE('', *, *, #53, .T.);                /* V3 -> V0 */
-
-  /* ==== Edge loop: ordered boundary of the face ==== */
-
-  #70 = EDGE_LOOP('', (#60, #61, #62, #63));
-
-  /* ==== Outer boundary of the face ==== */
-  /* FACE_OUTER_BOUND(name, bound, orientation); orientation = .T. means "same as surface" */
-
-  #80 = FACE_OUTER_BOUND('', #70, .T.);
-
-  /* ==== The face itself: advanced_face(surface, bounds) ==== */
-  /* ADVANCED_FACE(name, bounds, face_geometry, same_sense); */
-
-  #90 = ADVANCED_FACE('', (#80), #5, .T.);
+/* ============================================ */
+/* Shape Representation                         */
+/* ============================================ */
+#115 = ADVANCED_BREP_SHAPE_REPRESENTATION ( 'square', ( #114, #23 ), #10 );
+#116 = SHAPE_DEFINITION_REPRESENTATION ( #8, #115 );
 
 ENDSEC;
 END-ISO-10303-21;
