@@ -691,10 +691,7 @@ export async function sampleCurvesGPU(
     }
 
     if (startDist > tolerance || endDist > tolerance) {
-      console.warn(`[CURVE VALIDATION] ${curve.type} curve ${i}: endpoints don't match! startDist=${startDist.toFixed(2)}, endDist=${endDist.toFixed(2)}, tolerance=${tolerance.toFixed(2)}`);
-      console.warn(`  Expected start: [${startPoint.map(v => v.toFixed(2)).join(', ')}], got: [${firstSample.map(v => v.toFixed(2)).join(', ')}]`);
-      console.warn(`  Expected end: [${endPoint.map(v => v.toFixed(2)).join(', ')}], got: [${lastSample.map(v => v.toFixed(2)).join(', ')}]`);
-      // Fall back to linear interpolation
+      // Fall back to linear interpolation for curves with endpoint mismatch
       conicResults[i] = [startPoint, endPoint];
     }
   }

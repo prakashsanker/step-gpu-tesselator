@@ -1003,8 +1003,7 @@ function findBridgeTargetVertex(
   const rayHit = castRayToPolygon(holeVertex, outerPolygon);
 
   if (rayHit === null) {
-    // This shouldn't happen if topology validation passed (C2.4)
-    console.error("[Bridging] Ray cast failed - hole may be outside outer polygon");
+    // Ray cast failed - hole may be outside outer polygon (handled gracefully)
     return 0;
   }
 
@@ -1882,48 +1881,6 @@ async function tryTessellateCurvedSurface(
         faceYRange
       );
 
-      // DEBUG: Log UV boundary info for cylindrical faces
-      console.log(`[CYLINDER DEBUG Face #${face.id}]`);
-      console.log(`  Surface #${surfaceId}, radius=${cylinder.radius}`);
-      console.log(`  faceYRange: [${faceYRange[0].toFixed(2)}, ${faceYRange[1].toFixed(2)}]`);
-      console.log(`  boundsSpan: ${boundsSpan.toFixed(3)} rad (${(boundsSpan * 180 / Math.PI).toFixed(1)}°)`);
-      console.log(`  uvArea: ${uvArea.toFixed(3)}, expectedFullArea: ${expectedFullArea.toFixed(3)}, ratio: ${areaRatio.toFixed(3)}`);
-      console.log(`  isPartialSurface: ${isPartialSurface}`);
-      console.log(`  outerLoop points: ${outerLoop.length}, holes: ${holeLoops.length}`);
-
-      // Log UV boundary points (first few and last few)
-      if (outerLoop.length > 0) {
-        const uvToLog = outerLoop.length > 0 ? outerLoop : fixedUV;
-        console.log(`  UV boundary (${uvToLog.length} points):`);
-        for (let i = 0; i < Math.min(5, uvToLog.length); i++) {
-          console.log(`    [${i}]: u=${uvToLog[i][0].toFixed(3)}, v=${uvToLog[i][1].toFixed(2)}`);
-        }
-        if (uvToLog.length > 10) {
-          console.log(`    ...`);
-        }
-        for (let i = Math.max(5, uvToLog.length - 5); i < uvToLog.length; i++) {
-          console.log(`    [${i}]: u=${uvToLog[i][0].toFixed(3)}, v=${uvToLog[i][1].toFixed(2)}`);
-        }
-
-        // Check for closure gap
-        const first = uvToLog[0];
-        const last = uvToLog[uvToLog.length - 1];
-        const gap = Math.sqrt((first[0] - last[0]) ** 2 + (first[1] - last[1]) ** 2);
-        console.log(`  Closure gap: ${gap.toFixed(6)}`);
-
-        // Check for large jumps
-        let maxJump = 0;
-        let maxJumpIdx = -1;
-        for (let i = 0; i < uvToLog.length - 1; i++) {
-          const jump = Math.sqrt((uvToLog[i+1][0] - uvToLog[i][0]) ** 2 + (uvToLog[i+1][1] - uvToLog[i][1]) ** 2);
-          if (jump > maxJump) {
-            maxJump = jump;
-            maxJumpIdx = i;
-          }
-        }
-        console.log(`  Max jump: ${maxJump.toFixed(3)} at index ${maxJumpIdx}`);
-      }
-
       if (isPartialSurface || holeLoops.length > 0) {
         // Use trimmed surface tessellation with actual UV boundary
 
@@ -2083,7 +2040,6 @@ async function tryTessellateCurvedSurface(
     const uvBoundary = extractUVBoundaryFromPCurves(model, face, surfaceId, 16);
 
     if (uvBoundary && uvBoundary.length >= 3) {
-      console.log(`[B-spline] Using PCURVE-based UV boundary with ${uvBoundary.length} points`);
       // Use trimmed surface tessellation with actual UV boundary
       const mesh = await tessellateTrimmedSurface(
         surfaceObj,
@@ -2095,7 +2051,6 @@ async function tryTessellateCurvedSurface(
     }
 
     // Fallback: Use full rectangular tessellation (when no PCURVE data available)
-    console.log(`[B-spline] No PCURVE data, using full rectangular tessellation`);
     const mesh = await tessellateBSplineSurface(surfaceObj, 32, 32);
     return meshToVerticesAndTriangles(mesh);
   }
@@ -2226,7 +2181,7 @@ function sample2DCurve(model: StepModel, curveId: number, numSamples: number): V
   }
 
   // If we couldn't sample the curve, return empty
-  console.warn(`[sample2DCurve] Could not sample curve #${curveId}`);
+  // Could not sample curve - this may be expected for unsupported curve types
   return points;
 }
 
@@ -2460,13 +2415,11 @@ function pointToBSplineSurfaceUV(
 
   const { uKnots, vKnots, uDegree, vDegree, controlPoints } = surface;
 
-  // Debug: check if surface data is valid
+  // Check if surface data is valid
   if (!uKnots || uKnots.length === 0 || !vKnots || vKnots.length === 0) {
-    console.error(`[pointToBSplineSurfaceUV] Invalid knots: uKnots=${uKnots?.length}, vKnots=${vKnots?.length}`);
     return [0.5, 0.5];
   }
   if (!controlPoints || controlPoints.length === 0 || !controlPoints[0] || controlPoints[0].length === 0) {
-    console.error(`[pointToBSplineSurfaceUV] Invalid control points: ${controlPoints?.length} rows`);
     return [0.5, 0.5];
   }
 
@@ -2485,14 +2438,9 @@ function pointToBSplineSurfaceUV(
   const vMin = vKnots[vDegree];
   const vMax = vKnots.length > numV ? vKnots[numV] : vKnots[vKnots.length - 1];
 
-  // Debug: check if UV range is valid
+  // Check if UV range is valid
   if (isNaN(uMin) || isNaN(uMax) || isNaN(vMin) || isNaN(vMax) ||
       uMin === undefined || uMax === undefined || vMin === undefined || vMax === undefined) {
-    console.error(`[pointToBSplineSurfaceUV] Invalid UV range: u=[${uMin}, ${uMax}], v=[${vMin}, ${vMax}]`);
-    console.error(`  uDegree=${uDegree}, vDegree=${vDegree}`);
-    console.error(`  cpRows=${controlPoints.length}, cpCols=${controlPoints[0].length}`);
-    console.error(`  uKnots.length=${uKnots.length}, vKnots.length=${vKnots.length}`);
-    console.error(`  uKnots[${uDegree}]=${uKnots[uDegree]}, uKnots[${controlPoints[0].length}]=${uKnots[controlPoints[0].length]}`);
     return [0.5, 0.5];
   }
 
@@ -2545,10 +2493,7 @@ function pointToBSplineSurfaceUV(
     (point[1] - finalP[1]) ** 2 +
     (point[2] - finalP[2]) ** 2
   );
-  if (finalDist > 0.1) {
-    // Poor convergence - log warning
-    console.warn(`[pointToBSplineSurfaceUV] Poor convergence: dist=${finalDist.toFixed(4)} for point [${point.map(x=>x.toFixed(2)).join(',')}] -> UV [${u.toFixed(4)}, ${v.toFixed(4)}]`);
-  }
+  // Poor convergence is handled silently - UV will be clamped
 
   return [Math.max(uMin, Math.min(uMax, u)), Math.max(vMin, Math.min(vMax, v))];
 }
@@ -3517,7 +3462,6 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // Optimized version with parallel face processing and hybrid GPU/CPU triangulation.
   // Supports both planar and curved surfaces (cylinders, spheres, cones, tori).
 
-  console.log("======= STEP PARSING STARTED =======");
 
   const totalStart = performance.now();
   const parseStart = performance.now();
@@ -3527,15 +3471,8 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     throw new Error("No ADVANCED_FACE found in STEP file.");
   }
 
-  // Debug: Log parsed model statistics
-  console.log(`[parseStepToMesh] Parsed model stats:`);
-  console.log(`  - faces: ${model.faces.size}`);
-  console.log(`  - manifoldSolidBreps: ${model.manifoldSolidBreps.size}`);
-  console.log(`  - closedShells: ${model.closedShells.size}`);
-  console.log(`  - styledItems: ${model.styledItems.size}`);
-  console.log(`  - shapeRepresentations: ${model.shapeRepresentations.size}`);
-  console.log(`  - representationRelationships: ${model.representationRelationships.size}`);
-  console.log(`  - itemDefinedTransformations: ${model.itemDefinedTransformations.size}`);
+  // Minimal stats logging
+  console.log(`[parseStepToMesh] ${model.faces.size} faces, ${model.styledItems.size} styled items, ${model.colourRgbs.size} colors`);
 
   // C8: Use CLOSED_SHELL face ordering when available for consistent rendering
   let faces: AdvancedFace[];
@@ -3574,20 +3511,6 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
       // Use first solid's color as fallback for single-color mode
       solidColor = solids[0].color;
-      console.log(`[parseStepToMesh] Processing ${solids.length} solids with ${faces.length} total faces`);
-      console.warn(`🔧🔧🔧 [parseStepToMesh] faceTransformMap has ${faceTransformMap.size} entries (transformCount=${transformCount})`);
-      // Count unique transforms
-      const uniqueTranslations = new Set<string>();
-      for (const transform of faceTransformMap.values()) {
-        const key = `${transform.matrix[12].toFixed(2)},${transform.matrix[13].toFixed(2)},${transform.matrix[14].toFixed(2)}`;
-        uniqueTranslations.add(key);
-      }
-      console.warn(`🔧🔧🔧 Unique transform translations: ${uniqueTranslations.size}`);
-      // Log first 5 unique translations
-      const uniqueArr = [...uniqueTranslations].slice(0, 5);
-      for (const t of uniqueArr) {
-        console.warn(`🔧 Unique translation: [${t}]`);
-      }
     } else {
       faces = [...model.faces.values()];
     }
@@ -3609,60 +3532,23 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     // Use first shell's color as fallback
     const firstShell = [...model.closedShells.values()][0];
     solidColor = resolveColorForItem(model, firstShell.id);
-    console.log(`[parseStepToMesh] Processing ${model.closedShells.size} shells with ${faces.length} total faces`);
   } else {
     // Legacy: use all faces from model
     faces = [...model.faces.values()];
   }
 
-  // IMPORTANT: Check for per-face colors (STYLED_ITEM referencing ADVANCED_FACE directly)
-  // This overrides any solid/shell level colors
+  // Check for per-face colors (STYLED_ITEM referencing ADVANCED_FACE directly)
   let perFaceColorCount = 0;
-  for (const face of (faces.length > 0 ? faces : [...model.faces.values()])) {
+  const facesToCheck = faces.length > 0 ? faces : [...model.faces.values()];
+  for (const face of facesToCheck) {
     const faceColor = resolveColorForItem(model, face.id);
     if (faceColor) {
       faceColorMap.set(face.id, faceColor);
       perFaceColorCount++;
     }
   }
-  if (perFaceColorCount > 0) {
-    console.log(`[parseStepToMesh] Found ${perFaceColorCount} per-face colors (STYLED_ITEM -> ADVANCED_FACE)`);
-  }
-
-  // Log color distribution
-  const colorCounts = new Map<string, number>();
-  for (const [, color] of faceColorMap) {
-    const key = `${color.r.toFixed(2)},${color.g.toFixed(2)},${color.b.toFixed(2)}`;
-    colorCounts.set(key, (colorCounts.get(key) || 0) + 1);
-  }
-  console.log(`[parseStepToMesh] Color distribution across ${faceColorMap.size} faces:`);
-  for (const [color, count] of colorCounts) {
-    console.log(`  RGB(${color}): ${count} faces`);
-  }
+  console.log(`[parseStepToMesh] ${perFaceColorCount}/${facesToCheck.length} faces have colors`);
   const parseEnd = performance.now();
-
-  // DEBUG: Log all faces and their surface types
-  console.log(`[FACE SUMMARY] Total faces to process: ${faces.length}`);
-  for (const face of faces) {
-    const surfaceId = face.surfaceId;
-    let surfaceType = "UNKNOWN";
-    if (model.planes.get(surfaceId)) surfaceType = "PLANE";
-    else if (model.cylindricalSurfaces.get(surfaceId)) surfaceType = "CYLINDRICAL_SURFACE";
-    else if (model.sphericalSurfaces.get(surfaceId)) surfaceType = "SPHERICAL_SURFACE";
-    else if (model.conicalSurfaces.get(surfaceId)) surfaceType = "CONICAL_SURFACE";
-    else if (model.toroidalSurfaces.get(surfaceId)) surfaceType = "TOROIDAL_SURFACE";
-    else if (model.bSplineSurfaces.get(surfaceId)) surfaceType = "B_SPLINE_SURFACE";
-
-    // Count holes (non-outer bounds)
-    let holeCount = 0;
-    for (const boundId of face.boundIds) {
-      const bound = model.faceBounds.get(boundId);
-      if (bound && !bound.isOuter) holeCount++;
-    }
-    const holeInfo = holeCount > 0 ? ` [${holeCount} hole(s)]` : "";
-    console.log(`  Face #${face.id}: Surface #${surfaceId} (${surfaceType})${holeInfo}`);
-  }
-
   const triangulationStart = performance.now();
 
   // Helper function to process a single face (runs in parallel)
@@ -3760,15 +3646,14 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
       if (filtered2d.length >= 3) {
         // Validate that 2D and 3D vertex counts match
         if (filtered2d.length !== vertices3d.length) {
-          console.error(`[processFaceOptimized] Vertex count mismatch: 2D=${filtered2d.length}, 3D=${vertices3d.length}`);
           return null;
         }
         return { faceId: face.id, polygon2d: filtered2d, vertices3d, isCurved: false, basis };
       }
       return null;
-    } catch (err) {
-      console.error(`[processFaceOptimized] Face processing failed:`, err);
-      return null; // Skip failed faces
+    } catch {
+      // Face processing failed - skip this face (counted in final stats)
+      return null;
     }
   }
 
@@ -6383,9 +6268,7 @@ function multiplyTransforms(a: Transform, b: Transform): Transform {
  * Extract all solids with their face IDs and colors from the model.
  */
 export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
-  console.warn(`🚗🚗🚗 [extractSolidsWithColors] manifoldSolidBreps: ${model.manifoldSolidBreps.size}, representationRelationships: ${model.representationRelationships.size}, itemDefinedTransformations: ${model.itemDefinedTransformations.size}`);
   const solids: SolidWithColor[] = [];
-  let transformsFound = 0;
 
   for (const brep of model.manifoldSolidBreps.values()) {
     const shell = model.closedShells.get(brep.shellId);
@@ -6393,12 +6276,6 @@ export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
 
     const color = resolveColorForItem(model, brep.id);
     const transform = findTransformForSolid(model, brep.id);
-    if (transform) {
-      transformsFound++;
-    } else {
-      // Log solids without transforms to help debug
-      console.warn(`⚠️ Solid #${brep.id} "${brep.name || shell.name}" has NO transform (${shell.faceIds.length} faces)`);
-    }
 
     solids.push({
       solidId: brep.id,
@@ -6408,24 +6285,23 @@ export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
       transform,
     });
   }
-  console.warn(`🚗🚗🚗 [extractSolidsWithColors] DONE - Found ${transformsFound} transforms out of ${solids.length} solids`);
 
   // Also add any standalone CLOSED_SHELLs that aren't referenced by MANIFOLD_SOLID_BREP
-  // This is important for STEP files that have geometry not wrapped in manifold solids
-  let standaloneCount = 0;
-  let standaloneWithTransform = 0;
   for (const shell of model.closedShells.values()) {
     const isReferenced = [...model.manifoldSolidBreps.values()].some(b => b.shellId === shell.id);
     if (isReferenced) continue;
 
-    standaloneCount++;
-    const color = resolveColorForItem(model, shell.id);
-    const transform = findTransformForSolid(model, shell.id);
-    if (transform) {
-      standaloneWithTransform++;
-    } else {
-      console.warn(`⚠️ Standalone shell #${shell.id} "${shell.name}" has NO transform (${shell.faceIds.length} faces)`);
+    // Check if this shell is part of a BREP_WITH_VOIDS - if so, use that ID for color lookup
+    let colorLookupId = shell.id;
+    for (const brep of model.brepWithVoids.values()) {
+      if (brep.outerShellId === shell.id || brep.voidShellIds.includes(shell.id)) {
+        colorLookupId = brep.id;
+        break;
+      }
     }
+
+    const color = resolveColorForItem(model, colorLookupId);
+    const transform = findTransformForSolid(model, shell.id);
 
     solids.push({
       solidId: shell.id,
@@ -6434,9 +6310,6 @@ export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
       color,
       transform,
     });
-  }
-  if (standaloneCount > 0) {
-    console.warn(`🔧 Standalone shells: ${standaloneWithTransform}/${standaloneCount} have transforms`);
   }
 
   return solids;
