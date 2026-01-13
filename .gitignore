@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Large STEP files (too big for git)
+step-examples/complex/nissan-gtr.step
+step-examples/complex/scania-engine.step
+step-examples/complex/scania-8x4.step
+step-examples/complex/rocky_house.step.rtf
