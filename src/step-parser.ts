@@ -1623,6 +1623,7 @@ interface RepresentationRelationship {
   description: string;
   rep1Id: number;
   rep2Id: number;
+  transformationId?: number; // Reference to ITEM_DEFINED_TRANSFORMATION
 }
 
 /** ITEM_DEFINED_TRANSFORMATION: Transform between representations */
@@ -1641,12 +1642,60 @@ export interface ResolvedColor {
   b: number;
 }
 
-/** Solid with color information */
+/** Transform matrix (4x4) for assembly positioning */
+export interface Transform {
+  // 4x4 transformation matrix in column-major order
+  // [m00, m10, m20, m30, m01, m11, m21, m31, m02, m12, m22, m32, m03, m13, m23, m33]
+  matrix: number[];
+}
+
+/** Apply a 4x4 transform matrix to a 3D point */
+function applyTransformToPoint(point: Vec3, transform: Transform): Vec3 {
+  const m = transform.matrix;
+  const x = point[0];
+  const y = point[1];
+  const z = point[2];
+
+  // Matrix multiplication for column-major 4x4 matrix
+  // result = M * [x, y, z, 1]^T
+  return [
+    m[0] * x + m[4] * y + m[8] * z + m[12],
+    m[1] * x + m[5] * y + m[9] * z + m[13],
+    m[2] * x + m[6] * y + m[10] * z + m[14]
+  ];
+}
+
+/** Apply a 4x4 transform matrix to a 3D normal (rotation only, no translation) */
+function applyTransformToNormal(normal: Vec3, transform: Transform): Vec3 {
+  const m = transform.matrix;
+  const x = normal[0];
+  const y = normal[1];
+  const z = normal[2];
+
+  // For normals, only apply rotation (ignore translation)
+  const result: Vec3 = [
+    m[0] * x + m[4] * y + m[8] * z,
+    m[1] * x + m[5] * y + m[9] * z,
+    m[2] * x + m[6] * y + m[10] * z
+  ];
+
+  // Normalize the result
+  const len = Math.sqrt(result[0] * result[0] + result[1] * result[1] + result[2] * result[2]);
+  if (len > 0) {
+    result[0] /= len;
+    result[1] /= len;
+    result[2] /= len;
+  }
+  return result;
+}
+
+/** Solid with color and transform information */
 export interface SolidWithColor {
   solidId: number;
   name: string;
   faceIds: number[];
   color?: ResolvedColor;
+  transform?: Transform; // Assembly transform to apply to all vertices
 }
 
 /** Resolved curve geometry ready for sampling */
@@ -3476,6 +3525,9 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   console.log(`  - manifoldSolidBreps: ${model.manifoldSolidBreps.size}`);
   console.log(`  - closedShells: ${model.closedShells.size}`);
   console.log(`  - styledItems: ${model.styledItems.size}`);
+  console.log(`  - shapeRepresentations: ${model.shapeRepresentations.size}`);
+  console.log(`  - representationRelationships: ${model.representationRelationships.size}`);
+  console.log(`  - itemDefinedTransformations: ${model.itemDefinedTransformations.size}`);
 
   // C8: Use CLOSED_SHELL face ordering when available for consistent rendering
   let faces: AdvancedFace[];
@@ -3484,18 +3536,27 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // Map from faceId -> color for per-face coloring
   const faceColorMap = new Map<number, ResolvedColor>();
 
+  // Map from faceId -> transform for assembly positioning
+  const faceTransformMap = new Map<number, Transform>();
+
   // Check if we have solid structure (MANIFOLD_SOLID_BREP -> CLOSED_SHELL)
   if (model.manifoldSolidBreps.size > 0) {
     const solids = extractSolidsWithColors(model);
     if (solids.length > 0) {
-      // Collect faces from ALL solids and map each face to its solid's color
+      // Collect faces from ALL solids and map each face to its solid's color and transform
       const allFaceIds = new Set<number>();
+      let transformCount = 0;
       for (const solid of solids) {
         for (const faceId of solid.faceIds) {
           allFaceIds.add(faceId);
           // Map this face to the solid's color (can be overridden by per-face color below)
           if (solid.color) {
             faceColorMap.set(faceId, solid.color);
+          }
+          // Map this face to the solid's transform
+          if (solid.transform) {
+            faceTransformMap.set(faceId, solid.transform);
+            transformCount++;
           }
         }
       }
@@ -3506,6 +3567,19 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
       // Use first solid's color as fallback for single-color mode
       solidColor = solids[0].color;
       console.log(`[parseStepToMesh] Processing ${solids.length} solids with ${faces.length} total faces`);
+      console.warn(`🔧🔧🔧 [parseStepToMesh] faceTransformMap has ${faceTransformMap.size} entries (transformCount=${transformCount})`);
+      // Count unique transforms
+      const uniqueTranslations = new Set<string>();
+      for (const transform of faceTransformMap.values()) {
+        const key = `${transform.matrix[12].toFixed(2)},${transform.matrix[13].toFixed(2)},${transform.matrix[14].toFixed(2)}`;
+        uniqueTranslations.add(key);
+      }
+      console.warn(`🔧🔧🔧 Unique transform translations: ${uniqueTranslations.size}`);
+      // Log first 5 unique translations
+      const uniqueArr = [...uniqueTranslations].slice(0, 5);
+      for (const t of uniqueArr) {
+        console.warn(`🔧 Unique translation: [${t}]`);
+      }
     } else {
       faces = [...model.faces.values()];
     }
@@ -3743,8 +3817,13 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
         ? [faceColor.r, faceColor.g, faceColor.b]
         : defaultColor;
 
+      // Get transform for this face (if any)
+      const faceTransform = faceTransformMap.get(face.faceId);
+
       for (const v of face.curvedResult.vertices) {
-        allVertices.push(v);
+        // Apply assembly transform if present
+        const transformedV = faceTransform ? applyTransformToPoint(v, faceTransform) : v;
+        allVertices.push(transformedV);
         // For curved faces, use a placeholder normal - will be computed from geometry
         allNormals.push([0, 0, 1]);
         allColors.push(colorVec);
@@ -3779,7 +3858,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
       }
 
       // Get the face normal from STEP geometry (stored in basis)
-      const faceNormal: Vec3 = face.basis?.n || [0, 0, 1];
+      let faceNormal: Vec3 = face.basis?.n || [0, 0, 1];
 
       // Get color for this face
       const faceColor = faceColorMap.get(face.faceId);
@@ -3787,8 +3866,18 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
         ? [faceColor.r, faceColor.g, faceColor.b]
         : defaultColor;
 
+      // Get transform for this face (if any)
+      const faceTransform = faceTransformMap.get(face.faceId);
+
+      // Transform the normal if we have a transform
+      if (faceTransform) {
+        faceNormal = applyTransformToNormal(faceNormal, faceTransform);
+      }
+
       for (const v of face.vertices3d) {
-        allVertices.push(v);
+        // Apply assembly transform if present
+        const transformedV = faceTransform ? applyTransformToPoint(v, faceTransform) : v;
+        allVertices.push(transformedV);
         allNormals.push(faceNormal);  // All vertices of this face share the same normal
         allColors.push(colorVec);
       }
@@ -4843,6 +4932,13 @@ function parseComplexEntity(id: number, content: string, model: StepModel): void
     return;
   }
 
+  // Handle REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION (assembly transforms)
+  // Format: REPRESENTATION_RELATIONSHIP(' ',' ',#rep1,#rep2) REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#transform) SHAPE_REPRESENTATION_RELATIONSHIP()
+  if (types.has('REPRESENTATION_RELATIONSHIP') && types.has('REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION')) {
+    parseComplexRepresentationRelationship(id, subEntities, model);
+    return;
+  }
+
   // Handle other complex entity types as needed
   // For now, just try to parse any recognizable sub-entities
   for (const sub of subEntities) {
@@ -5018,6 +5114,53 @@ function parseComplexBSplineSurface(
 }
 
 /**
+ * Parse a complex REPRESENTATION_RELATIONSHIP with TRANSFORMATION.
+ * This handles assembly transforms that position components.
+ */
+function parseComplexRepresentationRelationship(
+  id: number,
+  subEntities: { type: string; args: string }[],
+  model: StepModel
+): void {
+  let name = '';
+  let description = '';
+  let rep1Id = 0;
+  let rep2Id = 0;
+  let transformationId: number | undefined;
+
+  for (const sub of subEntities) {
+    if (sub.type === 'REPRESENTATION_RELATIONSHIP') {
+      // REPRESENTATION_RELATIONSHIP(' ',' ',#rep1,#rep2)
+      const match = sub.args.match(/'([^']*)'\s*,\s*'([^']*)'\s*,\s*#(\d+)\s*,\s*#(\d+)/);
+      if (match) {
+        name = match[1];
+        description = match[2];
+        rep1Id = parseInt(match[3], 10);
+        rep2Id = parseInt(match[4], 10);
+      }
+    } else if (sub.type === 'REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION') {
+      // REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#transform_id)
+      const match = sub.args.match(/#(\d+)/);
+      if (match) {
+        transformationId = parseInt(match[1], 10);
+      }
+    }
+    // SHAPE_REPRESENTATION_RELATIONSHIP() has no args, just skip it
+  }
+
+  if (rep1Id > 0 && rep2Id > 0) {
+    model.representationRelationships.set(id, {
+      id,
+      name,
+      description,
+      rep1Id,
+      rep2Id,
+      transformationId
+    });
+  }
+}
+
+/**
  * Parse a simple STEP entity (single type).
  */
 function parseSimpleEntity(id: number, type: string, args: string, model: StepModel): void {
@@ -5114,6 +5257,9 @@ function parseSimpleEntity(id: number, type: string, args: string, model: StepMo
       case "MANIFOLD_SOLID_BREP":
         parseManifoldSolidBrep(id, args, model);
         break;
+      case "ITEM_DEFINED_TRANSFORMATION":
+        parseItemDefinedTransformation(id, args, model);
+        break;
       case "COLOUR_RGB":
         parseColourRgb(id, args, model);
         break;
@@ -5141,6 +5287,9 @@ function parseSimpleEntity(id: number, type: string, args: string, model: StepMo
       case "ADVANCED_BREP_SHAPE_REPRESENTATION":
       case "SHAPE_REPRESENTATION":
         parseShapeRepresentation(id, args, model);
+        break;
+      case "SHAPE_REPRESENTATION_RELATIONSHIP":
+        parseShapeRepresentationRelationship(id, args, model);
         break;
       // We ignore other entity types for now
     }
@@ -5718,6 +5867,26 @@ function parseManifoldSolidBrep(id: number, args: string, model: StepModel) {
   model.manifoldSolidBreps.set(id, { id, name, shellId });
 }
 
+function parseItemDefinedTransformation(id: number, args: string, model: StepModel) {
+  // ITEM_DEFINED_TRANSFORMATION(' ',' ',#189384,#191213);
+  // Format: name, description, source_axis2_placement, target_axis2_placement
+  const match = args.match(/'([^']*)'\s*,\s*'([^']*)'\s*,\s*#(\d+)\s*,\s*#(\d+)/);
+  if (!match) return;
+
+  const name = match[1];
+  const description = match[2];
+  const transformItem1Id = parseInt(match[3], 10);
+  const transformItem2Id = parseInt(match[4], 10);
+
+  model.itemDefinedTransformations.set(id, {
+    id,
+    name,
+    description,
+    transformItem1Id,
+    transformItem2Id
+  });
+}
+
 function parseColourRgb(id: number, args: string, model: StepModel) {
   // COLOUR_RGB ( '',0.792, 0.820, 0.933 )
   const match = args.match(/^'([^']*)'\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)\s*,\s*([-0-9.Ee+]+)/);
@@ -5866,6 +6035,25 @@ function parseShapeRepresentation(id: number, args: string, model: StepModel) {
   model.shapeRepresentations.set(id, { id, name, itemIds, contextId });
 }
 
+/**
+ * Parse SHAPE_REPRESENTATION_RELATIONSHIP - relates two shape representations without transform.
+ * Format: SHAPE_REPRESENTATION_RELATIONSHIP('name', 'desc', #rep1, #rep2)
+ */
+function parseShapeRepresentationRelationship(id: number, args: string, model: StepModel) {
+  // Extract name, description, and two rep IDs
+  const match = args.match(/'([^']*)'\s*,\s*'([^']*)'\s*,\s*#(\d+)\s*,\s*#(\d+)/);
+  if (!match) return;
+
+  model.representationRelationships.set(id, {
+    id,
+    name: match[1],
+    description: match[2],
+    rep1Id: parseInt(match[3], 10),
+    rep2Id: parseInt(match[4], 10),
+    // No transform for simple relationships
+  });
+}
+
 // =============================================================================
 // C8: Color Resolution (follow STYLED_ITEM -> color chain)
 // =============================================================================
@@ -5924,25 +6112,247 @@ function resolveColorFromPSA(model: StepModel, psa: PresentationStyleAssignment)
   return undefined;
 }
 
+// Enable verbose transform debugging with VITE_VERBOSE_TRANSFORM=true
+const VERBOSE_TRANSFORM_DEBUG = typeof import.meta !== 'undefined' &&
+  (import.meta.env?.VITE_VERBOSE_TRANSFORM === 'true');
+
+/**
+ * Build a 4x4 transformation matrix from source and target AXIS2_PLACEMENT_3D.
+ * The transform maps coordinates from source local space to target (assembly) space.
+ */
+function buildTransformMatrix(
+  model: StepModel,
+  sourceId: number,
+  targetId: number
+): Transform | undefined {
+  const source = model.axis2Placements.get(sourceId);
+  const target = model.axis2Placements.get(targetId);
+  if (!source || !target) return undefined;
+
+  // Get source coordinate system
+  const sourceOrigin = model.points.get(source.locationId)?.coords || [0, 0, 0];
+  let sourceZ: Vec3 = [0, 0, 1];
+  let sourceX: Vec3 = [1, 0, 0];
+  if (source.axisId !== null) {
+    const dir = model.directions.get(source.axisId);
+    if (dir) sourceZ = dir.dir;
+  }
+  if (source.refDirectionId !== null) {
+    const dir = model.directions.get(source.refDirectionId);
+    if (dir) sourceX = dir.dir;
+  }
+  const sourceY = vec3Cross(sourceZ, sourceX);
+
+  // Get target coordinate system
+  const targetOrigin = model.points.get(target.locationId)?.coords || [0, 0, 0];
+  let targetZ: Vec3 = [0, 0, 1];
+  let targetX: Vec3 = [1, 0, 0];
+  if (target.axisId !== null) {
+    const dir = model.directions.get(target.axisId);
+    if (dir) targetZ = dir.dir;
+  }
+  if (target.refDirectionId !== null) {
+    const dir = model.directions.get(target.refDirectionId);
+    if (dir) targetX = dir.dir;
+  }
+  const targetY = vec3Cross(targetZ, targetX);
+
+  // For ITEM_DEFINED_TRANSFORMATION, the convention is:
+  // transformItem1 is the source placement (local coordinate system)
+  // transformItem2 is the target placement (assembly coordinate system)
+  // We need to transform points from source local space to target assembly space
+  //
+  // The transformation is: P_target = R * (P_source - O_source) + O_target
+  // Where R maps source axes to target axes
+  //
+  // In matrix form: M = T_target * R * T_source^-1
+  // Where T_source^-1 translates by -sourceOrigin, R rotates, T_target translates by targetOrigin
+
+  // Build rotation matrix R that maps source axes to target axes
+  // If source has axes (sX, sY, sZ) and target has (tX, tY, tZ),
+  // R maps sX->tX, sY->tY, sZ->tZ
+  // R = [tX|tY|tZ] * [sX|sY|sZ]^T (target axes expressed in terms of source axes)
+
+  // For the simple case where source axes are identity (or we want to ignore source rotation):
+  // Just use target axes as the rotation
+  // But we need to account for sourceOrigin
+
+  // Build 4x4 matrix in column-major order
+  // The full transform is: P' = R * (P - O_source) + O_target
+  // Expanding: P' = R*P - R*O_source + O_target
+  // So translation = O_target - R*O_source
+
+  const matrix = new Array(16).fill(0);
+
+  // Rotation part: target axes (assuming source is at standard orientation)
+  matrix[0] = targetX[0]; matrix[1] = targetX[1]; matrix[2] = targetX[2]; matrix[3] = 0;
+  matrix[4] = targetY[0]; matrix[5] = targetY[1]; matrix[6] = targetY[2]; matrix[7] = 0;
+  matrix[8] = targetZ[0]; matrix[9] = targetZ[1]; matrix[10] = targetZ[2]; matrix[11] = 0;
+
+  // Translation part: O_target - R*O_source
+  // R*O_source = [targetX·O_s, targetY·O_s, targetZ·O_s]
+  const rotatedSourceOrigin: Vec3 = [
+    targetX[0] * sourceOrigin[0] + targetY[0] * sourceOrigin[1] + targetZ[0] * sourceOrigin[2],
+    targetX[1] * sourceOrigin[0] + targetY[1] * sourceOrigin[1] + targetZ[1] * sourceOrigin[2],
+    targetX[2] * sourceOrigin[0] + targetY[2] * sourceOrigin[1] + targetZ[2] * sourceOrigin[2]
+  ];
+
+  matrix[12] = targetOrigin[0] - rotatedSourceOrigin[0];
+  matrix[13] = targetOrigin[1] - rotatedSourceOrigin[1];
+  matrix[14] = targetOrigin[2] - rotatedSourceOrigin[2];
+  matrix[15] = 1;
+
+  if (VERBOSE_TRANSFORM_DEBUG) {
+    console.log(`[buildTransformMatrix] Source: origin=[${sourceOrigin.map(v => v.toFixed(2)).join(', ')}]`);
+    console.log(`[buildTransformMatrix] Target: origin=[${targetOrigin.map(v => v.toFixed(2)).join(', ')}]`);
+    console.log(`[buildTransformMatrix] Final translation=[${matrix[12].toFixed(2)}, ${matrix[13].toFixed(2)}, ${matrix[14].toFixed(2)}]`);
+  }
+
+  return { matrix };
+}
+
+/**
+ * Find the transform for a solid by tracing through shape representations.
+ * This walks up the assembly hierarchy to find and compose transforms.
+ */
+function findTransformForSolid(model: StepModel, solidId: number): Transform | undefined {
+  // Find which SHAPE_REPRESENTATION contains this solid
+  let currentRepId: number | undefined;
+  for (const rep of model.shapeRepresentations.values()) {
+    if (rep.itemIds.includes(solidId)) {
+      currentRepId = rep.id;
+      if (VERBOSE_TRANSFORM_DEBUG) {
+        console.log(`[findTransformForSolid] Solid #${solidId} found in Shape Rep #${currentRepId}`);
+      }
+      break;
+    }
+  }
+
+  if (currentRepId === undefined) {
+    if (VERBOSE_TRANSFORM_DEBUG) {
+      console.log(`[findTransformForSolid] Solid #${solidId} not found in any shape representation`);
+    }
+    return undefined;
+  }
+
+  // Walk up the representation hierarchy looking for transforms
+  // The hierarchy is: ADVANCED_BREP_SHAPE_REPRESENTATION -> SHAPE_REPRESENTATION -> ... with transforms
+  // Relationships: SHAPE_REPRESENTATION_RELATIONSHIP(rep1, rep2) where rep2 is the "child" (detailed rep)
+  // Complex entities with transforms: REPRESENTATION_RELATIONSHIP(rep1, rep2) where rep1 is being positioned in rep2
+  const visited = new Set<number>();
+  let composedTransform: Transform | undefined;
+
+  while (currentRepId !== undefined && !visited.has(currentRepId)) {
+    visited.add(currentRepId);
+
+    let foundNext = false;
+    for (const rel of model.representationRelationships.values()) {
+      // For SHAPE_REPRESENTATION_RELATIONSHIP: rep2 is the detailed (child) representation
+      // For REPRESENTATION_RELATIONSHIP with transform: rep1 is positioned relative to rep2
+
+      // Case 1: currentRepId is rep2 (child), we go to rep1 (parent) - no transform on this type
+      if (rel.rep2Id === currentRepId && rel.transformationId === undefined) {
+        if (VERBOSE_TRANSFORM_DEBUG) {
+          console.log(`[findTransformForSolid] Following relationship: Rep #${currentRepId} (child) -> Rep #${rel.rep1Id} (parent)`);
+        }
+        currentRepId = rel.rep1Id;
+        foundNext = true;
+        break;
+      }
+
+      // Case 2: currentRepId is rep1, and there's a transform to rep2 (assembly)
+      if (rel.rep1Id === currentRepId && rel.transformationId !== undefined) {
+        const transform = model.itemDefinedTransformations.get(rel.transformationId);
+        if (transform) {
+          if (VERBOSE_TRANSFORM_DEBUG) {
+            console.log(`[findTransformForSolid] Found transform: Rep #${currentRepId} -> Rep #${rel.rep2Id} via Transform #${rel.transformationId}`);
+          }
+          const matrix = buildTransformMatrix(
+            model,
+            transform.transformItem1Id,
+            transform.transformItem2Id
+          );
+          if (matrix) {
+            if (VERBOSE_TRANSFORM_DEBUG) {
+              console.log(`[findTransformForSolid] Transform translation=[${matrix.matrix[12].toFixed(2)}, ${matrix.matrix[13].toFixed(2)}, ${matrix.matrix[14].toFixed(2)}]`);
+            }
+            // DISABLED: return matrix to see baseline without transforms
+            // return matrix;
+            // Compose transforms - new transform should be applied AFTER existing ones
+            if (composedTransform) {
+              composedTransform = multiplyTransforms(matrix, composedTransform);
+            } else {
+              composedTransform = matrix;
+            }
+          }
+        }
+        // Continue up the hierarchy
+        currentRepId = rel.rep2Id;
+        foundNext = true;
+        break;
+      }
+    }
+
+    if (!foundNext) {
+      break;
+    }
+  }
+
+  if (VERBOSE_TRANSFORM_DEBUG && composedTransform) {
+    console.log(`[findTransformForSolid] Final transform for solid #${solidId}: translation=[${composedTransform.matrix[12].toFixed(2)}, ${composedTransform.matrix[13].toFixed(2)}, ${composedTransform.matrix[14].toFixed(2)}]`);
+  }
+
+  return composedTransform;
+}
+
+/**
+ * Multiply two 4x4 transform matrices (column-major order).
+ */
+function multiplyTransforms(a: Transform, b: Transform): Transform {
+  const ma = a.matrix;
+  const mb = b.matrix;
+  const result = new Array(16);
+
+  for (let col = 0; col < 4; col++) {
+    for (let row = 0; row < 4; row++) {
+      result[col * 4 + row] =
+        ma[0 * 4 + row] * mb[col * 4 + 0] +
+        ma[1 * 4 + row] * mb[col * 4 + 1] +
+        ma[2 * 4 + row] * mb[col * 4 + 2] +
+        ma[3 * 4 + row] * mb[col * 4 + 3];
+    }
+  }
+
+  return { matrix: result };
+}
+
 /**
  * Extract all solids with their face IDs and colors from the model.
  */
 export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
+  console.warn(`🚗🚗🚗 [extractSolidsWithColors] manifoldSolidBreps: ${model.manifoldSolidBreps.size}, representationRelationships: ${model.representationRelationships.size}, itemDefinedTransformations: ${model.itemDefinedTransformations.size}`);
   const solids: SolidWithColor[] = [];
+  let transformsFound = 0;
 
   for (const brep of model.manifoldSolidBreps.values()) {
     const shell = model.closedShells.get(brep.shellId);
     if (!shell) continue;
 
     const color = resolveColorForItem(model, brep.id);
+    const transform = findTransformForSolid(model, brep.id);
+    if (transform) {
+      transformsFound++;
+    }
 
     solids.push({
       solidId: brep.id,
       name: brep.name || shell.name || `Solid_${brep.id}`,
       faceIds: shell.faceIds,
       color,
+      transform,
     });
   }
+  console.warn(`🚗🚗🚗 [extractSolidsWithColors] DONE - Found ${transformsFound} transforms out of ${solids.length} solids`);
 
   // Also add any standalone CLOSED_SHELLs that aren't referenced by MANIFOLD_SOLID_BREP
   // This is important for STEP files that have geometry not wrapped in manifold solids
@@ -5951,12 +6361,14 @@ export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
     if (isReferenced) continue;
 
     const color = resolveColorForItem(model, shell.id);
+    const transform = findTransformForSolid(model, shell.id);
 
     solids.push({
       solidId: shell.id,
       name: shell.name || `Shell_${shell.id}`,
       faceIds: shell.faceIds,
       color,
+      transform,
     });
   }
 
