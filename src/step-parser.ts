@@ -1551,6 +1551,14 @@ interface ManifoldSolidBrep {
   shellId: number;
 }
 
+/** BREP_WITH_VOIDS: Solid body with outer shell and void shells */
+interface BrepWithVoids {
+  id: number;
+  name: string;
+  outerShellId: number;
+  voidShellIds: number[];
+}
+
 /** COLOUR_RGB: RGB color values (0-1 range) */
 interface ColourRgb {
   id: number;
@@ -4787,6 +4795,7 @@ function parseStep(stepText: string): StepModel {
     // C8: Full solids / assemblies
     closedShells: new Map(),
     manifoldSolidBreps: new Map(),
+    brepWithVoids: new Map<number, BrepWithVoids>(),
     styledItems: new Map(),
     colourRgbs: new Map(),
     fillAreaStyleColours: new Map(),
@@ -5256,6 +5265,9 @@ function parseSimpleEntity(id: number, type: string, args: string, model: StepMo
         break;
       case "MANIFOLD_SOLID_BREP":
         parseManifoldSolidBrep(id, args, model);
+        break;
+      case "BREP_WITH_VOIDS":
+        parseBrepWithVoids(id, args, model);
         break;
       case "ITEM_DEFINED_TRANSFORMATION":
         parseItemDefinedTransformation(id, args, model);
@@ -5867,6 +5879,28 @@ function parseManifoldSolidBrep(id: number, args: string, model: StepModel) {
   model.manifoldSolidBreps.set(id, { id, name, shellId });
 }
 
+function parseBrepWithVoids(id: number, args: string, model: StepModel) {
+  // BREP_WITH_VOIDS('',#139307,(#533,#534));
+  // Format: name, outer_shell, (void_shells...)
+  const match = args.match(/^'([^']*)'\s*,\s*#(\d+)\s*,\s*\(([^)]*)\)/);
+  if (!match) return;
+
+  const name = match[1];
+  const outerShellId = parseInt(match[2], 10);
+  const voidShellIds: number[] = [];
+
+  // Parse void shell IDs
+  const voidRefs = match[3].match(/#(\d+)/g);
+  if (voidRefs) {
+    for (const ref of voidRefs) {
+      const voidId = parseInt(ref.slice(1), 10);
+      voidShellIds.push(voidId);
+    }
+  }
+
+  model.brepWithVoids.set(id, { id, name, outerShellId, voidShellIds });
+}
+
 function parseItemDefinedTransformation(id: number, args: string, model: StepModel) {
   // ITEM_DEFINED_TRANSFORMATION(' ',' ',#189384,#191213);
   // Format: name, description, source_axis2_placement, target_axis2_placement
@@ -6216,13 +6250,32 @@ function buildTransformMatrix(
  * This walks up the assembly hierarchy to find and compose transforms.
  */
 function findTransformForSolid(model: StepModel, solidId: number): Transform | undefined {
-  // Find which SHAPE_REPRESENTATION contains this solid
+  // The solidId might be:
+  // 1. A MANIFOLD_SOLID_BREP directly in a SHAPE_REPRESENTATION
+  // 2. A BREP_WITH_VOIDS in a SHAPE_REPRESENTATION
+  // 3. A CLOSED_SHELL that's part of a BREP_WITH_VOIDS
+  // 4. A standalone CLOSED_SHELL
+
+  // First, check if this is a shell that's part of a BREP_WITH_VOIDS
+  let effectiveId = solidId;
+  for (const brep of model.brepWithVoids.values()) {
+    if (brep.outerShellId === solidId || brep.voidShellIds.includes(solidId)) {
+      // Use the BREP_WITH_VOIDS ID instead, as that's what's in the shape representation
+      effectiveId = brep.id;
+      if (VERBOSE_TRANSFORM_DEBUG) {
+        console.log(`[findTransformForSolid] Shell #${solidId} is part of BREP_WITH_VOIDS #${brep.id}`);
+      }
+      break;
+    }
+  }
+
+  // Find which SHAPE_REPRESENTATION contains this solid (or its parent BREP)
   let currentRepId: number | undefined;
   for (const rep of model.shapeRepresentations.values()) {
-    if (rep.itemIds.includes(solidId)) {
+    if (rep.itemIds.includes(effectiveId)) {
       currentRepId = rep.id;
       if (VERBOSE_TRANSFORM_DEBUG) {
-        console.log(`[findTransformForSolid] Solid #${solidId} found in Shape Rep #${currentRepId}`);
+        console.log(`[findTransformForSolid] Solid #${solidId} (effective #${effectiveId}) found in Shape Rep #${currentRepId}`);
       }
       break;
     }
@@ -6342,6 +6395,9 @@ export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
     const transform = findTransformForSolid(model, brep.id);
     if (transform) {
       transformsFound++;
+    } else {
+      // Log solids without transforms to help debug
+      console.warn(`⚠️ Solid #${brep.id} "${brep.name || shell.name}" has NO transform (${shell.faceIds.length} faces)`);
     }
 
     solids.push({
@@ -6356,12 +6412,20 @@ export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
 
   // Also add any standalone CLOSED_SHELLs that aren't referenced by MANIFOLD_SOLID_BREP
   // This is important for STEP files that have geometry not wrapped in manifold solids
+  let standaloneCount = 0;
+  let standaloneWithTransform = 0;
   for (const shell of model.closedShells.values()) {
     const isReferenced = [...model.manifoldSolidBreps.values()].some(b => b.shellId === shell.id);
     if (isReferenced) continue;
 
+    standaloneCount++;
     const color = resolveColorForItem(model, shell.id);
     const transform = findTransformForSolid(model, shell.id);
+    if (transform) {
+      standaloneWithTransform++;
+    } else {
+      console.warn(`⚠️ Standalone shell #${shell.id} "${shell.name}" has NO transform (${shell.faceIds.length} faces)`);
+    }
 
     solids.push({
       solidId: shell.id,
@@ -6370,6 +6434,9 @@ export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
       color,
       transform,
     });
+  }
+  if (standaloneCount > 0) {
+    console.warn(`🔧 Standalone shells: ${standaloneWithTransform}/${standaloneCount} have transforms`);
   }
 
   return solids;
