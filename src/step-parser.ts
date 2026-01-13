@@ -2663,6 +2663,79 @@ function extractUVBoundaryLoop(
         }
       }
 
+      // Check if edge is an ellipse
+      const ellipse = model.ellipses.get(edgeCurve.curveId);
+      if (ellipse) {
+        const isFullEllipse = edgeCurve.startVertexId === edgeCurve.endVertexId;
+
+        const ellipsePlacement = model.axis2Placements.get(ellipse.placementId);
+        if (ellipsePlacement) {
+          const center = model.points.get(ellipsePlacement.locationId)?.coords || [0, 0, 0];
+          let axis: Vec3 = [0, 0, 1];
+          let refDir: Vec3 = [1, 0, 0];
+
+          if (ellipsePlacement.axisId !== null) {
+            const dir = model.directions.get(ellipsePlacement.axisId);
+            if (dir) axis = dir.dir;
+          }
+          if (ellipsePlacement.refDirectionId !== null) {
+            const dir = model.directions.get(ellipsePlacement.refDirectionId);
+            if (dir) refDir = dir.dir;
+          }
+
+          const yDir = vec3Cross(axis, refDir);
+          const majorR = ellipse.majorRadius;
+          const minorR = ellipse.minorRadius;
+
+          if (isFullEllipse) {
+            for (let i = 0; i < samplesPerEdge; i++) {
+              const angle = (i / samplesPerEdge) * Math.PI * 2;
+              const x = center[0] + majorR * Math.cos(angle) * refDir[0] + minorR * Math.sin(angle) * yDir[0];
+              const y = center[1] + majorR * Math.cos(angle) * refDir[1] + minorR * Math.sin(angle) * yDir[1];
+              const z = center[2] + majorR * Math.cos(angle) * refDir[2] + minorR * Math.sin(angle) * yDir[2];
+              uvPoints.push(pointToUV([x, y, z]));
+            }
+            continue;
+          }
+
+          // Partial ellipse arc - compute angles using ellipse parametric form
+          const d1: Vec3 = [startPt[0] - center[0], startPt[1] - center[1], startPt[2] - center[2]];
+          const d2: Vec3 = [endPt[0] - center[0], endPt[1] - center[1], endPt[2] - center[2]];
+
+          const x1 = vec3Dot(d1, refDir);
+          const y1 = vec3Dot(d1, yDir);
+          const x2 = vec3Dot(d2, refDir);
+          const y2 = vec3Dot(d2, yDir);
+
+          const angle1 = Math.atan2(y1 / minorR, x1 / majorR);
+          let angle2 = Math.atan2(y2 / minorR, x2 / majorR);
+
+          // Choose the shorter path around the ellipse
+          let ccwDist = angle2 - angle1;
+          if (ccwDist < 0) ccwDist += Math.PI * 2;
+          const cwDist = Math.PI * 2 - ccwDist;
+
+          let angleSpan: number;
+          if (ccwDist < cwDist) {
+            angleSpan = ccwDist;
+          } else if (cwDist < ccwDist) {
+            angleSpan = -cwDist;
+          } else {
+            angleSpan = ccwDist;
+          }
+
+          for (let i = 0; i < samplesPerEdge; i++) {
+            const t = i / samplesPerEdge;
+            const angle = angle1 + t * angleSpan;
+            const x = center[0] + majorR * Math.cos(angle) * refDir[0] + minorR * Math.sin(angle) * yDir[0];
+            const y = center[1] + majorR * Math.cos(angle) * refDir[1] + minorR * Math.sin(angle) * yDir[1];
+            const z = center[2] + majorR * Math.cos(angle) * refDir[2] + minorR * Math.sin(angle) * yDir[2];
+            uvPoints.push(pointToUV([x, y, z]));
+          }
+          continue;
+        }
+      }
+
       // For lines and other curves, sample linearly
       for (let i = 0; i < samplesPerEdge; i++) {
         const t = i / samplesPerEdge;
@@ -2840,6 +2913,79 @@ function extractUVBoundaryLoopsSeparate(
 
           for (const pt of samples) {
             loopPoints.push(pointToUV(pt));
+          }
+          continue;
+        }
+      }
+
+      // Check if edge is an ellipse
+      const ellipse = model.ellipses.get(edgeCurve.curveId);
+      if (ellipse) {
+        const isFullEllipse = edgeCurve.startVertexId === edgeCurve.endVertexId;
+
+        const ellipsePlacement = model.axis2Placements.get(ellipse.placementId);
+        if (ellipsePlacement) {
+          const center = model.points.get(ellipsePlacement.locationId)?.coords || [0, 0, 0];
+          let axis: Vec3 = [0, 0, 1];
+          let refDir: Vec3 = [1, 0, 0];
+
+          if (ellipsePlacement.axisId !== null) {
+            const dir = model.directions.get(ellipsePlacement.axisId);
+            if (dir) axis = dir.dir;
+          }
+          if (ellipsePlacement.refDirectionId !== null) {
+            const dir = model.directions.get(ellipsePlacement.refDirectionId);
+            if (dir) refDir = dir.dir;
+          }
+
+          const yDir = vec3Cross(axis, refDir);
+          const majorR = ellipse.majorRadius;
+          const minorR = ellipse.minorRadius;
+
+          if (isFullEllipse) {
+            for (let i = 0; i < samplesPerEdge; i++) {
+              const angle = (i / samplesPerEdge) * Math.PI * 2;
+              const x = center[0] + majorR * Math.cos(angle) * refDir[0] + minorR * Math.sin(angle) * yDir[0];
+              const y = center[1] + majorR * Math.cos(angle) * refDir[1] + minorR * Math.sin(angle) * yDir[1];
+              const z = center[2] + majorR * Math.cos(angle) * refDir[2] + minorR * Math.sin(angle) * yDir[2];
+              loopPoints.push(pointToUV([x, y, z]));
+            }
+            continue;
+          }
+
+          // Partial ellipse arc - compute angles using ellipse parametric form
+          const d1: Vec3 = [startPt[0] - center[0], startPt[1] - center[1], startPt[2] - center[2]];
+          const d2: Vec3 = [endPt[0] - center[0], endPt[1] - center[1], endPt[2] - center[2]];
+
+          const x1 = vec3Dot(d1, refDir);
+          const y1 = vec3Dot(d1, yDir);
+          const x2 = vec3Dot(d2, refDir);
+          const y2 = vec3Dot(d2, yDir);
+
+          const angle1 = Math.atan2(y1 / minorR, x1 / majorR);
+          let angle2 = Math.atan2(y2 / minorR, x2 / majorR);
+
+          // Choose the shorter path around the ellipse
+          let ccwDist = angle2 - angle1;
+          if (ccwDist < 0) ccwDist += Math.PI * 2;
+          const cwDist = Math.PI * 2 - ccwDist;
+
+          let angleSpan: number;
+          if (ccwDist < cwDist) {
+            angleSpan = ccwDist;
+          } else if (cwDist < ccwDist) {
+            angleSpan = -cwDist;
+          } else {
+            angleSpan = ccwDist;
+          }
+
+          for (let i = 0; i < samplesPerEdge; i++) {
+            const t = i / samplesPerEdge;
+            const angle = angle1 + t * angleSpan;
+            const x = center[0] + majorR * Math.cos(angle) * refDir[0] + minorR * Math.sin(angle) * yDir[0];
+            const y = center[1] + majorR * Math.cos(angle) * refDir[1] + minorR * Math.sin(angle) * yDir[1];
+            const z = center[2] + majorR * Math.cos(angle) * refDir[2] + minorR * Math.sin(angle) * yDir[2];
+            loopPoints.push(pointToUV([x, y, z]));
           }
           continue;
         }
