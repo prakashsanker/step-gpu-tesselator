@@ -4787,6 +4787,19 @@ function parseStep(stepText: string): StepModel {
     }
   }
 
+  // Post-processing: Resolve ORIENTED_CLOSED_SHELL references
+  // These shells reference other closed shells and need to copy their face IDs
+  for (const shell of model.closedShells.values()) {
+    const shellWithRef = shell as ClosedShell & { _referencedShellId?: number; _isReversed?: boolean };
+    if (shellWithRef._referencedShellId !== undefined) {
+      const referencedShell = model.closedShells.get(shellWithRef._referencedShellId);
+      if (referencedShell) {
+        // Copy face IDs from the referenced shell
+        shellWithRef.faceIds = [...referencedShell.faceIds];
+      }
+    }
+  }
+
   return model;
 }
 
@@ -5094,6 +5107,9 @@ function parseSimpleEntity(id: number, type: string, args: string, model: StepMo
       // C8: Full solids / assemblies
       case "CLOSED_SHELL":
         parseClosedShell(id, args, model);
+        break;
+      case "ORIENTED_CLOSED_SHELL":
+        parseOrientedClosedShell(id, args, model);
         break;
       case "MANIFOLD_SOLID_BREP":
         parseManifoldSolidBrep(id, args, model);
@@ -5667,6 +5683,30 @@ function parseClosedShell(id: number, args: string, model: StepModel) {
   model.closedShells.set(id, { id, name, faceIds });
 }
 
+function parseOrientedClosedShell(id: number, args: string, model: StepModel) {
+  // ORIENTED_CLOSED_SHELL('',*,#139308,.F.);
+  // Format: name, *, shell_ref, orientation
+  // We need to get the faces from the referenced closed shell
+  const match = args.match(/#(\d+)/);
+  if (!match) return;
+
+  const referencedShellId = parseInt(match[1], 10);
+
+  // Store a reference - we'll resolve it after all shells are parsed
+  // The orientation (.T./.F.) indicates whether faces should be flipped
+  const orientationMatch = args.match(/\.(T|F)\.\s*$/);
+  const isReversed = orientationMatch ? orientationMatch[1] === 'F' : false;
+
+  // Store with a special marker that it's an oriented reference
+  model.closedShells.set(id, {
+    id,
+    name: `OrientedRef_${referencedShellId}`,
+    faceIds: [], // Will be populated in post-processing
+    _referencedShellId: referencedShellId,
+    _isReversed: isReversed
+  } as ClosedShell & { _referencedShellId?: number; _isReversed?: boolean });
+}
+
 function parseManifoldSolidBrep(id: number, args: string, model: StepModel) {
   // MANIFOLD_SOLID_BREP ( 'Fillet3', #903 )
   const match = args.match(/^'([^']*)'\s*,\s*#(\d+)/);
@@ -5904,21 +5944,20 @@ export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
     });
   }
 
-  // If no MANIFOLD_SOLID_BREP found, check for standalone CLOSED_SHELL
-  if (solids.length === 0) {
-    for (const shell of model.closedShells.values()) {
-      const isReferenced = [...model.manifoldSolidBreps.values()].some(b => b.shellId === shell.id);
-      if (isReferenced) continue;
+  // Also add any standalone CLOSED_SHELLs that aren't referenced by MANIFOLD_SOLID_BREP
+  // This is important for STEP files that have geometry not wrapped in manifold solids
+  for (const shell of model.closedShells.values()) {
+    const isReferenced = [...model.manifoldSolidBreps.values()].some(b => b.shellId === shell.id);
+    if (isReferenced) continue;
 
-      const color = resolveColorForItem(model, shell.id);
+    const color = resolveColorForItem(model, shell.id);
 
-      solids.push({
-        solidId: shell.id,
-        name: shell.name || `Shell_${shell.id}`,
-        faceIds: shell.faceIds,
-        color,
-      });
-    }
+    solids.push({
+      solidId: shell.id,
+      name: shell.name || `Shell_${shell.id}`,
+      faceIds: shell.faceIds,
+      color,
+    });
   }
 
   return solids;
