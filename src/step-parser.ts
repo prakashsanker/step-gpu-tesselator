@@ -1003,8 +1003,7 @@ function findBridgeTargetVertex(
   const rayHit = castRayToPolygon(holeVertex, outerPolygon);
 
   if (rayHit === null) {
-    // This shouldn't happen if topology validation passed (C2.4)
-    console.error("[Bridging] Ray cast failed - hole may be outside outer polygon");
+    // Ray cast failed - hole may be outside outer polygon (handled gracefully)
     return 0;
   }
 
@@ -1551,6 +1550,14 @@ interface ManifoldSolidBrep {
   shellId: number;
 }
 
+/** BREP_WITH_VOIDS: Solid body with outer shell and void shells */
+interface BrepWithVoids {
+  id: number;
+  name: string;
+  outerShellId: number;
+  voidShellIds: number[];
+}
+
 /** COLOUR_RGB: RGB color values (0-1 range) */
 interface ColourRgb {
   id: number;
@@ -1623,6 +1630,7 @@ interface RepresentationRelationship {
   description: string;
   rep1Id: number;
   rep2Id: number;
+  transformationId?: number; // Reference to ITEM_DEFINED_TRANSFORMATION
 }
 
 /** ITEM_DEFINED_TRANSFORMATION: Transform between representations */
@@ -1641,12 +1649,60 @@ export interface ResolvedColor {
   b: number;
 }
 
-/** Solid with color information */
+/** Transform matrix (4x4) for assembly positioning */
+export interface Transform {
+  // 4x4 transformation matrix in column-major order
+  // [m00, m10, m20, m30, m01, m11, m21, m31, m02, m12, m22, m32, m03, m13, m23, m33]
+  matrix: number[];
+}
+
+/** Apply a 4x4 transform matrix to a 3D point */
+function applyTransformToPoint(point: Vec3, transform: Transform): Vec3 {
+  const m = transform.matrix;
+  const x = point[0];
+  const y = point[1];
+  const z = point[2];
+
+  // Matrix multiplication for column-major 4x4 matrix
+  // result = M * [x, y, z, 1]^T
+  return [
+    m[0] * x + m[4] * y + m[8] * z + m[12],
+    m[1] * x + m[5] * y + m[9] * z + m[13],
+    m[2] * x + m[6] * y + m[10] * z + m[14]
+  ];
+}
+
+/** Apply a 4x4 transform matrix to a 3D normal (rotation only, no translation) */
+function applyTransformToNormal(normal: Vec3, transform: Transform): Vec3 {
+  const m = transform.matrix;
+  const x = normal[0];
+  const y = normal[1];
+  const z = normal[2];
+
+  // For normals, only apply rotation (ignore translation)
+  const result: Vec3 = [
+    m[0] * x + m[4] * y + m[8] * z,
+    m[1] * x + m[5] * y + m[9] * z,
+    m[2] * x + m[6] * y + m[10] * z
+  ];
+
+  // Normalize the result
+  const len = Math.sqrt(result[0] * result[0] + result[1] * result[1] + result[2] * result[2]);
+  if (len > 0) {
+    result[0] /= len;
+    result[1] /= len;
+    result[2] /= len;
+  }
+  return result;
+}
+
+/** Solid with color and transform information */
 export interface SolidWithColor {
   solidId: number;
   name: string;
   faceIds: number[];
   color?: ResolvedColor;
+  transform?: Transform; // Assembly transform to apply to all vertices
 }
 
 /** Resolved curve geometry ready for sampling */
@@ -1776,26 +1832,22 @@ async function tryTessellateCurvedSurface(
     );
 
     if (uvBoundary.length >= 3) {
+      // C6.4: Extract outer and hole loops separately FIRST
+      // This must happen before area calculation because the combined boundary is wrong for faces with holes
+      const { outer: outerLoop, holes: holeLoops } = extractUVBoundaryLoopsSeparate(
+        model, face,
+        (pt) => pointToCylinderUV(pt, placement),
+        samplesPerEdge,
+        faceYRange
+      );
+
+      // Use the OUTER loop for area calculation (not the combined boundary which includes holes)
+      const loopForArea = outerLoop.length > 0 ? outerLoop : uvBoundary;
+
       // Fix angle wrapping for continuous UV polygon
-      const fixedUV = fixUVAngleWrapping(uvBoundary);
+      const fixedUV = fixUVAngleWrapping(loopForArea);
 
-      // Check if this is a full cylinder (closed loop at same angular position)
-      // A full cylinder has edges that go all the way around (u changes by 2π)
-      // A half cylinder has edges that go partway (u stays within a range)
-
-      // Check if any single edge spans more than π (indicating a "going around" motion)
-      // For a half-cylinder, each arc edge spans ~π (half circle) but in opposite directions
-      // For a full cylinder, each arc edge spans ~2π (full circle)
-
-      // Alternative: check if the boundary's 3D vertices span the full angular range
-      // by looking at the original boundary vertices
-      const { uMin: boundsUMin, uMax: boundsUMax } = computeCylinderUVBounds(boundaryVertices, placement);
-
-      // Check the actual angular span from the original 3D points (not UV-wrapped)
-      // If the 3D points only cover ~180°, it's a half cylinder
-      const boundsSpan = boundsUMax - boundsUMin;
-
-      // Also compute signed area of UV polygon - if it's too small relative to bounds, something's wrong
+      // Compute signed area of UV polygon (using shoelace formula)
       let uvArea = 0;
       for (let i = 0; i < fixedUV.length; i++) {
         const j = (i + 1) % fixedUV.length;
@@ -1817,58 +1869,116 @@ async function tryTessellateCurvedSurface(
       // Use trimmed tessellation if area ratio suggests partial surface OR if there are holes
       const isPartialSurface = areaRatio < 0.8;
 
-      // C6.4: Check for holes by extracting loops separately
-      const { outer: outerLoop, holes: holeLoops } = extractUVBoundaryLoopsSeparate(
-        model, face,
-        (pt) => pointToCylinderUV(pt, placement),
-        samplesPerEdge,
-        faceYRange
-      );
+      console.log(`[Cylinder] Face ${face.id}: outerLoop.length=${outerLoop.length}, holeLoops.length=${holeLoops.length}, isPartialSurface=${isPartialSurface}, areaRatio=${areaRatio.toFixed(3)}`);
 
-      // DEBUG: Log UV boundary info for cylindrical faces
-      console.log(`[CYLINDER DEBUG Face #${face.id}]`);
-      console.log(`  Surface #${surfaceId}, radius=${cylinder.radius}`);
-      console.log(`  faceYRange: [${faceYRange[0].toFixed(2)}, ${faceYRange[1].toFixed(2)}]`);
-      console.log(`  boundsSpan: ${boundsSpan.toFixed(3)} rad (${(boundsSpan * 180 / Math.PI).toFixed(1)}°)`);
-      console.log(`  uvArea: ${uvArea.toFixed(3)}, expectedFullArea: ${expectedFullArea.toFixed(3)}, ratio: ${areaRatio.toFixed(3)}`);
-      console.log(`  isPartialSurface: ${isPartialSurface}`);
-      console.log(`  outerLoop points: ${outerLoop.length}, holes: ${holeLoops.length}`);
-
-      // Log UV boundary points (first few and last few)
+      // Debug: log UV bounds
       if (outerLoop.length > 0) {
-        const uvToLog = outerLoop.length > 0 ? outerLoop : fixedUV;
-        console.log(`  UV boundary (${uvToLog.length} points):`);
-        for (let i = 0; i < Math.min(5, uvToLog.length); i++) {
-          console.log(`    [${i}]: u=${uvToLog[i][0].toFixed(3)}, v=${uvToLog[i][1].toFixed(2)}`);
+        let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+        for (const [u, v] of outerLoop) {
+          uMin = Math.min(uMin, u);
+          uMax = Math.max(uMax, u);
+          vMin = Math.min(vMin, v);
+          vMax = Math.max(vMax, v);
         }
-        if (uvToLog.length > 10) {
-          console.log(`    ...`);
-        }
-        for (let i = Math.max(5, uvToLog.length - 5); i < uvToLog.length; i++) {
-          console.log(`    [${i}]: u=${uvToLog[i][0].toFixed(3)}, v=${uvToLog[i][1].toFixed(2)}`);
-        }
-
-        // Check for closure gap
-        const first = uvToLog[0];
-        const last = uvToLog[uvToLog.length - 1];
-        const gap = Math.sqrt((first[0] - last[0]) ** 2 + (first[1] - last[1]) ** 2);
-        console.log(`  Closure gap: ${gap.toFixed(6)}`);
-
-        // Check for large jumps
-        let maxJump = 0;
-        let maxJumpIdx = -1;
-        for (let i = 0; i < uvToLog.length - 1; i++) {
-          const jump = Math.sqrt((uvToLog[i+1][0] - uvToLog[i][0]) ** 2 + (uvToLog[i+1][1] - uvToLog[i][1]) ** 2);
-          if (jump > maxJump) {
-            maxJump = jump;
-            maxJumpIdx = i;
+        console.log(`[Cylinder] Outer UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+        // Show first and last 5 points
+        console.log(`[Cylinder] Outer loop first 5: ${outerLoop.slice(0, 5).map(([u, v]) => `(${u.toFixed(2)},${v.toFixed(2)})`).join(' ')}`);
+        console.log(`[Cylinder] Outer loop last 5: ${outerLoop.slice(-5).map(([u, v]) => `(${u.toFixed(2)},${v.toFixed(2)})`).join(' ')}`);
+      }
+      if (holeLoops.length > 0) {
+        for (let i = 0; i < holeLoops.length; i++) {
+          const hole = holeLoops[i];
+          let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+          for (const [u, v] of hole) {
+            uMin = Math.min(uMin, u);
+            uMax = Math.max(uMax, u);
+            vMin = Math.min(vMin, v);
+            vMax = Math.max(vMax, v);
           }
+          console.log(`[Cylinder] Hole ${i} UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+          console.log(`[Cylinder] Hole ${i} first 5: ${hole.slice(0, 5).map(([u, v]) => `(${u.toFixed(2)},${v.toFixed(2)})`).join(' ')}`);
         }
-        console.log(`  Max jump: ${maxJump.toFixed(3)} at index ${maxJumpIdx}`);
       }
 
       if (isPartialSurface || holeLoops.length > 0) {
         // Use trimmed surface tessellation with actual UV boundary
+        console.log(`[Cylinder] Using tessellateTrimmedSurface for Face ${face.id}`);
+
+        // For full cylinders with holes, use a simple rectangular boundary
+        // The extracted loop forms a path around the rectangle which confuses point-in-polygon
+        let effectiveOuterLoop: Vec2[];
+        // Normalized hole loops - shift to [0, 2π] range to match outer boundary
+        let normalizedHoleLoops: Vec2[][] = holeLoops;
+
+        if (!isPartialSurface && holeLoops.length > 0) {
+          // Full cylinder with holes - use rectangular boundary
+          // Create a simple rectangle from (0, vMin) to (2π, vMax)
+          const rectPoints: Vec2[] = [];
+          const numSamples = 32;
+          // Bottom edge: U from 0 to 2π
+          for (let i = 0; i <= numSamples; i++) {
+            rectPoints.push([i * Math.PI * 2 / numSamples, vMin]);
+          }
+          // Right edge: V from vMin to vMax
+          for (let i = 1; i <= numSamples; i++) {
+            rectPoints.push([Math.PI * 2, vMin + i * (vMax - vMin) / numSamples]);
+          }
+          // Top edge: U from 2π to 0
+          for (let i = numSamples - 1; i >= 0; i--) {
+            rectPoints.push([i * Math.PI * 2 / numSamples, vMax]);
+          }
+          // Left edge: V from vMax to vMin (but not including the start point again)
+          for (let i = numSamples - 1; i > 0; i--) {
+            rectPoints.push([0, vMin + i * (vMax - vMin) / numSamples]);
+          }
+          effectiveOuterLoop = rectPoints;
+          console.log(`[Cylinder] Using rectangular boundary for full cylinder with holes: ${rectPoints.length} points`);
+
+          // Normalize hole UV coordinates to [0, 2π] range
+          // Holes extracted via pointToUV use atan2 which returns [-π, π]
+          // But the rectangular boundary uses [0, 2π]
+          // We need to maintain continuity within each hole
+          normalizedHoleLoops = holeLoops.map(hole => {
+            if (hole.length === 0) return hole;
+
+            // First, make the hole continuous (no jumps > π)
+            const continuous: Vec2[] = [[...hole[0]]];
+            let prevU = hole[0][0];
+            for (let i = 1; i < hole.length; i++) {
+              let u = hole[i][0];
+              const v = hole[i][1];
+              while (u - prevU > Math.PI) u -= Math.PI * 2;
+              while (prevU - u > Math.PI) u += Math.PI * 2;
+              continuous.push([u, v]);
+              prevU = u;
+            }
+
+            // Find the center U of the continuous hole
+            let sumU = 0;
+            for (const [u] of continuous) sumU += u;
+            const centerU = sumU / continuous.length;
+
+            // Determine shift needed to put center in [0, 2π]
+            let shift = 0;
+            if (centerU < 0) shift = Math.PI * 2;
+            if (centerU >= Math.PI * 2) shift = -Math.PI * 2;
+
+            // Apply shift to all points
+            return continuous.map(([u, v]): Vec2 => [u + shift, v]);
+          });
+          console.log(`[Cylinder] Normalized ${normalizedHoleLoops.length} holes to [0, 2π] range`);
+          for (let i = 0; i < normalizedHoleLoops.length; i++) {
+            const hole = normalizedHoleLoops[i];
+            let holeUMin = Infinity, holeUMax = -Infinity;
+            for (const [u] of hole) {
+              holeUMin = Math.min(holeUMin, u);
+              holeUMax = Math.max(holeUMax, u);
+            }
+            console.log(`[Cylinder] Normalized hole ${i}: U=[${holeUMin.toFixed(3)}, ${holeUMax.toFixed(3)}]`);
+          }
+        } else {
+          effectiveOuterLoop = outerLoop.length > 0 ? outerLoop : uvBoundary;
+        }
 
         const mesh = await tessellateTrimmedSurface(
           {
@@ -1876,10 +1986,36 @@ async function tryTessellateCurvedSurface(
             placement,
             radius: cylinder.radius,
           },
-          outerLoop.length > 0 ? outerLoop : uvBoundary,  // Use outer loop or fall back to combined
+          effectiveOuterLoop,
           64,  // Grid density for tessellation (higher = less gaps at boundary)
-          holeLoops  // C6.4: Pass hole loops
+          normalizedHoleLoops  // C6.4: Pass normalized hole loops
         );
+
+        console.log(`[Cylinder] tessellateTrimmedSurface returned: ${mesh.positions.length / 3} vertices, ${mesh.indices.length / 3} triangles`);
+
+        // Check for NaN in positions
+        let nanCount = 0;
+        for (let i = 0; i < mesh.positions.length; i++) {
+          if (isNaN(mesh.positions[i])) nanCount++;
+        }
+        if (nanCount > 0) {
+          console.warn(`[Cylinder] WARNING: ${nanCount} NaN values in positions!`);
+        }
+
+        // Log position bounds
+        let xMin = Infinity, xMax = -Infinity;
+        let yMin = Infinity, yMax = -Infinity;
+        let zMin = Infinity, zMax = -Infinity;
+        for (let i = 0; i < mesh.positions.length; i += 3) {
+          xMin = Math.min(xMin, mesh.positions[i]);
+          xMax = Math.max(xMax, mesh.positions[i]);
+          yMin = Math.min(yMin, mesh.positions[i + 1]);
+          yMax = Math.max(yMax, mesh.positions[i + 1]);
+          zMin = Math.min(zMin, mesh.positions[i + 2]);
+          zMax = Math.max(zMax, mesh.positions[i + 2]);
+        }
+        console.log(`[Cylinder] Position bounds: X=[${xMin.toFixed(3)}, ${xMax.toFixed(3)}], Y=[${yMin.toFixed(3)}, ${yMax.toFixed(3)}], Z=[${zMin.toFixed(3)}, ${zMax.toFixed(3)}]`);
+
         return meshToVerticesAndTriangles(mesh);
       }
     }
@@ -2026,7 +2162,6 @@ async function tryTessellateCurvedSurface(
     const uvBoundary = extractUVBoundaryFromPCurves(model, face, surfaceId, 16);
 
     if (uvBoundary && uvBoundary.length >= 3) {
-      console.log(`[B-spline] Using PCURVE-based UV boundary with ${uvBoundary.length} points`);
       // Use trimmed surface tessellation with actual UV boundary
       const mesh = await tessellateTrimmedSurface(
         surfaceObj,
@@ -2038,7 +2173,6 @@ async function tryTessellateCurvedSurface(
     }
 
     // Fallback: Use full rectangular tessellation (when no PCURVE data available)
-    console.log(`[B-spline] No PCURVE data, using full rectangular tessellation`);
     const mesh = await tessellateBSplineSurface(surfaceObj, 32, 32);
     return meshToVerticesAndTriangles(mesh);
   }
@@ -2169,7 +2303,7 @@ function sample2DCurve(model: StepModel, curveId: number, numSamples: number): V
   }
 
   // If we couldn't sample the curve, return empty
-  console.warn(`[sample2DCurve] Could not sample curve #${curveId}`);
+  // Could not sample curve - this may be expected for unsupported curve types
   return points;
 }
 
@@ -2403,13 +2537,11 @@ function pointToBSplineSurfaceUV(
 
   const { uKnots, vKnots, uDegree, vDegree, controlPoints } = surface;
 
-  // Debug: check if surface data is valid
+  // Check if surface data is valid
   if (!uKnots || uKnots.length === 0 || !vKnots || vKnots.length === 0) {
-    console.error(`[pointToBSplineSurfaceUV] Invalid knots: uKnots=${uKnots?.length}, vKnots=${vKnots?.length}`);
     return [0.5, 0.5];
   }
   if (!controlPoints || controlPoints.length === 0 || !controlPoints[0] || controlPoints[0].length === 0) {
-    console.error(`[pointToBSplineSurfaceUV] Invalid control points: ${controlPoints?.length} rows`);
     return [0.5, 0.5];
   }
 
@@ -2428,14 +2560,9 @@ function pointToBSplineSurfaceUV(
   const vMin = vKnots[vDegree];
   const vMax = vKnots.length > numV ? vKnots[numV] : vKnots[vKnots.length - 1];
 
-  // Debug: check if UV range is valid
+  // Check if UV range is valid
   if (isNaN(uMin) || isNaN(uMax) || isNaN(vMin) || isNaN(vMax) ||
       uMin === undefined || uMax === undefined || vMin === undefined || vMax === undefined) {
-    console.error(`[pointToBSplineSurfaceUV] Invalid UV range: u=[${uMin}, ${uMax}], v=[${vMin}, ${vMax}]`);
-    console.error(`  uDegree=${uDegree}, vDegree=${vDegree}`);
-    console.error(`  cpRows=${controlPoints.length}, cpCols=${controlPoints[0].length}`);
-    console.error(`  uKnots.length=${uKnots.length}, vKnots.length=${vKnots.length}`);
-    console.error(`  uKnots[${uDegree}]=${uKnots[uDegree]}, uKnots[${controlPoints[0].length}]=${uKnots[controlPoints[0].length]}`);
     return [0.5, 0.5];
   }
 
@@ -2488,10 +2615,7 @@ function pointToBSplineSurfaceUV(
     (point[1] - finalP[1]) ** 2 +
     (point[2] - finalP[2]) ** 2
   );
-  if (finalDist > 0.1) {
-    // Poor convergence - log warning
-    console.warn(`[pointToBSplineSurfaceUV] Poor convergence: dist=${finalDist.toFixed(4)} for point [${point.map(x=>x.toFixed(2)).join(',')}] -> UV [${u.toFixed(4)}, ${v.toFixed(4)}]`);
-  }
+  // Poor convergence is handled silently - UV will be clamped
 
   return [Math.max(uMin, Math.min(uMax, u)), Math.max(vMin, Math.min(vMax, v))];
 }
@@ -2663,6 +2787,79 @@ function extractUVBoundaryLoop(
         }
       }
 
+      // Check if edge is an ellipse
+      const ellipse = model.ellipses.get(edgeCurve.curveId);
+      if (ellipse) {
+        const isFullEllipse = edgeCurve.startVertexId === edgeCurve.endVertexId;
+
+        const ellipsePlacement = model.axis2Placements.get(ellipse.placementId);
+        if (ellipsePlacement) {
+          const center = model.points.get(ellipsePlacement.locationId)?.coords || [0, 0, 0];
+          let axis: Vec3 = [0, 0, 1];
+          let refDir: Vec3 = [1, 0, 0];
+
+          if (ellipsePlacement.axisId !== null) {
+            const dir = model.directions.get(ellipsePlacement.axisId);
+            if (dir) axis = dir.dir;
+          }
+          if (ellipsePlacement.refDirectionId !== null) {
+            const dir = model.directions.get(ellipsePlacement.refDirectionId);
+            if (dir) refDir = dir.dir;
+          }
+
+          const yDir = vec3Cross(axis, refDir);
+          const majorR = ellipse.majorRadius;
+          const minorR = ellipse.minorRadius;
+
+          if (isFullEllipse) {
+            for (let i = 0; i < samplesPerEdge; i++) {
+              const angle = (i / samplesPerEdge) * Math.PI * 2;
+              const x = center[0] + majorR * Math.cos(angle) * refDir[0] + minorR * Math.sin(angle) * yDir[0];
+              const y = center[1] + majorR * Math.cos(angle) * refDir[1] + minorR * Math.sin(angle) * yDir[1];
+              const z = center[2] + majorR * Math.cos(angle) * refDir[2] + minorR * Math.sin(angle) * yDir[2];
+              uvPoints.push(pointToUV([x, y, z]));
+            }
+            continue;
+          }
+
+          // Partial ellipse arc - compute angles using ellipse parametric form
+          const d1: Vec3 = [startPt[0] - center[0], startPt[1] - center[1], startPt[2] - center[2]];
+          const d2: Vec3 = [endPt[0] - center[0], endPt[1] - center[1], endPt[2] - center[2]];
+
+          const x1 = vec3Dot(d1, refDir);
+          const y1 = vec3Dot(d1, yDir);
+          const x2 = vec3Dot(d2, refDir);
+          const y2 = vec3Dot(d2, yDir);
+
+          const angle1 = Math.atan2(y1 / minorR, x1 / majorR);
+          let angle2 = Math.atan2(y2 / minorR, x2 / majorR);
+
+          // Choose the shorter path around the ellipse
+          let ccwDist = angle2 - angle1;
+          if (ccwDist < 0) ccwDist += Math.PI * 2;
+          const cwDist = Math.PI * 2 - ccwDist;
+
+          let angleSpan: number;
+          if (ccwDist < cwDist) {
+            angleSpan = ccwDist;
+          } else if (cwDist < ccwDist) {
+            angleSpan = -cwDist;
+          } else {
+            angleSpan = ccwDist;
+          }
+
+          for (let i = 0; i < samplesPerEdge; i++) {
+            const t = i / samplesPerEdge;
+            const angle = angle1 + t * angleSpan;
+            const x = center[0] + majorR * Math.cos(angle) * refDir[0] + minorR * Math.sin(angle) * yDir[0];
+            const y = center[1] + majorR * Math.cos(angle) * refDir[1] + minorR * Math.sin(angle) * yDir[1];
+            const z = center[2] + majorR * Math.cos(angle) * refDir[2] + minorR * Math.sin(angle) * yDir[2];
+            uvPoints.push(pointToUV([x, y, z]));
+          }
+          continue;
+        }
+      }
+
       // For lines and other curves, sample linearly
       for (let i = 0; i < samplesPerEdge; i++) {
         const t = i / samplesPerEdge;
@@ -2694,9 +2891,15 @@ function extractUVBoundaryLoopsSeparate(
   let outer: Vec2[] = [];
   const holes: Vec2[][] = [];
 
+  console.log(`[extractUVBoundaryLoopsSeparate] Face ${face.id}: processing ${face.boundIds.length} bounds: ${face.boundIds.join(', ')}`);
+
   for (const boundId of face.boundIds) {
     const bound = model.faceBounds.get(boundId);
-    if (!bound) continue;
+    if (!bound) {
+      console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId} not found!`);
+      continue;
+    }
+    console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId}: isOuter=${bound.isOuter}, loopId=#${bound.loopId}`);
 
     const loop = model.edgeLoops.get(bound.loopId);
     if (!loop) continue;
@@ -2747,12 +2950,21 @@ function extractUVBoundaryLoopsSeparate(
           const yDir = vec3Cross(axis, refDir);
 
           if (isFullCircle) {
+            // For full circles, we need to maintain angle continuity
+            // The direction is determined by sameSense and edgeOrientation
+            const effectiveDirection = edgeOrientation === edgeCurve.sameSense;
+
             for (let i = 0; i < samplesPerEdge; i++) {
-              const angle = (i / samplesPerEdge) * Math.PI * 2;
+              // Sample from 0 to 2π (or 2π to 0 if reversed)
+              const t = i / samplesPerEdge;
+              const angle = effectiveDirection ? t * Math.PI * 2 : (1 - t) * Math.PI * 2;
               const x = center[0] + circle.radius * (Math.cos(angle) * refDir[0] + Math.sin(angle) * yDir[0]);
               const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
               const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
-              loopPoints.push(pointToUV([x, y, z]));
+              // Compute V (height along cylinder axis) the normal way
+              const uv = pointToUV([x, y, z]);
+              // But use the unwrapped angle for U to maintain continuity
+              loopPoints.push([angle, uv[1]]);
             }
             continue;
           }
@@ -2768,19 +2980,23 @@ function extractUVBoundaryLoopsSeparate(
           if (ccwDist < 0) ccwDist += Math.PI * 2;
           const cwDist = Math.PI * 2 - ccwDist;
 
-          // Initial choice: pick shorter path
+          // Use EDGE_CURVE sameSense to determine arc direction:
+          // - sameSense=.T. -> curve parameterization agrees with edge direction (CCW for standard circles)
+          // - sameSense=.F. -> curve parameterization is reversed (CW direction)
+          // Combined with orientedEdge.orientation to get effective direction
+          const effectiveDirection = edgeOrientation === edgeCurve.sameSense;
+
           let angleSpan: number;
-          if (ccwDist < cwDist) {
+          if (effectiveDirection) {
+            // Go CCW (positive direction)
             angleSpan = ccwDist;
-          } else if (cwDist < ccwDist) {
-            angleSpan = -cwDist;
           } else {
-            // Equal distance - default to CCW
-            angleSpan = ccwDist;
+            // Go CW (negative direction)
+            angleSpan = -cwDist;
           }
 
-          // VALIDATION: Check if the arc midpoint is within the face's Y range
-          // If we have a face Y range, validate that the arc doesn't go outside it
+          // Fallback validation using face Y range
+          // Only apply if the chosen direction results in midpoint outside face bounds
           const midAngle = angle1 + angleSpan / 2;
           const midPt: Vec3 = [
             center[0] + circle.radius * (Math.cos(midAngle) * refDir[0] + Math.sin(midAngle) * yDir[0]),
@@ -2845,6 +3061,79 @@ function extractUVBoundaryLoopsSeparate(
         }
       }
 
+      // Check if edge is an ellipse
+      const ellipse = model.ellipses.get(edgeCurve.curveId);
+      if (ellipse) {
+        const isFullEllipse = edgeCurve.startVertexId === edgeCurve.endVertexId;
+
+        const ellipsePlacement = model.axis2Placements.get(ellipse.placementId);
+        if (ellipsePlacement) {
+          const center = model.points.get(ellipsePlacement.locationId)?.coords || [0, 0, 0];
+          let axis: Vec3 = [0, 0, 1];
+          let refDir: Vec3 = [1, 0, 0];
+
+          if (ellipsePlacement.axisId !== null) {
+            const dir = model.directions.get(ellipsePlacement.axisId);
+            if (dir) axis = dir.dir;
+          }
+          if (ellipsePlacement.refDirectionId !== null) {
+            const dir = model.directions.get(ellipsePlacement.refDirectionId);
+            if (dir) refDir = dir.dir;
+          }
+
+          const yDir = vec3Cross(axis, refDir);
+          const majorR = ellipse.majorRadius;
+          const minorR = ellipse.minorRadius;
+
+          if (isFullEllipse) {
+            for (let i = 0; i < samplesPerEdge; i++) {
+              const angle = (i / samplesPerEdge) * Math.PI * 2;
+              const x = center[0] + majorR * Math.cos(angle) * refDir[0] + minorR * Math.sin(angle) * yDir[0];
+              const y = center[1] + majorR * Math.cos(angle) * refDir[1] + minorR * Math.sin(angle) * yDir[1];
+              const z = center[2] + majorR * Math.cos(angle) * refDir[2] + minorR * Math.sin(angle) * yDir[2];
+              loopPoints.push(pointToUV([x, y, z]));
+            }
+            continue;
+          }
+
+          // Partial ellipse arc - compute angles using ellipse parametric form
+          const d1: Vec3 = [startPt[0] - center[0], startPt[1] - center[1], startPt[2] - center[2]];
+          const d2: Vec3 = [endPt[0] - center[0], endPt[1] - center[1], endPt[2] - center[2]];
+
+          const x1 = vec3Dot(d1, refDir);
+          const y1 = vec3Dot(d1, yDir);
+          const x2 = vec3Dot(d2, refDir);
+          const y2 = vec3Dot(d2, yDir);
+
+          const angle1 = Math.atan2(y1 / minorR, x1 / majorR);
+          let angle2 = Math.atan2(y2 / minorR, x2 / majorR);
+
+          // Choose the shorter path around the ellipse
+          let ccwDist = angle2 - angle1;
+          if (ccwDist < 0) ccwDist += Math.PI * 2;
+          const cwDist = Math.PI * 2 - ccwDist;
+
+          let angleSpan: number;
+          if (ccwDist < cwDist) {
+            angleSpan = ccwDist;
+          } else if (cwDist < ccwDist) {
+            angleSpan = -cwDist;
+          } else {
+            angleSpan = ccwDist;
+          }
+
+          for (let i = 0; i < samplesPerEdge; i++) {
+            const t = i / samplesPerEdge;
+            const angle = angle1 + t * angleSpan;
+            const x = center[0] + majorR * Math.cos(angle) * refDir[0] + minorR * Math.sin(angle) * yDir[0];
+            const y = center[1] + majorR * Math.cos(angle) * refDir[1] + minorR * Math.sin(angle) * yDir[1];
+            const z = center[2] + majorR * Math.cos(angle) * refDir[2] + minorR * Math.sin(angle) * yDir[2];
+            loopPoints.push(pointToUV([x, y, z]));
+          }
+          continue;
+        }
+      }
+
       // For lines and other curves, sample linearly
       for (let i = 0; i < samplesPerEdge; i++) {
         const t = i / samplesPerEdge;
@@ -2857,15 +3146,21 @@ function extractUVBoundaryLoopsSeparate(
       }
     }
 
+    console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId}: generated ${loopPoints.length} loopPoints`);
     if (loopPoints.length >= 3) {
       if (bound.isOuter) {
+        console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId}: classifying as OUTER (${loopPoints.length} points)`);
         outer = loopPoints;
       } else {
+        console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId}: classifying as HOLE (${loopPoints.length} points)`);
         holes.push(loopPoints);
       }
+    } else {
+      console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId}: SKIPPED (only ${loopPoints.length} points, need >= 3)`);
     }
   }
 
+  console.log(`[extractUVBoundaryLoopsSeparate] Final result: outer=${outer.length} points, ${holes.length} holes`);
   return { outer, holes };
 }
 
@@ -3314,7 +3609,6 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // Optimized version with parallel face processing and hybrid GPU/CPU triangulation.
   // Supports both planar and curved surfaces (cylinders, spheres, cones, tori).
 
-  console.log("======= STEP PARSING STARTED =======");
 
   const totalStart = performance.now();
   const parseStart = performance.now();
@@ -3324,12 +3618,8 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     throw new Error("No ADVANCED_FACE found in STEP file.");
   }
 
-  // Debug: Log parsed model statistics
-  console.log(`[parseStepToMesh] Parsed model stats:`);
-  console.log(`  - faces: ${model.faces.size}`);
-  console.log(`  - manifoldSolidBreps: ${model.manifoldSolidBreps.size}`);
-  console.log(`  - closedShells: ${model.closedShells.size}`);
-  console.log(`  - styledItems: ${model.styledItems.size}`);
+  // Minimal stats logging
+  console.log(`[parseStepToMesh] ${model.faces.size} faces, ${model.styledItems.size} styled items, ${model.colourRgbs.size} colors`);
 
   // C8: Use CLOSED_SHELL face ordering when available for consistent rendering
   let faces: AdvancedFace[];
@@ -3338,18 +3628,27 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   // Map from faceId -> color for per-face coloring
   const faceColorMap = new Map<number, ResolvedColor>();
 
+  // Map from faceId -> transform for assembly positioning
+  const faceTransformMap = new Map<number, Transform>();
+
   // Check if we have solid structure (MANIFOLD_SOLID_BREP -> CLOSED_SHELL)
   if (model.manifoldSolidBreps.size > 0) {
     const solids = extractSolidsWithColors(model);
     if (solids.length > 0) {
-      // Collect faces from ALL solids and map each face to its solid's color
+      // Collect faces from ALL solids and map each face to its solid's color and transform
       const allFaceIds = new Set<number>();
+      let transformCount = 0;
       for (const solid of solids) {
         for (const faceId of solid.faceIds) {
           allFaceIds.add(faceId);
           // Map this face to the solid's color (can be overridden by per-face color below)
           if (solid.color) {
             faceColorMap.set(faceId, solid.color);
+          }
+          // Map this face to the solid's transform
+          if (solid.transform) {
+            faceTransformMap.set(faceId, solid.transform);
+            transformCount++;
           }
         }
       }
@@ -3359,7 +3658,6 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
       // Use first solid's color as fallback for single-color mode
       solidColor = solids[0].color;
-      console.log(`[parseStepToMesh] Processing ${solids.length} solids with ${faces.length} total faces`);
     } else {
       faces = [...model.faces.values()];
     }
@@ -3381,60 +3679,23 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
     // Use first shell's color as fallback
     const firstShell = [...model.closedShells.values()][0];
     solidColor = resolveColorForItem(model, firstShell.id);
-    console.log(`[parseStepToMesh] Processing ${model.closedShells.size} shells with ${faces.length} total faces`);
   } else {
     // Legacy: use all faces from model
     faces = [...model.faces.values()];
   }
 
-  // IMPORTANT: Check for per-face colors (STYLED_ITEM referencing ADVANCED_FACE directly)
-  // This overrides any solid/shell level colors
+  // Check for per-face colors (STYLED_ITEM referencing ADVANCED_FACE directly)
   let perFaceColorCount = 0;
-  for (const face of (faces.length > 0 ? faces : [...model.faces.values()])) {
+  const facesToCheck = faces.length > 0 ? faces : [...model.faces.values()];
+  for (const face of facesToCheck) {
     const faceColor = resolveColorForItem(model, face.id);
     if (faceColor) {
       faceColorMap.set(face.id, faceColor);
       perFaceColorCount++;
     }
   }
-  if (perFaceColorCount > 0) {
-    console.log(`[parseStepToMesh] Found ${perFaceColorCount} per-face colors (STYLED_ITEM -> ADVANCED_FACE)`);
-  }
-
-  // Log color distribution
-  const colorCounts = new Map<string, number>();
-  for (const [, color] of faceColorMap) {
-    const key = `${color.r.toFixed(2)},${color.g.toFixed(2)},${color.b.toFixed(2)}`;
-    colorCounts.set(key, (colorCounts.get(key) || 0) + 1);
-  }
-  console.log(`[parseStepToMesh] Color distribution across ${faceColorMap.size} faces:`);
-  for (const [color, count] of colorCounts) {
-    console.log(`  RGB(${color}): ${count} faces`);
-  }
+  console.log(`[parseStepToMesh] ${perFaceColorCount}/${facesToCheck.length} faces have colors`);
   const parseEnd = performance.now();
-
-  // DEBUG: Log all faces and their surface types
-  console.log(`[FACE SUMMARY] Total faces to process: ${faces.length}`);
-  for (const face of faces) {
-    const surfaceId = face.surfaceId;
-    let surfaceType = "UNKNOWN";
-    if (model.planes.get(surfaceId)) surfaceType = "PLANE";
-    else if (model.cylindricalSurfaces.get(surfaceId)) surfaceType = "CYLINDRICAL_SURFACE";
-    else if (model.sphericalSurfaces.get(surfaceId)) surfaceType = "SPHERICAL_SURFACE";
-    else if (model.conicalSurfaces.get(surfaceId)) surfaceType = "CONICAL_SURFACE";
-    else if (model.toroidalSurfaces.get(surfaceId)) surfaceType = "TOROIDAL_SURFACE";
-    else if (model.bSplineSurfaces.get(surfaceId)) surfaceType = "B_SPLINE_SURFACE";
-
-    // Count holes (non-outer bounds)
-    let holeCount = 0;
-    for (const boundId of face.boundIds) {
-      const bound = model.faceBounds.get(boundId);
-      if (bound && !bound.isOuter) holeCount++;
-    }
-    const holeInfo = holeCount > 0 ? ` [${holeCount} hole(s)]` : "";
-    console.log(`  Face #${face.id}: Surface #${surfaceId} (${surfaceType})${holeInfo}`);
-  }
-
   const triangulationStart = performance.now();
 
   // Helper function to process a single face (runs in parallel)
@@ -3532,15 +3793,14 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
       if (filtered2d.length >= 3) {
         // Validate that 2D and 3D vertex counts match
         if (filtered2d.length !== vertices3d.length) {
-          console.error(`[processFaceOptimized] Vertex count mismatch: 2D=${filtered2d.length}, 3D=${vertices3d.length}`);
           return null;
         }
         return { faceId: face.id, polygon2d: filtered2d, vertices3d, isCurved: false, basis };
       }
       return null;
-    } catch (err) {
-      console.error(`[processFaceOptimized] Face processing failed:`, err);
-      return null; // Skip failed faces
+    } catch {
+      // Face processing failed - skip this face (counted in final stats)
+      return null;
     }
   }
 
@@ -3576,10 +3836,13 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   const defaultColor: Vec3 = [0.7, 0.7, 0.7];
 
   // Add curved faces (already have triangles from surface tessellation)
+  console.log(`[parseStepToMesh] Processing ${curvedFaces.length} curved faces, ${planarFaces.length} planar faces`);
   for (let fi = 0; fi < curvedFaces.length; fi++) {
     const face = curvedFaces[fi];
     if (face.curvedResult) {
       const numVerts = face.curvedResult.vertices.length;
+      const numTris = face.curvedResult.triangles.length;
+      console.log(`[parseStepToMesh] Curved face ${face.faceId}: ${numVerts} vertices, ${numTris} triangles`);
 
       // Validate face mesh before adding
       let faceMaxIndex = 0;
@@ -3597,8 +3860,13 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
         ? [faceColor.r, faceColor.g, faceColor.b]
         : defaultColor;
 
+      // Get transform for this face (if any)
+      const faceTransform = faceTransformMap.get(face.faceId);
+
       for (const v of face.curvedResult.vertices) {
-        allVertices.push(v);
+        // Apply assembly transform if present
+        const transformedV = faceTransform ? applyTransformToPoint(v, faceTransform) : v;
+        allVertices.push(transformedV);
         // For curved faces, use a placeholder normal - will be computed from geometry
         allNormals.push([0, 0, 1]);
         allColors.push(colorVec);
@@ -3621,6 +3889,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
     if (triangles && triangles.length > 0) {
       const numVerts = face.vertices3d.length;
+      console.log(`[parseStepToMesh] Planar face ${face.faceId}: ${numVerts} vertices, ${triangles.length} triangles`);
 
       // Validate face mesh before adding
       let faceMaxIndex = 0;
@@ -3633,7 +3902,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
       }
 
       // Get the face normal from STEP geometry (stored in basis)
-      const faceNormal: Vec3 = face.basis?.n || [0, 0, 1];
+      let faceNormal: Vec3 = face.basis?.n || [0, 0, 1];
 
       // Get color for this face
       const faceColor = faceColorMap.get(face.faceId);
@@ -3641,8 +3910,18 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
         ? [faceColor.r, faceColor.g, faceColor.b]
         : defaultColor;
 
+      // Get transform for this face (if any)
+      const faceTransform = faceTransformMap.get(face.faceId);
+
+      // Transform the normal if we have a transform
+      if (faceTransform) {
+        faceNormal = applyTransformToNormal(faceNormal, faceTransform);
+      }
+
       for (const v of face.vertices3d) {
-        allVertices.push(v);
+        // Apply assembly transform if present
+        const transformedV = faceTransform ? applyTransformToPoint(v, faceTransform) : v;
+        allVertices.push(transformedV);
         allNormals.push(faceNormal);  // All vertices of this face share the same normal
         allColors.push(colorVec);
       }
@@ -4552,6 +4831,7 @@ function parseStep(stepText: string): StepModel {
     // C8: Full solids / assemblies
     closedShells: new Map(),
     manifoldSolidBreps: new Map(),
+    brepWithVoids: new Map<number, BrepWithVoids>(),
     styledItems: new Map(),
     colourRgbs: new Map(),
     fillAreaStyleColours: new Map(),
@@ -4641,6 +4921,19 @@ function parseStep(stepText: string): StepModel {
     }
   }
 
+  // Post-processing: Resolve ORIENTED_CLOSED_SHELL references
+  // These shells reference other closed shells and need to copy their face IDs
+  for (const shell of model.closedShells.values()) {
+    const shellWithRef = shell as ClosedShell & { _referencedShellId?: number; _isReversed?: boolean };
+    if (shellWithRef._referencedShellId !== undefined) {
+      const referencedShell = model.closedShells.get(shellWithRef._referencedShellId);
+      if (referencedShell) {
+        // Copy face IDs from the referenced shell
+        shellWithRef.faceIds = [...referencedShell.faceIds];
+      }
+    }
+  }
+
   return model;
 }
 
@@ -4681,6 +4974,13 @@ function parseComplexEntity(id: number, content: string, model: StepModel): void
   // Handle complex B-spline surface (combines B_SPLINE_SURFACE + B_SPLINE_SURFACE_WITH_KNOTS + optional RATIONAL)
   if (types.has('B_SPLINE_SURFACE') && types.has('B_SPLINE_SURFACE_WITH_KNOTS')) {
     parseComplexBSplineSurface(id, subEntities, model);
+    return;
+  }
+
+  // Handle REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION (assembly transforms)
+  // Format: REPRESENTATION_RELATIONSHIP(' ',' ',#rep1,#rep2) REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#transform) SHAPE_REPRESENTATION_RELATIONSHIP()
+  if (types.has('REPRESENTATION_RELATIONSHIP') && types.has('REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION')) {
+    parseComplexRepresentationRelationship(id, subEntities, model);
     return;
   }
 
@@ -4859,6 +5159,53 @@ function parseComplexBSplineSurface(
 }
 
 /**
+ * Parse a complex REPRESENTATION_RELATIONSHIP with TRANSFORMATION.
+ * This handles assembly transforms that position components.
+ */
+function parseComplexRepresentationRelationship(
+  id: number,
+  subEntities: { type: string; args: string }[],
+  model: StepModel
+): void {
+  let name = '';
+  let description = '';
+  let rep1Id = 0;
+  let rep2Id = 0;
+  let transformationId: number | undefined;
+
+  for (const sub of subEntities) {
+    if (sub.type === 'REPRESENTATION_RELATIONSHIP') {
+      // REPRESENTATION_RELATIONSHIP(' ',' ',#rep1,#rep2)
+      const match = sub.args.match(/'([^']*)'\s*,\s*'([^']*)'\s*,\s*#(\d+)\s*,\s*#(\d+)/);
+      if (match) {
+        name = match[1];
+        description = match[2];
+        rep1Id = parseInt(match[3], 10);
+        rep2Id = parseInt(match[4], 10);
+      }
+    } else if (sub.type === 'REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION') {
+      // REPRESENTATION_RELATIONSHIP_WITH_TRANSFORMATION(#transform_id)
+      const match = sub.args.match(/#(\d+)/);
+      if (match) {
+        transformationId = parseInt(match[1], 10);
+      }
+    }
+    // SHAPE_REPRESENTATION_RELATIONSHIP() has no args, just skip it
+  }
+
+  if (rep1Id > 0 && rep2Id > 0) {
+    model.representationRelationships.set(id, {
+      id,
+      name,
+      description,
+      rep1Id,
+      rep2Id,
+      transformationId
+    });
+  }
+}
+
+/**
  * Parse a simple STEP entity (single type).
  */
 function parseSimpleEntity(id: number, type: string, args: string, model: StepModel): void {
@@ -4949,8 +5296,17 @@ function parseSimpleEntity(id: number, type: string, args: string, model: StepMo
       case "CLOSED_SHELL":
         parseClosedShell(id, args, model);
         break;
+      case "ORIENTED_CLOSED_SHELL":
+        parseOrientedClosedShell(id, args, model);
+        break;
       case "MANIFOLD_SOLID_BREP":
         parseManifoldSolidBrep(id, args, model);
+        break;
+      case "BREP_WITH_VOIDS":
+        parseBrepWithVoids(id, args, model);
+        break;
+      case "ITEM_DEFINED_TRANSFORMATION":
+        parseItemDefinedTransformation(id, args, model);
         break;
       case "COLOUR_RGB":
         parseColourRgb(id, args, model);
@@ -4979,6 +5335,9 @@ function parseSimpleEntity(id: number, type: string, args: string, model: StepMo
       case "ADVANCED_BREP_SHAPE_REPRESENTATION":
       case "SHAPE_REPRESENTATION":
         parseShapeRepresentation(id, args, model);
+        break;
+      case "SHAPE_REPRESENTATION_RELATIONSHIP":
+        parseShapeRepresentationRelationship(id, args, model);
         break;
       // We ignore other entity types for now
     }
@@ -5521,6 +5880,30 @@ function parseClosedShell(id: number, args: string, model: StepModel) {
   model.closedShells.set(id, { id, name, faceIds });
 }
 
+function parseOrientedClosedShell(id: number, args: string, model: StepModel) {
+  // ORIENTED_CLOSED_SHELL('',*,#139308,.F.);
+  // Format: name, *, shell_ref, orientation
+  // We need to get the faces from the referenced closed shell
+  const match = args.match(/#(\d+)/);
+  if (!match) return;
+
+  const referencedShellId = parseInt(match[1], 10);
+
+  // Store a reference - we'll resolve it after all shells are parsed
+  // The orientation (.T./.F.) indicates whether faces should be flipped
+  const orientationMatch = args.match(/\.(T|F)\.\s*$/);
+  const isReversed = orientationMatch ? orientationMatch[1] === 'F' : false;
+
+  // Store with a special marker that it's an oriented reference
+  model.closedShells.set(id, {
+    id,
+    name: `OrientedRef_${referencedShellId}`,
+    faceIds: [], // Will be populated in post-processing
+    _referencedShellId: referencedShellId,
+    _isReversed: isReversed
+  } as ClosedShell & { _referencedShellId?: number; _isReversed?: boolean });
+}
+
 function parseManifoldSolidBrep(id: number, args: string, model: StepModel) {
   // MANIFOLD_SOLID_BREP ( 'Fillet3', #903 )
   const match = args.match(/^'([^']*)'\s*,\s*#(\d+)/);
@@ -5530,6 +5913,48 @@ function parseManifoldSolidBrep(id: number, args: string, model: StepModel) {
   const shellId = parseInt(match[2], 10);
 
   model.manifoldSolidBreps.set(id, { id, name, shellId });
+}
+
+function parseBrepWithVoids(id: number, args: string, model: StepModel) {
+  // BREP_WITH_VOIDS('',#139307,(#533,#534));
+  // Format: name, outer_shell, (void_shells...)
+  const match = args.match(/^'([^']*)'\s*,\s*#(\d+)\s*,\s*\(([^)]*)\)/);
+  if (!match) return;
+
+  const name = match[1];
+  const outerShellId = parseInt(match[2], 10);
+  const voidShellIds: number[] = [];
+
+  // Parse void shell IDs
+  const voidRefs = match[3].match(/#(\d+)/g);
+  if (voidRefs) {
+    for (const ref of voidRefs) {
+      const voidId = parseInt(ref.slice(1), 10);
+      voidShellIds.push(voidId);
+    }
+  }
+
+  model.brepWithVoids.set(id, { id, name, outerShellId, voidShellIds });
+}
+
+function parseItemDefinedTransformation(id: number, args: string, model: StepModel) {
+  // ITEM_DEFINED_TRANSFORMATION(' ',' ',#189384,#191213);
+  // Format: name, description, source_axis2_placement, target_axis2_placement
+  const match = args.match(/'([^']*)'\s*,\s*'([^']*)'\s*,\s*#(\d+)\s*,\s*#(\d+)/);
+  if (!match) return;
+
+  const name = match[1];
+  const description = match[2];
+  const transformItem1Id = parseInt(match[3], 10);
+  const transformItem2Id = parseInt(match[4], 10);
+
+  model.itemDefinedTransformations.set(id, {
+    id,
+    name,
+    description,
+    transformItem1Id,
+    transformItem2Id
+  });
 }
 
 function parseColourRgb(id: number, args: string, model: StepModel) {
@@ -5680,6 +6105,25 @@ function parseShapeRepresentation(id: number, args: string, model: StepModel) {
   model.shapeRepresentations.set(id, { id, name, itemIds, contextId });
 }
 
+/**
+ * Parse SHAPE_REPRESENTATION_RELATIONSHIP - relates two shape representations without transform.
+ * Format: SHAPE_REPRESENTATION_RELATIONSHIP('name', 'desc', #rep1, #rep2)
+ */
+function parseShapeRepresentationRelationship(id: number, args: string, model: StepModel) {
+  // Extract name, description, and two rep IDs
+  const match = args.match(/'([^']*)'\s*,\s*'([^']*)'\s*,\s*#(\d+)\s*,\s*#(\d+)/);
+  if (!match) return;
+
+  model.representationRelationships.set(id, {
+    id,
+    name: match[1],
+    description: match[2],
+    rep1Id: parseInt(match[3], 10),
+    rep2Id: parseInt(match[4], 10),
+    // No transform for simple relationships
+  });
+}
+
 // =============================================================================
 // C8: Color Resolution (follow STYLED_ITEM -> color chain)
 // =============================================================================
@@ -5738,6 +6182,239 @@ function resolveColorFromPSA(model: StepModel, psa: PresentationStyleAssignment)
   return undefined;
 }
 
+// Enable verbose transform debugging with VITE_VERBOSE_TRANSFORM=true
+const VERBOSE_TRANSFORM_DEBUG = typeof import.meta !== 'undefined' &&
+  (import.meta.env?.VITE_VERBOSE_TRANSFORM === 'true');
+
+/**
+ * Build a 4x4 transformation matrix from source and target AXIS2_PLACEMENT_3D.
+ * The transform maps coordinates from source local space to target (assembly) space.
+ */
+function buildTransformMatrix(
+  model: StepModel,
+  sourceId: number,
+  targetId: number
+): Transform | undefined {
+  const source = model.axis2Placements.get(sourceId);
+  const target = model.axis2Placements.get(targetId);
+  if (!source || !target) return undefined;
+
+  // Get source coordinate system
+  const sourceOrigin = model.points.get(source.locationId)?.coords || [0, 0, 0];
+  let sourceZ: Vec3 = [0, 0, 1];
+  let sourceX: Vec3 = [1, 0, 0];
+  if (source.axisId !== null) {
+    const dir = model.directions.get(source.axisId);
+    if (dir) sourceZ = dir.dir;
+  }
+  if (source.refDirectionId !== null) {
+    const dir = model.directions.get(source.refDirectionId);
+    if (dir) sourceX = dir.dir;
+  }
+  const sourceY = vec3Cross(sourceZ, sourceX);
+
+  // Get target coordinate system
+  const targetOrigin = model.points.get(target.locationId)?.coords || [0, 0, 0];
+  let targetZ: Vec3 = [0, 0, 1];
+  let targetX: Vec3 = [1, 0, 0];
+  if (target.axisId !== null) {
+    const dir = model.directions.get(target.axisId);
+    if (dir) targetZ = dir.dir;
+  }
+  if (target.refDirectionId !== null) {
+    const dir = model.directions.get(target.refDirectionId);
+    if (dir) targetX = dir.dir;
+  }
+  const targetY = vec3Cross(targetZ, targetX);
+
+  // For ITEM_DEFINED_TRANSFORMATION, the convention is:
+  // transformItem1 is the source placement (local coordinate system)
+  // transformItem2 is the target placement (assembly coordinate system)
+  // We need to transform points from source local space to target assembly space
+  //
+  // The transformation is: P_target = R * (P_source - O_source) + O_target
+  // Where R maps source axes to target axes
+  //
+  // In matrix form: M = T_target * R * T_source^-1
+  // Where T_source^-1 translates by -sourceOrigin, R rotates, T_target translates by targetOrigin
+
+  // Build rotation matrix R that maps source axes to target axes
+  // If source has axes (sX, sY, sZ) and target has (tX, tY, tZ),
+  // R maps sX->tX, sY->tY, sZ->tZ
+  // R = [tX|tY|tZ] * [sX|sY|sZ]^T (target axes expressed in terms of source axes)
+
+  // For the simple case where source axes are identity (or we want to ignore source rotation):
+  // Just use target axes as the rotation
+  // But we need to account for sourceOrigin
+
+  // Build 4x4 matrix in column-major order
+  // The full transform is: P' = R * (P - O_source) + O_target
+  // Expanding: P' = R*P - R*O_source + O_target
+  // So translation = O_target - R*O_source
+
+  const matrix = new Array(16).fill(0);
+
+  // Rotation part: target axes (assuming source is at standard orientation)
+  matrix[0] = targetX[0]; matrix[1] = targetX[1]; matrix[2] = targetX[2]; matrix[3] = 0;
+  matrix[4] = targetY[0]; matrix[5] = targetY[1]; matrix[6] = targetY[2]; matrix[7] = 0;
+  matrix[8] = targetZ[0]; matrix[9] = targetZ[1]; matrix[10] = targetZ[2]; matrix[11] = 0;
+
+  // Translation part: O_target - R*O_source
+  // R*O_source = [targetX·O_s, targetY·O_s, targetZ·O_s]
+  const rotatedSourceOrigin: Vec3 = [
+    targetX[0] * sourceOrigin[0] + targetY[0] * sourceOrigin[1] + targetZ[0] * sourceOrigin[2],
+    targetX[1] * sourceOrigin[0] + targetY[1] * sourceOrigin[1] + targetZ[1] * sourceOrigin[2],
+    targetX[2] * sourceOrigin[0] + targetY[2] * sourceOrigin[1] + targetZ[2] * sourceOrigin[2]
+  ];
+
+  matrix[12] = targetOrigin[0] - rotatedSourceOrigin[0];
+  matrix[13] = targetOrigin[1] - rotatedSourceOrigin[1];
+  matrix[14] = targetOrigin[2] - rotatedSourceOrigin[2];
+  matrix[15] = 1;
+
+  if (VERBOSE_TRANSFORM_DEBUG) {
+    console.log(`[buildTransformMatrix] Source: origin=[${sourceOrigin.map(v => v.toFixed(2)).join(', ')}]`);
+    console.log(`[buildTransformMatrix] Target: origin=[${targetOrigin.map(v => v.toFixed(2)).join(', ')}]`);
+    console.log(`[buildTransformMatrix] Final translation=[${matrix[12].toFixed(2)}, ${matrix[13].toFixed(2)}, ${matrix[14].toFixed(2)}]`);
+  }
+
+  return { matrix };
+}
+
+/**
+ * Find the transform for a solid by tracing through shape representations.
+ * This walks up the assembly hierarchy to find and compose transforms.
+ */
+function findTransformForSolid(model: StepModel, solidId: number): Transform | undefined {
+  // The solidId might be:
+  // 1. A MANIFOLD_SOLID_BREP directly in a SHAPE_REPRESENTATION
+  // 2. A BREP_WITH_VOIDS in a SHAPE_REPRESENTATION
+  // 3. A CLOSED_SHELL that's part of a BREP_WITH_VOIDS
+  // 4. A standalone CLOSED_SHELL
+
+  // First, check if this is a shell that's part of a BREP_WITH_VOIDS
+  let effectiveId = solidId;
+  for (const brep of model.brepWithVoids.values()) {
+    if (brep.outerShellId === solidId || brep.voidShellIds.includes(solidId)) {
+      // Use the BREP_WITH_VOIDS ID instead, as that's what's in the shape representation
+      effectiveId = brep.id;
+      if (VERBOSE_TRANSFORM_DEBUG) {
+        console.log(`[findTransformForSolid] Shell #${solidId} is part of BREP_WITH_VOIDS #${brep.id}`);
+      }
+      break;
+    }
+  }
+
+  // Find which SHAPE_REPRESENTATION contains this solid (or its parent BREP)
+  let currentRepId: number | undefined;
+  for (const rep of model.shapeRepresentations.values()) {
+    if (rep.itemIds.includes(effectiveId)) {
+      currentRepId = rep.id;
+      if (VERBOSE_TRANSFORM_DEBUG) {
+        console.log(`[findTransformForSolid] Solid #${solidId} (effective #${effectiveId}) found in Shape Rep #${currentRepId}`);
+      }
+      break;
+    }
+  }
+
+  if (currentRepId === undefined) {
+    if (VERBOSE_TRANSFORM_DEBUG) {
+      console.log(`[findTransformForSolid] Solid #${solidId} not found in any shape representation`);
+    }
+    return undefined;
+  }
+
+  // Walk up the representation hierarchy looking for transforms
+  // The hierarchy is: ADVANCED_BREP_SHAPE_REPRESENTATION -> SHAPE_REPRESENTATION -> ... with transforms
+  // Relationships: SHAPE_REPRESENTATION_RELATIONSHIP(rep1, rep2) where rep2 is the "child" (detailed rep)
+  // Complex entities with transforms: REPRESENTATION_RELATIONSHIP(rep1, rep2) where rep1 is being positioned in rep2
+  const visited = new Set<number>();
+  let composedTransform: Transform | undefined;
+
+  while (currentRepId !== undefined && !visited.has(currentRepId)) {
+    visited.add(currentRepId);
+
+    let foundNext = false;
+    for (const rel of model.representationRelationships.values()) {
+      // For SHAPE_REPRESENTATION_RELATIONSHIP: rep2 is the detailed (child) representation
+      // For REPRESENTATION_RELATIONSHIP with transform: rep1 is positioned relative to rep2
+
+      // Case 1: currentRepId is rep2 (child), we go to rep1 (parent) - no transform on this type
+      if (rel.rep2Id === currentRepId && rel.transformationId === undefined) {
+        if (VERBOSE_TRANSFORM_DEBUG) {
+          console.log(`[findTransformForSolid] Following relationship: Rep #${currentRepId} (child) -> Rep #${rel.rep1Id} (parent)`);
+        }
+        currentRepId = rel.rep1Id;
+        foundNext = true;
+        break;
+      }
+
+      // Case 2: currentRepId is rep1, and there's a transform to rep2 (assembly)
+      if (rel.rep1Id === currentRepId && rel.transformationId !== undefined) {
+        const transform = model.itemDefinedTransformations.get(rel.transformationId);
+        if (transform) {
+          if (VERBOSE_TRANSFORM_DEBUG) {
+            console.log(`[findTransformForSolid] Found transform: Rep #${currentRepId} -> Rep #${rel.rep2Id} via Transform #${rel.transformationId}`);
+          }
+          const matrix = buildTransformMatrix(
+            model,
+            transform.transformItem1Id,
+            transform.transformItem2Id
+          );
+          if (matrix) {
+            if (VERBOSE_TRANSFORM_DEBUG) {
+              console.log(`[findTransformForSolid] Transform translation=[${matrix.matrix[12].toFixed(2)}, ${matrix.matrix[13].toFixed(2)}, ${matrix.matrix[14].toFixed(2)}]`);
+            }
+            // DISABLED: return matrix to see baseline without transforms
+            // return matrix;
+            // Compose transforms - new transform should be applied AFTER existing ones
+            if (composedTransform) {
+              composedTransform = multiplyTransforms(matrix, composedTransform);
+            } else {
+              composedTransform = matrix;
+            }
+          }
+        }
+        // Continue up the hierarchy
+        currentRepId = rel.rep2Id;
+        foundNext = true;
+        break;
+      }
+    }
+
+    if (!foundNext) {
+      break;
+    }
+  }
+
+  if (VERBOSE_TRANSFORM_DEBUG && composedTransform) {
+    console.log(`[findTransformForSolid] Final transform for solid #${solidId}: translation=[${composedTransform.matrix[12].toFixed(2)}, ${composedTransform.matrix[13].toFixed(2)}, ${composedTransform.matrix[14].toFixed(2)}]`);
+  }
+
+  return composedTransform;
+}
+
+/**
+ * Multiply two 4x4 transform matrices (column-major order).
+ */
+function multiplyTransforms(a: Transform, b: Transform): Transform {
+  const ma = a.matrix;
+  const mb = b.matrix;
+  const result = new Array(16);
+
+  for (let col = 0; col < 4; col++) {
+    for (let row = 0; row < 4; row++) {
+      result[col * 4 + row] =
+        ma[0 * 4 + row] * mb[col * 4 + 0] +
+        ma[1 * 4 + row] * mb[col * 4 + 1] +
+        ma[2 * 4 + row] * mb[col * 4 + 2] +
+        ma[3 * 4 + row] * mb[col * 4 + 3];
+    }
+  }
+
+  return { matrix: result };
+}
+
 /**
  * Extract all solids with their face IDs and colors from the model.
  */
@@ -5749,30 +6426,41 @@ export function extractSolidsWithColors(model: StepModel): SolidWithColor[] {
     if (!shell) continue;
 
     const color = resolveColorForItem(model, brep.id);
+    const transform = findTransformForSolid(model, brep.id);
 
     solids.push({
       solidId: brep.id,
       name: brep.name || shell.name || `Solid_${brep.id}`,
       faceIds: shell.faceIds,
       color,
+      transform,
     });
   }
 
-  // If no MANIFOLD_SOLID_BREP found, check for standalone CLOSED_SHELL
-  if (solids.length === 0) {
-    for (const shell of model.closedShells.values()) {
-      const isReferenced = [...model.manifoldSolidBreps.values()].some(b => b.shellId === shell.id);
-      if (isReferenced) continue;
+  // Also add any standalone CLOSED_SHELLs that aren't referenced by MANIFOLD_SOLID_BREP
+  for (const shell of model.closedShells.values()) {
+    const isReferenced = [...model.manifoldSolidBreps.values()].some(b => b.shellId === shell.id);
+    if (isReferenced) continue;
 
-      const color = resolveColorForItem(model, shell.id);
-
-      solids.push({
-        solidId: shell.id,
-        name: shell.name || `Shell_${shell.id}`,
-        faceIds: shell.faceIds,
-        color,
-      });
+    // Check if this shell is part of a BREP_WITH_VOIDS - if so, use that ID for color lookup
+    let colorLookupId = shell.id;
+    for (const brep of model.brepWithVoids.values()) {
+      if (brep.outerShellId === shell.id || brep.voidShellIds.includes(shell.id)) {
+        colorLookupId = brep.id;
+        break;
+      }
     }
+
+    const color = resolveColorForItem(model, colorLookupId);
+    const transform = findTransformForSolid(model, shell.id);
+
+    solids.push({
+      solidId: shell.id,
+      name: shell.name || `Shell_${shell.id}`,
+      faceIds: shell.faceIds,
+      color,
+      transform,
+    });
   }
 
   return solids;

@@ -381,7 +381,20 @@ export async function tessellateTrimmedSurface(
     const PI = Math.PI;
     const nearPosPI = uvBoundary.filter(([u]) => u > PI - 0.5).length;
     const nearNegPI = uvBoundary.filter(([u]) => u < -PI + 0.5).length;
-    const hasDiscontinuity = nearPosPI > 0 && nearNegPI > 0;
+
+    // Also check if this is a full circle (U spans nearly 2π)
+    let uMinBoundary = Infinity, uMaxBoundary = -Infinity;
+    for (const [u] of uvBoundary) {
+        uMinBoundary = Math.min(uMinBoundary, u);
+        uMaxBoundary = Math.max(uMaxBoundary, u);
+    }
+    const uSpan = uMaxBoundary - uMinBoundary;
+    const isFullCircle = uSpan > 5.5; // More than ~315 degrees
+
+    // Only treat as discontinuity if it's NOT a full circle
+    const hasDiscontinuity = nearPosPI > 0 && nearNegPI > 0 && !isFullCircle;
+
+    console.log(`[tessellateTrimmedSurface] nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, uSpan=${uSpan.toFixed(3)}, isFullCircle=${isFullCircle}, hasDiscontinuity=${hasDiscontinuity}`);
 
     // Create a continuous version of the boundary for polygon testing
     let continuousBoundary: Vec2[];
@@ -431,33 +444,31 @@ export async function tessellateTrimmedSurface(
         continuousHoles = uvHoles;
     }
 
-    // DEBUG: Log UV boundary info
-    const origUVals = uvBoundary.map(([u]) => u);
-    const contUVals = continuousBoundary.map(([u]) => u);
-    console.log(`[UV DEBUG] Original U range: [${Math.min(...origUVals).toFixed(3)}, ${Math.max(...origUVals).toFixed(3)}]`);
-    console.log(`[UV DEBUG] Continuous U range: [${Math.min(...contUVals).toFixed(3)}, ${Math.max(...contUVals).toFixed(3)}]`);
-    console.log(`[UV DEBUG] Boundary points: ${continuousBoundary.length}`);
-
-    // Check if polygon is closed (first and last points should be close)
-    if (continuousBoundary.length > 0) {
-        const first = continuousBoundary[0];
-        const last = continuousBoundary[continuousBoundary.length - 1];
-        const gap = Math.sqrt((first[0] - last[0]) ** 2 + (first[1] - last[1]) ** 2);
-        console.log(`[UV DEBUG] Polygon closure gap: ${gap.toFixed(6)} (first=[${first[0].toFixed(3)}, ${first[1].toFixed(3)}], last=[${last[0].toFixed(3)}, ${last[1].toFixed(3)}])`);
-
-        // Check for large jumps in the boundary (potential discontinuities)
-        let maxJump = 0;
-        let maxJumpIdx = -1;
-        for (let i = 0; i < continuousBoundary.length; i++) {
-            const curr = continuousBoundary[i];
-            const next = continuousBoundary[(i + 1) % continuousBoundary.length];
-            const jump = Math.sqrt((curr[0] - next[0]) ** 2 + (curr[1] - next[1]) ** 2);
-            if (jump > maxJump) {
-                maxJump = jump;
-                maxJumpIdx = i;
+    // Debug: log continuous boundary bounds
+    {
+        let cbUMin = Infinity, cbUMax = -Infinity, cbVMin = Infinity, cbVMax = -Infinity;
+        for (const [u, v] of continuousBoundary) {
+            cbUMin = Math.min(cbUMin, u);
+            cbUMax = Math.max(cbUMax, u);
+            cbVMin = Math.min(cbVMin, v);
+            cbVMax = Math.max(cbVMax, v);
+        }
+        console.log(`[tessellateTrimmedSurface] Continuous boundary bounds: U=[${cbUMin.toFixed(3)}, ${cbUMax.toFixed(3)}], V=[${cbVMin.toFixed(3)}, ${cbVMax.toFixed(3)}]`);
+        console.log(`[tessellateTrimmedSurface] Continuous boundary first 5: ${continuousBoundary.slice(0, 5).map(([u, v]) => `(${u.toFixed(2)},${v.toFixed(2)})`).join(' ')}`);
+        console.log(`[tessellateTrimmedSurface] Continuous boundary has ${continuousBoundary.length} points`);
+        if (continuousHoles.length > 0) {
+            for (let i = 0; i < continuousHoles.length; i++) {
+                const hole = continuousHoles[i];
+                let hUMin = Infinity, hUMax = -Infinity, hVMin = Infinity, hVMax = -Infinity;
+                for (const [u, v] of hole) {
+                    hUMin = Math.min(hUMin, u);
+                    hUMax = Math.max(hUMax, u);
+                    hVMin = Math.min(hVMin, v);
+                    hVMax = Math.max(hVMax, v);
+                }
+                console.log(`[tessellateTrimmedSurface] Continuous hole ${i} bounds: U=[${hUMin.toFixed(3)}, ${hUMax.toFixed(3)}], V=[${hVMin.toFixed(3)}, ${hVMax.toFixed(3)}]`);
             }
         }
-        console.log(`[UV DEBUG] Max jump in boundary: ${maxJump.toFixed(3)} at index ${maxJumpIdx}`);
     }
 
     // Find UV bounding box from the continuous boundary
@@ -470,8 +481,6 @@ export async function tessellateTrimmedSurface(
         vMin = Math.min(vMin, v);
         vMax = Math.max(vMax, v);
     }
-
-    console.log(`[UV DEBUG] Bounding box: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
 
     // Create a grid of UV vertices
     const du = (uMax - uMin) / gridDensity;
@@ -542,7 +551,15 @@ export async function tessellateTrimmedSurface(
         }
     }
 
-    console.log(`[UV DEBUG] Grid: ${insideCount} inside, ${outsideCount} outside (total ${(gridDensity+1)*(gridDensity+1)})`);
+    console.log(`[tessellateTrimmedSurface] Grid bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+    console.log(`[tessellateTrimmedSurface] Grid points: ${insideCount} inside, ${outsideCount} outside`);
+
+    // Diagnostic: test a specific point that should be inside (center of grid)
+    const testU = (uMin + uMax) / 2;
+    const testV = (vMin + vMax) / 2;
+    const testInside = isPointInPolygon([testU, testV], continuousBoundary);
+    const testInHole = continuousHoles.some(hole => isPointInPolygon([testU, testV], hole));
+    console.log(`[tessellateTrimmedSurface] Test point (${testU.toFixed(3)}, ${testV.toFixed(3)}): insideBoundary=${testInside}, insideHole=${testInHole}`);
 
     // Create triangles from the grid
     const triangles: [number, number, number][] = [];
@@ -577,7 +594,8 @@ export async function tessellateTrimmedSurface(
         }
     }
 
-    console.log(`[tessellateTrimmedSurface] Grid: ${gridDensity}x${gridDensity}, vertices: ${uvVertices.length}, triangles: ${triangles.length}`);
+
+    console.log(`[tessellateTrimmedSurface] Generated ${triangles.length} triangles from ${uvVertices.length} vertices`);
 
     // Note: We do NOT add boundary stitching triangles here.
     // The boundary stitching was causing visible spike artifacts on curved surfaces.
@@ -596,8 +614,6 @@ function bridgeAllHolesUV(outer: Vec2[], holes: Vec2[][]): Vec2[] {
         return outer;
     }
 
-    console.log(`[bridgeAllHolesUV] Outer: ${outer.length} points, Holes: ${holes.length}`);
-
     // Ensure outer is CCW
     let outerArea = 0;
     for (let i = 0; i < outer.length; i++) {
@@ -605,7 +621,6 @@ function bridgeAllHolesUV(outer: Vec2[], holes: Vec2[][]): Vec2[] {
         outerArea += outer[i][0] * outer[j][1] - outer[j][0] * outer[i][1];
     }
     outerArea /= 2;
-    console.log(`[bridgeAllHolesUV] Outer area: ${outerArea.toFixed(4)}, ${outerArea > 0 ? 'CCW' : 'CW'}`);
     let currentOuter = outerArea > 0 ? outer : [...outer].reverse();
 
     // Ensure holes are CW
@@ -636,20 +651,8 @@ function bridgeAllHolesUV(outer: Vec2[], holes: Vec2[][]): Vec2[] {
     // Merge each hole
     let merged = currentOuter;
     for (const { hole, rightmostIndex } of holesWithRightmost) {
-        console.log(`[bridgeAllHolesUV] Hole rightmost: index=${rightmostIndex}, coords=(${hole[rightmostIndex][0].toFixed(3)}, ${hole[rightmostIndex][1].toFixed(3)})`);
         merged = mergeHoleIntoOuterUV(merged, hole, rightmostIndex);
     }
-
-    console.log(`[bridgeAllHolesUV] Merged polygon: ${merged.length} points`);
-    // Print UV range
-    let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
-    for (const [u, v] of merged) {
-        uMin = Math.min(uMin, u);
-        uMax = Math.max(uMax, u);
-        vMin = Math.min(vMin, v);
-        vMax = Math.max(vMax, v);
-    }
-    console.log(`[bridgeAllHolesUV] Merged UV range: u=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], v=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
 
     return merged;
 }
@@ -659,12 +662,10 @@ function bridgeAllHolesUV(outer: Vec2[], holes: Vec2[][]): Vec2[] {
  */
 function mergeHoleIntoOuterUV(outer: Vec2[], hole: Vec2[], holeRightmostIndex: number): Vec2[] {
     const holeVertex = hole[holeRightmostIndex];
-    console.log(`[mergeHoleIntoOuterUV] Hole vertex: (${holeVertex[0].toFixed(3)}, ${holeVertex[1].toFixed(3)})`);
 
     // Cast a ray from holeVertex in the +U direction to find the closest edge on outer
     let bestDist = Infinity;
     let bestOuterIndex = 0;
-    let foundIntersection = false;
 
     for (let i = 0; i < outer.length; i++) {
         const j = (i + 1) % outer.length;
@@ -690,14 +691,10 @@ function mergeHoleIntoOuterUV(outer: Vec2[], hole: Vec2[], holeRightmostIndex: n
                     const distToP1 = Math.abs(p1[1] - holeVertex[1]);
                     const distToP2 = Math.abs(p2[1] - holeVertex[1]);
                     bestOuterIndex = distToP1 < distToP2 ? i : j;
-                    foundIntersection = true;
                 }
             }
         }
     }
-
-    console.log(`[mergeHoleIntoOuterUV] Found intersection: ${foundIntersection}, bestDist: ${bestDist.toFixed(3)}, bestOuterIndex: ${bestOuterIndex}`);
-    console.log(`[mergeHoleIntoOuterUV] Target outer vertex: (${outer[bestOuterIndex][0].toFixed(3)}, ${outer[bestOuterIndex][1].toFixed(3)})`);
 
     // Check if any reflex vertex on outer is visible and closer
     for (let i = 0; i < outer.length; i++) {

@@ -257,7 +257,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 // Helper Functions
 // =============================================================================
 
-/** Compute angle of a point on a circle/ellipse relative to its center */
+/** Compute angle of a point on a circle relative to its center */
 function pointToAngle(
   point: Vec3,
   center: Vec3,
@@ -279,6 +279,42 @@ function pointToAngle(
   const y = dx * perpX + dy * perpY + dz * perpZ;
 
   return Math.atan2(y, x);
+}
+
+/**
+ * Compute parameter angle for an ellipse point.
+ * For an ellipse: P(t) = center + majorR * cos(t) * refDir + minorR * sin(t) * perpDir
+ * Given a point P, we need to find t such that:
+ *   x = dot(P - center, refDir) = majorR * cos(t)
+ *   y = dot(P - center, perpDir) = minorR * sin(t)
+ * Therefore: t = atan2(y / minorR, x / majorR)
+ */
+function pointToEllipseAngle(
+  point: Vec3,
+  center: Vec3,
+  normal: Vec3,
+  refDirection: Vec3,
+  majorRadius: number,
+  minorRadius: number
+): number {
+  // Vector from center to point
+  const dx = point[0] - center[0];
+  const dy = point[1] - center[1];
+  const dz = point[2] - center[2];
+
+  // Compute perpendicular direction (cross product of normal and refDirection)
+  const perpX = normal[1] * refDirection[2] - normal[2] * refDirection[1];
+  const perpY = normal[2] * refDirection[0] - normal[0] * refDirection[2];
+  const perpZ = normal[0] * refDirection[1] - normal[1] * refDirection[0];
+
+  // Project onto refDirection and perpendicular direction
+  const x = dx * refDirection[0] + dy * refDirection[1] + dz * refDirection[2];
+  const y = dx * perpX + dy * perpY + dz * perpZ;
+
+  // For ellipse: x = majorR * cos(t), y = minorR * sin(t)
+  // So: cos(t) = x / majorR, sin(t) = y / minorR
+  // Therefore: t = atan2(sin(t), cos(t)) = atan2(y/minorR, x/majorR)
+  return Math.atan2(y / minorRadius, x / majorRadius);
 }
 
 /** Calculate number of samples for an arc based on angular tolerance */
@@ -303,7 +339,7 @@ function calculateArcSamples(
 
 /** Normalize an angle difference to handle wraparound */
 function normalizeAngleDiff(startAngle: number, endAngle: number, reversed: boolean): [number, number] {
-  // Ensure we traverse in the correct direction
+  // Ensure we traverse in the correct direction based on the reversed flag
   if (reversed) {
     // Traverse backward (CW for positive angles)
     if (endAngle > startAngle) {
@@ -571,13 +607,21 @@ export async function sampleCurvesGPU(
       let numSamples: number;
 
       if (isFullCircle) {
-        // Full circle: use 0 to 2π
+        // Full circle/ellipse: use 0 to 2π
         startAngle = 0;
         endAngle = Math.PI * 2;
         numSamples = Math.max(options.minSamples ?? 8, 16);
       } else {
-        startAngle = pointToAngle(startPoint, center, normal, refDir);
-        endAngle = pointToAngle(endPoint, center, normal, refDir);
+        // Use appropriate angle calculation based on curve type
+        if (curve.type === 'ELLIPSE') {
+          // For ellipse, we need to account for different radii
+          startAngle = pointToEllipseAngle(startPoint, center, normal, refDir, curve.majorRadius, curve.minorRadius);
+          endAngle = pointToEllipseAngle(endPoint, center, normal, refDir, curve.majorRadius, curve.minorRadius);
+        } else {
+          // For circle, use standard angle calculation
+          startAngle = pointToAngle(startPoint, center, normal, refDir);
+          endAngle = pointToAngle(endPoint, center, normal, refDir);
+        }
         [startAngle, endAngle] = normalizeAngleDiff(startAngle, endAngle, rev);
         numSamples = calculateArcSamples(startAngle, endAngle, options);
       }
@@ -613,7 +657,44 @@ export async function sampleCurvesGPU(
   }
 
   // Sample conics on GPU
-  const conicResults = await sampleConicsGPU(device, conicCurves, maxSamplesPerCurve);
+  let conicResults = await sampleConicsGPU(device, conicCurves, maxSamplesPerCurve);
+
+  // Validate conic results - check that sampled points are close to original endpoints
+  // If not, fall back to linear interpolation
+  for (let i = 0; i < conicResults.length; i++) {
+    const samples = conicResults[i];
+    if (samples.length < 2) continue;
+
+    const { startPoint, endPoint, curve } = conicCurves[i];
+    const firstSample = samples[0];
+    const lastSample = samples[samples.length - 1];
+
+    // Distance from first/last sample to expected start/end
+    const startDist = Math.sqrt(
+      (firstSample[0] - startPoint[0]) ** 2 +
+      (firstSample[1] - startPoint[1]) ** 2 +
+      (firstSample[2] - startPoint[2]) ** 2
+    );
+    const endDist = Math.sqrt(
+      (lastSample[0] - endPoint[0]) ** 2 +
+      (lastSample[1] - endPoint[1]) ** 2 +
+      (lastSample[2] - endPoint[2]) ** 2
+    );
+
+    // If either endpoint is way off, something is wrong
+    // Use a tolerance based on curve size (e.g., 10% of radius for circles/ellipses)
+    let tolerance = 1.0; // default 1 unit
+    if (curve.type === 'CIRCLE') {
+      tolerance = curve.radius * 0.1;
+    } else if (curve.type === 'ELLIPSE') {
+      tolerance = Math.max(curve.majorRadius, curve.minorRadius) * 0.1;
+    }
+
+    if (startDist > tolerance || endDist > tolerance) {
+      // Fall back to linear interpolation for curves with endpoint mismatch
+      conicResults[i] = [startPoint, endPoint];
+    }
+  }
 
   // TODO: Sample B-splines on GPU (for now, fall back to CPU)
   const bsplineResults: Vec3[][] = bsplineCurves.map(({ curve, startParam, endParam, numSamples }) => {
