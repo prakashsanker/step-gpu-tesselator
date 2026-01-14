@@ -1907,6 +1907,9 @@ async function tryTessellateCurvedSurface(
         // For full cylinders with holes, use a simple rectangular boundary
         // The extracted loop forms a path around the rectangle which confuses point-in-polygon
         let effectiveOuterLoop: Vec2[];
+        // Normalized hole loops - shift to [0, 2π] range to match outer boundary
+        let normalizedHoleLoops: Vec2[][] = holeLoops;
+
         if (!isPartialSurface && holeLoops.length > 0) {
           // Full cylinder with holes - use rectangular boundary
           // Create a simple rectangle from (0, vMin) to (2π, vMax)
@@ -1930,6 +1933,49 @@ async function tryTessellateCurvedSurface(
           }
           effectiveOuterLoop = rectPoints;
           console.log(`[Cylinder] Using rectangular boundary for full cylinder with holes: ${rectPoints.length} points`);
+
+          // Normalize hole UV coordinates to [0, 2π] range
+          // Holes extracted via pointToUV use atan2 which returns [-π, π]
+          // But the rectangular boundary uses [0, 2π]
+          // We need to maintain continuity within each hole
+          normalizedHoleLoops = holeLoops.map(hole => {
+            if (hole.length === 0) return hole;
+
+            // First, make the hole continuous (no jumps > π)
+            const continuous: Vec2[] = [[...hole[0]]];
+            let prevU = hole[0][0];
+            for (let i = 1; i < hole.length; i++) {
+              let u = hole[i][0];
+              const v = hole[i][1];
+              while (u - prevU > Math.PI) u -= Math.PI * 2;
+              while (prevU - u > Math.PI) u += Math.PI * 2;
+              continuous.push([u, v]);
+              prevU = u;
+            }
+
+            // Find the center U of the continuous hole
+            let sumU = 0;
+            for (const [u] of continuous) sumU += u;
+            const centerU = sumU / continuous.length;
+
+            // Determine shift needed to put center in [0, 2π]
+            let shift = 0;
+            if (centerU < 0) shift = Math.PI * 2;
+            if (centerU >= Math.PI * 2) shift = -Math.PI * 2;
+
+            // Apply shift to all points
+            return continuous.map(([u, v]): Vec2 => [u + shift, v]);
+          });
+          console.log(`[Cylinder] Normalized ${normalizedHoleLoops.length} holes to [0, 2π] range`);
+          for (let i = 0; i < normalizedHoleLoops.length; i++) {
+            const hole = normalizedHoleLoops[i];
+            let holeUMin = Infinity, holeUMax = -Infinity;
+            for (const [u] of hole) {
+              holeUMin = Math.min(holeUMin, u);
+              holeUMax = Math.max(holeUMax, u);
+            }
+            console.log(`[Cylinder] Normalized hole ${i}: U=[${holeUMin.toFixed(3)}, ${holeUMax.toFixed(3)}]`);
+          }
         } else {
           effectiveOuterLoop = outerLoop.length > 0 ? outerLoop : uvBoundary;
         }
@@ -1942,7 +1988,7 @@ async function tryTessellateCurvedSurface(
           },
           effectiveOuterLoop,
           64,  // Grid density for tessellation (higher = less gaps at boundary)
-          holeLoops  // C6.4: Pass hole loops
+          normalizedHoleLoops  // C6.4: Pass normalized hole loops
         );
 
         console.log(`[Cylinder] tessellateTrimmedSurface returned: ${mesh.positions.length / 3} vertices, ${mesh.indices.length / 3} triangles`);
@@ -2845,9 +2891,15 @@ function extractUVBoundaryLoopsSeparate(
   let outer: Vec2[] = [];
   const holes: Vec2[][] = [];
 
+  console.log(`[extractUVBoundaryLoopsSeparate] Face ${face.id}: processing ${face.boundIds.length} bounds: ${face.boundIds.join(', ')}`);
+
   for (const boundId of face.boundIds) {
     const bound = model.faceBounds.get(boundId);
-    if (!bound) continue;
+    if (!bound) {
+      console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId} not found!`);
+      continue;
+    }
+    console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId}: isOuter=${bound.isOuter}, loopId=#${bound.loopId}`);
 
     const loop = model.edgeLoops.get(bound.loopId);
     if (!loop) continue;
@@ -3094,15 +3146,21 @@ function extractUVBoundaryLoopsSeparate(
       }
     }
 
+    console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId}: generated ${loopPoints.length} loopPoints`);
     if (loopPoints.length >= 3) {
       if (bound.isOuter) {
+        console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId}: classifying as OUTER (${loopPoints.length} points)`);
         outer = loopPoints;
       } else {
+        console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId}: classifying as HOLE (${loopPoints.length} points)`);
         holes.push(loopPoints);
       }
+    } else {
+      console.log(`[extractUVBoundaryLoopsSeparate] Bound #${boundId}: SKIPPED (only ${loopPoints.length} points, need >= 3)`);
     }
   }
 
+  console.log(`[extractUVBoundaryLoopsSeparate] Final result: outer=${outer.length} points, ${holes.length} holes`);
   return { outer, holes };
 }
 
