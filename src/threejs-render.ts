@@ -45,8 +45,10 @@ export function createThreeMeshFromTesselation(mesh: Mesh): THREE.Mesh {
             "normal",
             new THREE.BufferAttribute(convertedNormals, 3)
         );
+        console.log(`[Three.js] Using provided normals (${convertedNormals.length / 3} normals)`);
     } else {
         // Fall back to computed normals
+        console.log(`[Three.js] No normals provided, computing vertex normals...`);
         geometry.computeVertexNormals();
     }
 
