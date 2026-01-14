@@ -3,207 +3,243 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>OpenCascade.js Checkpoint 1</title>
+  <title>OCC STEP Viewer</title>
   <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
     body {
       font-family: monospace;
       background: #1e1e1e;
       color: #d4d4d4;
-      padding: 20px;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    #toolbar {
+      padding: 10px 20px;
+      background: #2d2d2d;
+      display: flex;
+      align-items: center;
+      gap: 15px;
+      border-bottom: 1px solid #444;
+    }
+    #render-container {
+      flex: 1;
+      width: 100%;
+      min-height: 0;
     }
     #output {
       white-space: pre-wrap;
-      background: #2d2d2d;
-      padding: 15px;
-      border-radius: 5px;
-      margin-top: 20px;
+      background: #252525;
+      padding: 10px 20px;
+      max-height: 150px;
+      overflow-y: auto;
+      font-size: 12px;
+      border-top: 1px solid #444;
     }
     .success { color: #4ec9b0; }
     .error { color: #f44747; }
     .info { color: #9cdcfe; }
     button {
-      background: #0e639c;
+      background: #0a7c3e;
       color: white;
       border: none;
-      padding: 10px 20px;
+      padding: 8px 16px;
       cursor: pointer;
       font-size: 14px;
-      margin-right: 10px;
+      border-radius: 4px;
     }
     button:hover {
-      background: #1177bb;
+      background: #0b9648;
+    }
+    button:disabled {
+      background: #555;
+      cursor: not-allowed;
     }
     input[type="file"] {
-      margin: 10px 0;
+      color: #d4d4d4;
+    }
+    #stats {
+      margin-left: auto;
+      font-size: 12px;
+      color: #888;
     }
   </style>
 </head>
 <body>
-  <h1>OpenCascade.js - Checkpoints</h1>
-
-  <div>
+  <div id="toolbar">
     <input type="file" id="file-input" accept=".step,.stp,.STEP,.STP" />
-    <button id="run-cp1">Run Checkpoint 1</button>
-    <button id="run-cp2">Run Checkpoint 2</button>
-    <button id="run-cp3">Run Checkpoint 3</button>
-    <button id="run-cp4">Run Checkpoint 4</button>
+    <button id="run-adapter">Parse & Render</button>
+    <div id="stats"></div>
   </div>
 
-  <div id="render-container" style="width: 600px; height: 400px; margin-top: 20px;"></div>
+  <div id="render-container"></div>
 
-  <div id="output">Waiting for file...</div>
+  <div id="output">Select a STEP file and click "Parse & Render"</div>
 
   <script type="module">
-    import { runCheckpoint1, runCheckpoint2, runCheckpoint3, runCheckpoint4 } from './src/occ-test.ts';
+    import { parseStepWithOCC } from './src/occ-test.ts';
+    import { createThreeMeshFromTesselation } from './src/threejs-render.ts';
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
     const output = document.getElementById('output');
     const fileInput = document.getElementById('file-input');
-    const runCP1Button = document.getElementById('run-cp1');
-    const runCP2Button = document.getElementById('run-cp2');
-    const runCP3Button = document.getElementById('run-cp3');
-    const runCP4Button = document.getElementById('run-cp4');
+    const runButton = document.getElementById('run-adapter');
+    const stats = document.getElementById('stats');
+
+    let renderer, scene, camera, controls, currentMesh;
 
     function log(message, type = 'info') {
       const line = document.createElement('div');
       line.className = type;
       line.textContent = message;
       output.appendChild(line);
-      console.log(message);
+      output.scrollTop = output.scrollHeight;
     }
 
     function clearOutput() {
       output.innerHTML = '';
     }
 
-    async function getFileContent() {
+    function initRenderer() {
+      const container = document.getElementById('render-container');
+      const width = container.clientWidth;
+      const height = container.clientHeight;
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(window.devicePixelRatio);
+      container.appendChild(renderer.domElement);
+
+      scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x303030);
+
+      camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 10000);
+      camera.position.set(100, 100, 100);
+
+      controls = new OrbitControls(camera, renderer.domElement);
+      controls.enableDamping = true;
+
+      // Lights
+      const hemiLight = new THREE.HemisphereLight(0xffffff, 0x888888, 1.5);
+      scene.add(hemiLight);
+
+      const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+      dirLight.position.set(100, 150, 100);
+      scene.add(dirLight);
+
+      // Handle resize
+      window.addEventListener('resize', () => {
+        const w = container.clientWidth;
+        const h = container.clientHeight;
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+        renderer.setSize(w, h);
+      });
+
+      function animate() {
+        requestAnimationFrame(animate);
+        controls.update();
+        renderer.render(scene, camera);
+      }
+      animate();
+    }
+
+    function fitCameraToMesh(mesh) {
+      mesh.geometry.computeBoundingBox();
+      const boundingBox = mesh.geometry.boundingBox;
+      const center = new THREE.Vector3();
+      boundingBox.getCenter(center);
+      const size = new THREE.Vector3();
+      boundingBox.getSize(size);
+
+      const maxDim = Math.max(size.x, size.y, size.z);
+      const fov = camera.fov * (Math.PI / 180);
+      const cameraDistance = maxDim / (2 * Math.tan(fov / 2)) * 1.5;
+
+      camera.position.set(
+        center.x + cameraDistance * 0.7,
+        center.y + cameraDistance * 0.7,
+        center.z + cameraDistance * 0.7
+      );
+      camera.near = cameraDistance / 100;
+      camera.far = cameraDistance * 10;
+      camera.updateProjectionMatrix();
+
+      controls.target.copy(center);
+      controls.update();
+
+      // Update grid
+      scene.children = scene.children.filter(c => !(c instanceof THREE.GridHelper));
+      const gridSize = Math.ceil(maxDim * 2);
+      const grid = new THREE.GridHelper(gridSize, Math.min(gridSize, 20));
+      grid.position.y = boundingBox.min.y;
+      scene.add(grid);
+    }
+
+    async function loadAndRender() {
       const file = fileInput.files?.[0];
       if (!file) {
         log('Please select a STEP file first', 'error');
-        return null;
+        return;
       }
+
       clearOutput();
-      log(`Loading file: ${file.name}`, 'info');
-      const content = await file.text();
-      log(`File size: ${content.length} bytes`, 'info');
-      log('', 'info');
-      return content;
+      runButton.disabled = true;
+      runButton.textContent = 'Loading...';
+
+      try {
+        log(`Loading: ${file.name}`, 'info');
+        const content = await file.text();
+        log(`File size: ${(content.length / 1024).toFixed(1)} KB`, 'info');
+
+        const startTime = performance.now();
+        const mesh = await parseStepWithOCC(content);
+        const parseTime = performance.now() - startTime;
+
+        const vertexCount = mesh.positions.length / 3;
+        const triangleCount = mesh.indices.length / 3;
+
+        log(`✓ Parsed in ${parseTime.toFixed(0)}ms`, 'success');
+        log(`  ${vertexCount.toLocaleString()} vertices, ${triangleCount.toLocaleString()} triangles`, 'success');
+
+        // Update stats in toolbar
+        stats.textContent = `${vertexCount.toLocaleString()} verts | ${triangleCount.toLocaleString()} tris | ${parseTime.toFixed(0)}ms`;
+
+        // Remove old mesh
+        if (currentMesh) {
+          scene.remove(currentMesh);
+          currentMesh.geometry.dispose();
+          currentMesh.material.dispose();
+        }
+
+        // Add new mesh
+        currentMesh = createThreeMeshFromTesselation(mesh);
+        scene.add(currentMesh);
+
+        // Fit camera
+        fitCameraToMesh(currentMesh);
+
+      } catch (err) {
+        log(`Error: ${err.message}`, 'error');
+        console.error(err);
+        stats.textContent = 'Error';
+      } finally {
+        runButton.disabled = false;
+        runButton.textContent = 'Parse & Render';
+      }
     }
 
-    runCP1Button.addEventListener('click', async () => {
-      const content = await getFileContent();
-      if (!content) return;
+    // Initialize
+    initRenderer();
+    runButton.addEventListener('click', loadAndRender);
 
-      try {
-        const result = await runCheckpoint1(content);
-
-        log('', 'info');
-        if (result.success) {
-          log(`✓ CHECKPOINT 1 PASSED`, 'success');
-          log(`  Face count: ${result.faceCount}`, 'success');
-        } else if (result.error) {
-          log(`✗ CHECKPOINT 1 FAILED`, 'error');
-          log(`  Error: ${result.error}`, 'error');
-        } else {
-          log(`✗ CHECKPOINT 1 FAILED`, 'error');
-          log(`  Expected 6 faces, got ${result.faceCount}`, 'error');
-        }
-      } catch (err) {
-        log(`Error: ${err.message}`, 'error');
-        console.error(err);
-      }
-    });
-
-    runCP2Button.addEventListener('click', async () => {
-      const content = await getFileContent();
-      if (!content) return;
-
-      try {
-        const result = await runCheckpoint2(content);
-
-        log('', 'info');
-        if (result.success) {
-          log(`✓ CHECKPOINT 2 PASSED`, 'success');
-          log(`  Surfaces extracted: ${result.surfaces.length}`, 'success');
-          for (const s of result.surfaces) {
-            log(`    Face ${s.faceIndex}: ${s.surfaceType} UV=[${s.uvBounds.uMin.toFixed(2)},${s.uvBounds.uMax.toFixed(2)}]x[${s.uvBounds.vMin.toFixed(2)},${s.uvBounds.vMax.toFixed(2)}]`, 'success');
-          }
-        } else if (result.error) {
-          log(`✗ CHECKPOINT 2 FAILED`, 'error');
-          log(`  Error: ${result.error}`, 'error');
-        } else {
-          log(`✗ CHECKPOINT 2 FAILED`, 'error');
-          log(`  Surfaces: ${result.surfaces.length}`, 'error');
-          for (const s of result.surfaces) {
-            log(`    Face ${s.faceIndex}: ${s.surfaceType}`, 'error');
-          }
-        }
-      } catch (err) {
-        log(`Error: ${err.message}`, 'error');
-        console.error(err);
-      }
-    });
-
-    runCP3Button.addEventListener('click', async () => {
-      const content = await getFileContent();
-      if (!content) return;
-
-      try {
-        const result = await runCheckpoint3(content);
-
-        log('', 'info');
-        if (result.success) {
-          log(`✓ CHECKPOINT 3 PASSED`, 'success');
-          log(`  Faces with edges extracted: ${result.faces.length}`, 'success');
-          for (const f of result.faces) {
-            const edgeTypes = f.outerLoop.map(e => e.curveType).join(', ');
-            log(`    Face ${f.faceIndex}: ${f.surfaceType}, ${f.outerLoop.length} edges [${edgeTypes}]`, 'success');
-            if (f.outerLoop.length > 0) {
-              const first = f.outerLoop[0];
-              log(`      Edge 0: (${first.startPoint.x.toFixed(2)}, ${first.startPoint.y.toFixed(2)}, ${first.startPoint.z.toFixed(2)}) → (${first.endPoint.x.toFixed(2)}, ${first.endPoint.y.toFixed(2)}, ${first.endPoint.z.toFixed(2)})`, 'success');
-            }
-          }
-        } else if (result.error) {
-          log(`✗ CHECKPOINT 3 FAILED`, 'error');
-          log(`  Error: ${result.error}`, 'error');
-        } else {
-          log(`✗ CHECKPOINT 3 FAILED`, 'error');
-          log(`  Faces: ${result.faces.length}`, 'error');
-          for (const f of result.faces) {
-            const edgeTypes = f.outerLoop.map(e => e.curveType).join(', ');
-            log(`    Face ${f.faceIndex}: ${f.surfaceType}, ${f.outerLoop.length} edges [${edgeTypes}]`, 'error');
-          }
-        }
-      } catch (err) {
-        log(`Error: ${err.message}`, 'error');
-        console.error(err);
-      }
-    });
-
-    runCP4Button.addEventListener('click', async () => {
-      const content = await getFileContent();
-      if (!content) return;
-
-      try {
-        const result = await runCheckpoint4(content);
-
-        log('', 'info');
-        if (result.success) {
-          log(`✓ CHECKPOINT 4 PASSED`, 'success');
-          log(`  Vertices: ${result.vertexCount}`, 'success');
-          log(`  Triangles: ${result.triangleCount}`, 'success');
-          log(`  Mesh rendered in container above`, 'success');
-        } else if (result.error) {
-          log(`✗ CHECKPOINT 4 FAILED`, 'error');
-          log(`  Error: ${result.error}`, 'error');
-        } else {
-          log(`✗ CHECKPOINT 4 FAILED`, 'error');
-          log(`  Vertices: ${result.vertexCount}, Triangles: ${result.triangleCount}`, 'error');
-        }
-      } catch (err) {
-        log(`Error: ${err.message}`, 'error');
-        console.error(err);
-      }
-    });
+    // Auto-load on file select
+    fileInput.addEventListener('change', loadAndRender);
   </script>
 </body>
 </html>
