@@ -381,7 +381,20 @@ export async function tessellateTrimmedSurface(
     const PI = Math.PI;
     const nearPosPI = uvBoundary.filter(([u]) => u > PI - 0.5).length;
     const nearNegPI = uvBoundary.filter(([u]) => u < -PI + 0.5).length;
-    const hasDiscontinuity = nearPosPI > 0 && nearNegPI > 0;
+
+    // Also check if this is a full circle (U spans nearly 2π)
+    let uMinBoundary = Infinity, uMaxBoundary = -Infinity;
+    for (const [u] of uvBoundary) {
+        uMinBoundary = Math.min(uMinBoundary, u);
+        uMaxBoundary = Math.max(uMaxBoundary, u);
+    }
+    const uSpan = uMaxBoundary - uMinBoundary;
+    const isFullCircle = uSpan > 5.5; // More than ~315 degrees
+
+    // Only treat as discontinuity if it's NOT a full circle
+    const hasDiscontinuity = nearPosPI > 0 && nearNegPI > 0 && !isFullCircle;
+
+    console.log(`[tessellateTrimmedSurface] nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, uSpan=${uSpan.toFixed(3)}, isFullCircle=${isFullCircle}, hasDiscontinuity=${hasDiscontinuity}`);
 
     // Create a continuous version of the boundary for polygon testing
     let continuousBoundary: Vec2[];
@@ -429,6 +442,33 @@ export async function tessellateTrimmedSurface(
     } else {
         continuousBoundary = uvBoundary;
         continuousHoles = uvHoles;
+    }
+
+    // Debug: log continuous boundary bounds
+    {
+        let cbUMin = Infinity, cbUMax = -Infinity, cbVMin = Infinity, cbVMax = -Infinity;
+        for (const [u, v] of continuousBoundary) {
+            cbUMin = Math.min(cbUMin, u);
+            cbUMax = Math.max(cbUMax, u);
+            cbVMin = Math.min(cbVMin, v);
+            cbVMax = Math.max(cbVMax, v);
+        }
+        console.log(`[tessellateTrimmedSurface] Continuous boundary bounds: U=[${cbUMin.toFixed(3)}, ${cbUMax.toFixed(3)}], V=[${cbVMin.toFixed(3)}, ${cbVMax.toFixed(3)}]`);
+        console.log(`[tessellateTrimmedSurface] Continuous boundary first 5: ${continuousBoundary.slice(0, 5).map(([u, v]) => `(${u.toFixed(2)},${v.toFixed(2)})`).join(' ')}`);
+        console.log(`[tessellateTrimmedSurface] Continuous boundary has ${continuousBoundary.length} points`);
+        if (continuousHoles.length > 0) {
+            for (let i = 0; i < continuousHoles.length; i++) {
+                const hole = continuousHoles[i];
+                let hUMin = Infinity, hUMax = -Infinity, hVMin = Infinity, hVMax = -Infinity;
+                for (const [u, v] of hole) {
+                    hUMin = Math.min(hUMin, u);
+                    hUMax = Math.max(hUMax, u);
+                    hVMin = Math.min(hVMin, v);
+                    hVMax = Math.max(hVMax, v);
+                }
+                console.log(`[tessellateTrimmedSurface] Continuous hole ${i} bounds: U=[${hUMin.toFixed(3)}, ${hUMax.toFixed(3)}], V=[${hVMin.toFixed(3)}, ${hVMax.toFixed(3)}]`);
+            }
+        }
     }
 
     // Find UV bounding box from the continuous boundary
@@ -511,6 +551,16 @@ export async function tessellateTrimmedSurface(
         }
     }
 
+    console.log(`[tessellateTrimmedSurface] Grid bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+    console.log(`[tessellateTrimmedSurface] Grid points: ${insideCount} inside, ${outsideCount} outside`);
+
+    // Diagnostic: test a specific point that should be inside (center of grid)
+    const testU = (uMin + uMax) / 2;
+    const testV = (vMin + vMax) / 2;
+    const testInside = isPointInPolygon([testU, testV], continuousBoundary);
+    const testInHole = continuousHoles.some(hole => isPointInPolygon([testU, testV], hole));
+    console.log(`[tessellateTrimmedSurface] Test point (${testU.toFixed(3)}, ${testV.toFixed(3)}): insideBoundary=${testInside}, insideHole=${testInHole}`);
+
     // Create triangles from the grid
     const triangles: [number, number, number][] = [];
 
@@ -544,6 +594,8 @@ export async function tessellateTrimmedSurface(
         }
     }
 
+
+    console.log(`[tessellateTrimmedSurface] Generated ${triangles.length} triangles from ${uvVertices.length} vertices`);
 
     // Note: We do NOT add boundary stitching triangles here.
     // The boundary stitching was causing visible spike artifacts on curved surfaces.

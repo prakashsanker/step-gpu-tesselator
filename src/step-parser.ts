@@ -1832,26 +1832,22 @@ async function tryTessellateCurvedSurface(
     );
 
     if (uvBoundary.length >= 3) {
+      // C6.4: Extract outer and hole loops separately FIRST
+      // This must happen before area calculation because the combined boundary is wrong for faces with holes
+      const { outer: outerLoop, holes: holeLoops } = extractUVBoundaryLoopsSeparate(
+        model, face,
+        (pt) => pointToCylinderUV(pt, placement),
+        samplesPerEdge,
+        faceYRange
+      );
+
+      // Use the OUTER loop for area calculation (not the combined boundary which includes holes)
+      const loopForArea = outerLoop.length > 0 ? outerLoop : uvBoundary;
+
       // Fix angle wrapping for continuous UV polygon
-      const fixedUV = fixUVAngleWrapping(uvBoundary);
+      const fixedUV = fixUVAngleWrapping(loopForArea);
 
-      // Check if this is a full cylinder (closed loop at same angular position)
-      // A full cylinder has edges that go all the way around (u changes by 2π)
-      // A half cylinder has edges that go partway (u stays within a range)
-
-      // Check if any single edge spans more than π (indicating a "going around" motion)
-      // For a half-cylinder, each arc edge spans ~π (half circle) but in opposite directions
-      // For a full cylinder, each arc edge spans ~2π (full circle)
-
-      // Alternative: check if the boundary's 3D vertices span the full angular range
-      // by looking at the original boundary vertices
-      const { uMin: boundsUMin, uMax: boundsUMax } = computeCylinderUVBounds(boundaryVertices, placement);
-
-      // Check the actual angular span from the original 3D points (not UV-wrapped)
-      // If the 3D points only cover ~180°, it's a half cylinder
-      const boundsSpan = boundsUMax - boundsUMin;
-
-      // Also compute signed area of UV polygon - if it's too small relative to bounds, something's wrong
+      // Compute signed area of UV polygon (using shoelace formula)
       let uvArea = 0;
       for (let i = 0; i < fixedUV.length; i++) {
         const j = (i + 1) % fixedUV.length;
@@ -1873,16 +1869,70 @@ async function tryTessellateCurvedSurface(
       // Use trimmed tessellation if area ratio suggests partial surface OR if there are holes
       const isPartialSurface = areaRatio < 0.8;
 
-      // C6.4: Check for holes by extracting loops separately
-      const { outer: outerLoop, holes: holeLoops } = extractUVBoundaryLoopsSeparate(
-        model, face,
-        (pt) => pointToCylinderUV(pt, placement),
-        samplesPerEdge,
-        faceYRange
-      );
+      console.log(`[Cylinder] Face ${face.id}: outerLoop.length=${outerLoop.length}, holeLoops.length=${holeLoops.length}, isPartialSurface=${isPartialSurface}, areaRatio=${areaRatio.toFixed(3)}`);
+
+      // Debug: log UV bounds
+      if (outerLoop.length > 0) {
+        let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+        for (const [u, v] of outerLoop) {
+          uMin = Math.min(uMin, u);
+          uMax = Math.max(uMax, u);
+          vMin = Math.min(vMin, v);
+          vMax = Math.max(vMax, v);
+        }
+        console.log(`[Cylinder] Outer UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+        // Show first and last 5 points
+        console.log(`[Cylinder] Outer loop first 5: ${outerLoop.slice(0, 5).map(([u, v]) => `(${u.toFixed(2)},${v.toFixed(2)})`).join(' ')}`);
+        console.log(`[Cylinder] Outer loop last 5: ${outerLoop.slice(-5).map(([u, v]) => `(${u.toFixed(2)},${v.toFixed(2)})`).join(' ')}`);
+      }
+      if (holeLoops.length > 0) {
+        for (let i = 0; i < holeLoops.length; i++) {
+          const hole = holeLoops[i];
+          let uMin = Infinity, uMax = -Infinity, vMin = Infinity, vMax = -Infinity;
+          for (const [u, v] of hole) {
+            uMin = Math.min(uMin, u);
+            uMax = Math.max(uMax, u);
+            vMin = Math.min(vMin, v);
+            vMax = Math.max(vMax, v);
+          }
+          console.log(`[Cylinder] Hole ${i} UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+          console.log(`[Cylinder] Hole ${i} first 5: ${hole.slice(0, 5).map(([u, v]) => `(${u.toFixed(2)},${v.toFixed(2)})`).join(' ')}`);
+        }
+      }
 
       if (isPartialSurface || holeLoops.length > 0) {
         // Use trimmed surface tessellation with actual UV boundary
+        console.log(`[Cylinder] Using tessellateTrimmedSurface for Face ${face.id}`);
+
+        // For full cylinders with holes, use a simple rectangular boundary
+        // The extracted loop forms a path around the rectangle which confuses point-in-polygon
+        let effectiveOuterLoop: Vec2[];
+        if (!isPartialSurface && holeLoops.length > 0) {
+          // Full cylinder with holes - use rectangular boundary
+          // Create a simple rectangle from (0, vMin) to (2π, vMax)
+          const rectPoints: Vec2[] = [];
+          const numSamples = 32;
+          // Bottom edge: U from 0 to 2π
+          for (let i = 0; i <= numSamples; i++) {
+            rectPoints.push([i * Math.PI * 2 / numSamples, vMin]);
+          }
+          // Right edge: V from vMin to vMax
+          for (let i = 1; i <= numSamples; i++) {
+            rectPoints.push([Math.PI * 2, vMin + i * (vMax - vMin) / numSamples]);
+          }
+          // Top edge: U from 2π to 0
+          for (let i = numSamples - 1; i >= 0; i--) {
+            rectPoints.push([i * Math.PI * 2 / numSamples, vMax]);
+          }
+          // Left edge: V from vMax to vMin (but not including the start point again)
+          for (let i = numSamples - 1; i > 0; i--) {
+            rectPoints.push([0, vMin + i * (vMax - vMin) / numSamples]);
+          }
+          effectiveOuterLoop = rectPoints;
+          console.log(`[Cylinder] Using rectangular boundary for full cylinder with holes: ${rectPoints.length} points`);
+        } else {
+          effectiveOuterLoop = outerLoop.length > 0 ? outerLoop : uvBoundary;
+        }
 
         const mesh = await tessellateTrimmedSurface(
           {
@@ -1890,10 +1940,36 @@ async function tryTessellateCurvedSurface(
             placement,
             radius: cylinder.radius,
           },
-          outerLoop.length > 0 ? outerLoop : uvBoundary,  // Use outer loop or fall back to combined
+          effectiveOuterLoop,
           64,  // Grid density for tessellation (higher = less gaps at boundary)
           holeLoops  // C6.4: Pass hole loops
         );
+
+        console.log(`[Cylinder] tessellateTrimmedSurface returned: ${mesh.positions.length / 3} vertices, ${mesh.indices.length / 3} triangles`);
+
+        // Check for NaN in positions
+        let nanCount = 0;
+        for (let i = 0; i < mesh.positions.length; i++) {
+          if (isNaN(mesh.positions[i])) nanCount++;
+        }
+        if (nanCount > 0) {
+          console.warn(`[Cylinder] WARNING: ${nanCount} NaN values in positions!`);
+        }
+
+        // Log position bounds
+        let xMin = Infinity, xMax = -Infinity;
+        let yMin = Infinity, yMax = -Infinity;
+        let zMin = Infinity, zMax = -Infinity;
+        for (let i = 0; i < mesh.positions.length; i += 3) {
+          xMin = Math.min(xMin, mesh.positions[i]);
+          xMax = Math.max(xMax, mesh.positions[i]);
+          yMin = Math.min(yMin, mesh.positions[i + 1]);
+          yMax = Math.max(yMax, mesh.positions[i + 1]);
+          zMin = Math.min(zMin, mesh.positions[i + 2]);
+          zMax = Math.max(zMax, mesh.positions[i + 2]);
+        }
+        console.log(`[Cylinder] Position bounds: X=[${xMin.toFixed(3)}, ${xMax.toFixed(3)}], Y=[${yMin.toFixed(3)}, ${yMax.toFixed(3)}], Z=[${zMin.toFixed(3)}, ${zMax.toFixed(3)}]`);
+
         return meshToVerticesAndTriangles(mesh);
       }
     }
@@ -2822,12 +2898,21 @@ function extractUVBoundaryLoopsSeparate(
           const yDir = vec3Cross(axis, refDir);
 
           if (isFullCircle) {
+            // For full circles, we need to maintain angle continuity
+            // The direction is determined by sameSense and edgeOrientation
+            const effectiveDirection = edgeOrientation === edgeCurve.sameSense;
+
             for (let i = 0; i < samplesPerEdge; i++) {
-              const angle = (i / samplesPerEdge) * Math.PI * 2;
+              // Sample from 0 to 2π (or 2π to 0 if reversed)
+              const t = i / samplesPerEdge;
+              const angle = effectiveDirection ? t * Math.PI * 2 : (1 - t) * Math.PI * 2;
               const x = center[0] + circle.radius * (Math.cos(angle) * refDir[0] + Math.sin(angle) * yDir[0]);
               const y = center[1] + circle.radius * (Math.cos(angle) * refDir[1] + Math.sin(angle) * yDir[1]);
               const z = center[2] + circle.radius * (Math.cos(angle) * refDir[2] + Math.sin(angle) * yDir[2]);
-              loopPoints.push(pointToUV([x, y, z]));
+              // Compute V (height along cylinder axis) the normal way
+              const uv = pointToUV([x, y, z]);
+              // But use the unwrapped angle for U to maintain continuity
+              loopPoints.push([angle, uv[1]]);
             }
             continue;
           }
@@ -2843,19 +2928,23 @@ function extractUVBoundaryLoopsSeparate(
           if (ccwDist < 0) ccwDist += Math.PI * 2;
           const cwDist = Math.PI * 2 - ccwDist;
 
-          // Initial choice: pick shorter path
+          // Use EDGE_CURVE sameSense to determine arc direction:
+          // - sameSense=.T. -> curve parameterization agrees with edge direction (CCW for standard circles)
+          // - sameSense=.F. -> curve parameterization is reversed (CW direction)
+          // Combined with orientedEdge.orientation to get effective direction
+          const effectiveDirection = edgeOrientation === edgeCurve.sameSense;
+
           let angleSpan: number;
-          if (ccwDist < cwDist) {
+          if (effectiveDirection) {
+            // Go CCW (positive direction)
             angleSpan = ccwDist;
-          } else if (cwDist < ccwDist) {
-            angleSpan = -cwDist;
           } else {
-            // Equal distance - default to CCW
-            angleSpan = ccwDist;
+            // Go CW (negative direction)
+            angleSpan = -cwDist;
           }
 
-          // VALIDATION: Check if the arc midpoint is within the face's Y range
-          // If we have a face Y range, validate that the arc doesn't go outside it
+          // Fallback validation using face Y range
+          // Only apply if the chosen direction results in midpoint outside face bounds
           const midAngle = angle1 + angleSpan / 2;
           const midPt: Vec3 = [
             center[0] + circle.radius * (Math.cos(midAngle) * refDir[0] + Math.sin(midAngle) * yDir[0]),
@@ -3689,10 +3778,13 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
   const defaultColor: Vec3 = [0.7, 0.7, 0.7];
 
   // Add curved faces (already have triangles from surface tessellation)
+  console.log(`[parseStepToMesh] Processing ${curvedFaces.length} curved faces, ${planarFaces.length} planar faces`);
   for (let fi = 0; fi < curvedFaces.length; fi++) {
     const face = curvedFaces[fi];
     if (face.curvedResult) {
       const numVerts = face.curvedResult.vertices.length;
+      const numTris = face.curvedResult.triangles.length;
+      console.log(`[parseStepToMesh] Curved face ${face.faceId}: ${numVerts} vertices, ${numTris} triangles`);
 
       // Validate face mesh before adding
       let faceMaxIndex = 0;
@@ -3739,6 +3831,7 @@ export async function parseStepToMesh(stepText: string): Promise<Mesh> {
 
     if (triangles && triangles.length > 0) {
       const numVerts = face.vertices3d.length;
+      console.log(`[parseStepToMesh] Planar face ${face.faceId}: ${numVerts} vertices, ${triangles.length} triangles`);
 
       // Validate face mesh before adding
       let faceMaxIndex = 0;
