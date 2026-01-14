@@ -16,8 +16,8 @@ import { computeSmoothNormals, filterDegenerateTriangles } from "./mesh-quality"
 import { computeSmoothNormalsGPU } from "./smooth-normals-gpu";
 
 // Minimal STEP → mesh parser for the square face example
-type Vec3 = [number, number, number];
-type Vec2 = [number, number];
+export type Vec3 = [number, number, number];
+export type Vec2 = [number, number];
 
 // =============================================================================
 // Ear Clipping Algorithm Selection
@@ -307,7 +307,7 @@ function computeFaceBasisFromStepFace(
  * Compute a face basis geometrically from the outer loop vertices.
  * Used as fallback when STEP plane data is not available.
  */
-function computeFaceBasisFromLoop(loop: Vec3[]): FaceBasis {
+export function computeFaceBasisFromLoop(loop: Vec3[]): FaceBasis {
   if (loop.length < 3) {
     throw new Error("Cannot compute basis from loop with fewer than 3 vertices");
   }
@@ -378,7 +378,7 @@ function projectPointTo2D(p: Vec3, basis: FaceBasis): Vec2 {
 /**
  * Project all face loops (outer + holes) from 3D to 2D.
  */
-function projectFaceLoopsTo2D(
+export function projectFaceLoopsTo2D(
   faceLoops3d: { outer: Vec3[]; holes: Vec3[][] },
   basis: FaceBasis
 ): ProjectedLoops {
@@ -406,7 +406,7 @@ function projectFaceLoopsTo2D(
  * @param projected - The 2D projected loops (outer + holes)
  * @returns Normalized loops with tracking of which were reversed
  */
-function normalizeWinding(projected: ProjectedLoops): NormalizedLoops {
+export function normalizeWinding(projected: ProjectedLoops): NormalizedLoops {
   const { outer2d, holes2d } = projected;
 
   // Step 1: Check outer loop winding
@@ -452,7 +452,7 @@ function normalizeWinding(projected: ProjectedLoops): NormalizedLoops {
  * Apply the same reversal to 3D loops that was applied to 2D loops.
  * This keeps 3D and 2D arrays in sync for correct vertex indexing.
  */
-function applyWindingTo3D(
+export function applyWindingTo3D(
   loops3d: { outer: Vec3[]; holes: Vec3[][] },
   outerReversed: boolean,
   holesReversed: boolean[]
@@ -1223,7 +1223,7 @@ function mergeHoleIntoOuter(outer: Vec2[], hole: Vec2[]): Vec2[] {
  *     └──────────────────────────┘
  *     Then bridge H1 - no crossing!
  */
-function bridgeAllHoles(outer: Vec2[], holes: Vec2[][]): Vec2[] {
+export function bridgeAllHoles(outer: Vec2[], holes: Vec2[][]): Vec2[] {
   if (holes.length === 0) {
     return outer;
   }
@@ -6617,11 +6617,7 @@ export {
     extractFaceBounds,
     extractFaceBoundsWithCurves,
     computeFaceBasisFromStepFace,
-    projectFaceLoopsTo2D,
-    normalizeWinding,
-    applyWindingTo3D,
     validateTopology,
-    bridgeAllHoles,
     tryTessellateCurvedSurface,
 };
 

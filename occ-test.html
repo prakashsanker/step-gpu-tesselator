@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>OpenCascade.js Checkpoint 1</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 20px;
+    }
+    #output {
+      white-space: pre-wrap;
+      background: #2d2d2d;
+      padding: 15px;
+      border-radius: 5px;
+      margin-top: 20px;
+    }
+    .success { color: #4ec9b0; }
+    .error { color: #f44747; }
+    .info { color: #9cdcfe; }
+    button {
+      background: #0e639c;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      cursor: pointer;
+      font-size: 14px;
+      margin-right: 10px;
+    }
+    button:hover {
+      background: #1177bb;
+    }
+    input[type="file"] {
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+  <h1>OpenCascade.js - Checkpoints</h1>
+
+  <div>
+    <input type="file" id="file-input" accept=".step,.stp,.STEP,.STP" />
+    <button id="run-cp1">Run Checkpoint 1</button>
+    <button id="run-cp2">Run Checkpoint 2</button>
+    <button id="run-cp3">Run Checkpoint 3</button>
+    <button id="run-cp4">Run Checkpoint 4</button>
+  </div>
+
+  <div id="render-container" style="width: 600px; height: 400px; margin-top: 20px;"></div>
+
+  <div id="output">Waiting for file...</div>
+
+  <script type="module">
+    import { runCheckpoint1, runCheckpoint2, runCheckpoint3, runCheckpoint4 } from './src/occ-test.ts';
+
+    const output = document.getElementById('output');
+    const fileInput = document.getElementById('file-input');
+    const runCP1Button = document.getElementById('run-cp1');
+    const runCP2Button = document.getElementById('run-cp2');
+    const runCP3Button = document.getElementById('run-cp3');
+    const runCP4Button = document.getElementById('run-cp4');
+
+    function log(message, type = 'info') {
+      const line = document.createElement('div');
+      line.className = type;
+      line.textContent = message;
+      output.appendChild(line);
+      console.log(message);
+    }
+
+    function clearOutput() {
+      output.innerHTML = '';
+    }
+
+    async function getFileContent() {
+      const file = fileInput.files?.[0];
+      if (!file) {
+        log('Please select a STEP file first', 'error');
+        return null;
+      }
+      clearOutput();
+      log(`Loading file: ${file.name}`, 'info');
+      const content = await file.text();
+      log(`File size: ${content.length} bytes`, 'info');
+      log('', 'info');
+      return content;
+    }
+
+    runCP1Button.addEventListener('click', async () => {
+      const content = await getFileContent();
+      if (!content) return;
+
+      try {
+        const result = await runCheckpoint1(content);
+
+        log('', 'info');
+        if (result.success) {
+          log(`✓ CHECKPOINT 1 PASSED`, 'success');
+          log(`  Face count: ${result.faceCount}`, 'success');
+        } else if (result.error) {
+          log(`✗ CHECKPOINT 1 FAILED`, 'error');
+          log(`  Error: ${result.error}`, 'error');
+        } else {
+          log(`✗ CHECKPOINT 1 FAILED`, 'error');
+          log(`  Expected 6 faces, got ${result.faceCount}`, 'error');
+        }
+      } catch (err) {
+        log(`Error: ${err.message}`, 'error');
+        console.error(err);
+      }
+    });
+
+    runCP2Button.addEventListener('click', async () => {
+      const content = await getFileContent();
+      if (!content) return;
+
+      try {
+        const result = await runCheckpoint2(content);
+
+        log('', 'info');
+        if (result.success) {
+          log(`✓ CHECKPOINT 2 PASSED`, 'success');
+          log(`  Surfaces extracted: ${result.surfaces.length}`, 'success');
+          for (const s of result.surfaces) {
+            log(`    Face ${s.faceIndex}: ${s.surfaceType} UV=[${s.uvBounds.uMin.toFixed(2)},${s.uvBounds.uMax.toFixed(2)}]x[${s.uvBounds.vMin.toFixed(2)},${s.uvBounds.vMax.toFixed(2)}]`, 'success');
+          }
+        } else if (result.error) {
+          log(`✗ CHECKPOINT 2 FAILED`, 'error');
+          log(`  Error: ${result.error}`, 'error');
+        } else {
+          log(`✗ CHECKPOINT 2 FAILED`, 'error');
+          log(`  Surfaces: ${result.surfaces.length}`, 'error');
+          for (const s of result.surfaces) {
+            log(`    Face ${s.faceIndex}: ${s.surfaceType}`, 'error');
+          }
+        }
+      } catch (err) {
+        log(`Error: ${err.message}`, 'error');
+        console.error(err);
+      }
+    });
+
+    runCP3Button.addEventListener('click', async () => {
+      const content = await getFileContent();
+      if (!content) return;
+
+      try {
+        const result = await runCheckpoint3(content);
+
+        log('', 'info');
+        if (result.success) {
+          log(`✓ CHECKPOINT 3 PASSED`, 'success');
+          log(`  Faces with edges extracted: ${result.faces.length}`, 'success');
+          for (const f of result.faces) {
+            const edgeTypes = f.outerLoop.map(e => e.curveType).join(', ');
+            log(`    Face ${f.faceIndex}: ${f.surfaceType}, ${f.outerLoop.length} edges [${edgeTypes}]`, 'success');
+            if (f.outerLoop.length > 0) {
+              const first = f.outerLoop[0];
+              log(`      Edge 0: (${first.startPoint.x.toFixed(2)}, ${first.startPoint.y.toFixed(2)}, ${first.startPoint.z.toFixed(2)}) → (${first.endPoint.x.toFixed(2)}, ${first.endPoint.y.toFixed(2)}, ${first.endPoint.z.toFixed(2)})`, 'success');
+            }
+          }
+        } else if (result.error) {
+          log(`✗ CHECKPOINT 3 FAILED`, 'error');
+          log(`  Error: ${result.error}`, 'error');
+        } else {
+          log(`✗ CHECKPOINT 3 FAILED`, 'error');
+          log(`  Faces: ${result.faces.length}`, 'error');
+          for (const f of result.faces) {
+            const edgeTypes = f.outerLoop.map(e => e.curveType).join(', ');
+            log(`    Face ${f.faceIndex}: ${f.surfaceType}, ${f.outerLoop.length} edges [${edgeTypes}]`, 'error');
+          }
+        }
+      } catch (err) {
+        log(`Error: ${err.message}`, 'error');
+        console.error(err);
+      }
+    });
+
+    runCP4Button.addEventListener('click', async () => {
+      const content = await getFileContent();
+      if (!content) return;
+
+      try {
+        const result = await runCheckpoint4(content);
+
+        log('', 'info');
+        if (result.success) {
+          log(`✓ CHECKPOINT 4 PASSED`, 'success');
+          log(`  Vertices: ${result.vertexCount}`, 'success');
+          log(`  Triangles: ${result.triangleCount}`, 'success');
+          log(`  Mesh rendered in container above`, 'success');
+        } else if (result.error) {
+          log(`✗ CHECKPOINT 4 FAILED`, 'error');
+          log(`  Error: ${result.error}`, 'error');
+        } else {
+          log(`✗ CHECKPOINT 4 FAILED`, 'error');
+          log(`  Vertices: ${result.vertexCount}, Triangles: ${result.triangleCount}`, 'error');
+        }
+      } catch (err) {
+        log(`Error: ${err.message}`, 'error');
+        console.error(err);
+      }
+    });
+  </script>
+</body>
+</html>
