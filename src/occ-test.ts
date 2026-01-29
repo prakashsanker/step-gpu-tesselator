@@ -1765,6 +1765,36 @@ async function loadStepFile(fileContent: string, fileName: string): Promise<Step
           }
         }
 
+        // === CHECK FOR XCAFPrs_DocumentExplorer ===
+        // This is the canonical way to iterate XCAF documents with colors
+        console.log('\n=== XCAFPrs_DocumentExplorer Check ===');
+        const xcafPrsAPIs = Object.keys(oc).filter(k => k.includes('XCAFPrs'));
+        console.log('[XCAFPrs] Available XCAFPrs APIs:', xcafPrsAPIs.length > 0 ? xcafPrsAPIs.join(', ') : 'NONE');
+
+        if (oc.XCAFPrs_DocumentExplorer) {
+          console.log('[XCAFPrs] XCAFPrs_DocumentExplorer IS available!');
+          try {
+            // Check constructor and methods
+            const explorerProto = Object.getOwnPropertyNames(oc.XCAFPrs_DocumentExplorer.prototype || {});
+            console.log('[XCAFPrs] XCAFPrs_DocumentExplorer.prototype methods:', explorerProto.join(', '));
+
+            // Try to create an instance with the document
+            // XCAFPrs_DocumentExplorer typically takes (Handle<TDocStd_Document>, XCAFPrs_DocumentExplorerFlags, XCAFPrs_Style)
+            // or just (Handle<TDocStd_Document>)
+            const explorerConstructors = Object.keys(oc).filter(k => k.startsWith('XCAFPrs_DocumentExplorer'));
+            console.log('[XCAFPrs] DocumentExplorer constructors:', explorerConstructors.join(', '));
+          } catch (e) {
+            console.log('[XCAFPrs] Error inspecting XCAFPrs_DocumentExplorer:', e);
+          }
+        } else {
+          console.log('[XCAFPrs] XCAFPrs_DocumentExplorer is NOT directly available');
+
+          // Check if it's available through a different pattern
+          const xcafPrsStyles = Object.keys(oc).filter(k => k.includes('XCAFPrs_Style'));
+          console.log('[XCAFPrs] XCAFPrs_Style APIs:', xcafPrsStyles.length > 0 ? xcafPrsStyles.join(', ') : 'NONE');
+        }
+        console.log('=== End XCAFPrs Check ===\n');
+
         // Get all shapes from the document
         // TDF_LabelSequence may not be available in this build, try alternatives
         let labelsLength = 0;
