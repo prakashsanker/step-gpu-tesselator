@@ -1377,8 +1377,11 @@ function buildShapeColorMap(
     }
   };
 
-  // DEBUG: List available methods on shapeTool and colorTool
-  console.log('[ShapeColorMap] shapeTool methods:', Object.keys(shapeTool).filter(k => typeof shapeTool[k] === 'function').slice(0, 30));
+  // DEBUG: List available methods on shapeTool and colorTool (use prototype)
+  const shapeToolProto = Object.getOwnPropertyNames(Object.getPrototypeOf(shapeTool) || {}).filter(k => typeof shapeTool[k] === 'function');
+  console.log('[ShapeColorMap] shapeTool prototype methods:', shapeToolProto.join(', '));
+  console.log('[ShapeColorMap] shapeTool has Search:', typeof shapeTool.Search === 'function');
+  console.log('[ShapeColorMap] shapeTool has Search_1:', typeof shapeTool.Search_1 === 'function');
   console.log('[ShapeColorMap] colorTool methods:', Object.keys(colorTool).filter(k => typeof colorTool[k] === 'function').slice(0, 30));
 
   // NEW: Try to get the main label and traverse from there
@@ -1455,28 +1458,59 @@ function buildShapeColorMap(
       }
 
       // If direct shape lookup fails, try finding the label for this shape
+      // occt-import-js uses shapeTool->Search() which is the correct approach
       if (!solidColor && shapeTool) {
-        // FindShape signature: (shape, out_label, findInstance) - 3 args with output param
-        // Try different FindShape variants
-        for (const findMethodName of ['FindShape', 'FindShape_1', 'FindShape_2']) {
-          if (typeof shapeTool[findMethodName] === 'function') {
+        // Try Search method first (like occt-import-js does)
+        // Search signature: (shape, out_label) → bool - finds label for exact shape match
+        for (const searchMethodName of ['Search', 'Search_1', 'Search_2']) {
+          if (typeof shapeTool[searchMethodName] === 'function') {
             try {
-              // Create output label - FindShape fills this with the result
               const solidLabel = new oc.TDF_Label();
-              // Call with 3 args: shape, output label, findInstance flag
-              const found = shapeTool[findMethodName](solid, solidLabel, false);
+              const found = shapeTool[searchMethodName](solid, solidLabel);
               if (found && solidLabel && !solidLabel.IsNull()) {
                 solidColor = getLabelColor(solidLabel);
                 if (solidColor && solidIndex < 3) {
-                  console.log(`[ShapeColorMap] Solid ${solidIndex} found color via ${findMethodName} label lookup`);
+                  console.log(`[ShapeColorMap] Solid ${solidIndex} found color via ${searchMethodName} label lookup`);
                 }
                 break;
               } else if (solidIndex === 0) {
-                console.log(`[ShapeColorMap] Solid 0: ${findMethodName} returned found=${found}, label null/empty`);
+                console.log(`[ShapeColorMap] Solid 0: ${searchMethodName} returned found=${found}`);
               }
-            } catch (e) {
+            } catch (e: any) {
               if (solidIndex === 0) {
-                console.log(`[ShapeColorMap] Solid 0: ${findMethodName} threw error:`, e);
+                console.log(`[ShapeColorMap] Solid 0: ${searchMethodName} error: ${e.message || e}`);
+              }
+            }
+          }
+        }
+
+        // Fallback to FindShape variants if Search didn't work
+        if (!solidColor) {
+          for (const findMethodName of ['FindShape', 'FindShape_1', 'FindShape_2']) {
+            if (typeof shapeTool[findMethodName] === 'function') {
+              try {
+                const solidLabel = new oc.TDF_Label();
+                // Try 2-arg signature first (shape, out_label)
+                let found = false;
+                try {
+                  found = shapeTool[findMethodName](solid, solidLabel);
+                } catch (e2) {
+                  // Try 3-arg signature (shape, out_label, findInstance)
+                  try {
+                    found = shapeTool[findMethodName](solid, solidLabel, false);
+                  } catch (e3) {
+                    // Neither worked
+                  }
+                }
+                if (found && solidLabel && !solidLabel.IsNull()) {
+                  solidColor = getLabelColor(solidLabel);
+                  if (solidColor && solidIndex < 3) {
+                    console.log(`[ShapeColorMap] Solid ${solidIndex} found color via ${findMethodName}`);
+                  }
+                  break;
+                }
+              } catch (e) {
+                // Silent
               }
             }
           }
