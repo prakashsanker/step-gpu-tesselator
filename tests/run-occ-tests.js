@@ -872,6 +872,100 @@ async function testAP214StepnetFiles(page) {
 }
 
 /**
+ * Test Suite: AP224 Manufacturing Features Files
+ * Files from steptools.com AP224 collection (RPTS MP 6.0, RAMP)
+ */
+async function testAP224ManufacturingFiles(page) {
+    log('\n[Suite] AP224 Manufacturing Features Files', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const tests = [
+        {
+            name: 'ap224_995277945 (RAMP)',
+            path: 'step-examples/external/steptools-ap224/ap224_995277945.stp',
+            minVertices: 100,
+            minTriangles: 100,
+        },
+        {
+            name: 'ap224_995288709 (RAMP)',
+            path: 'step-examples/external/steptools-ap224/ap224_995288709.stp',
+            minVertices: 100,
+            minTriangles: 100,
+        },
+        {
+            name: 'ap224_995315479 (RAMP)',
+            path: 'step-examples/external/steptools-ap224/ap224_995315479.stp',
+            minVertices: 100,
+            minTriangles: 100,
+        },
+        {
+            name: 'ap224_995602415 (RAMP)',
+            path: 'step-examples/external/steptools-ap224/ap224_995602415.stp',
+            minVertices: 50,
+            minTriangles: 50,
+        },
+        {
+            name: 'ap224_997423743 (RAMP)',
+            path: 'step-examples/external/steptools-ap224/ap224_997423743.stp',
+            minVertices: 100,
+            minTriangles: 100,
+        },
+        {
+            name: 'ap224_997865309 (RAMP)',
+            path: 'step-examples/external/steptools-ap224/ap224_997865309.stp',
+            minVertices: 100,
+            minTriangles: 100,
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            const result = await page.evaluate(async (stepText) => {
+                return await window.testHarness.parseStep(stepText);
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            const vertexCount = result.mesh.vertexCount;
+            const triangleCount = result.mesh.triangleCount;
+
+            const verticesOk = vertexCount >= test.minVertices;
+            const trianglesOk = triangleCount >= test.minTriangles;
+
+            if (verticesOk && trianglesOk) {
+                logTest(test.name, true, `${vertexCount} vertices, ${triangleCount} triangles, ${result.timing.total.toFixed(0)}ms`);
+                passed++;
+            } else {
+                const issues = [];
+                if (!verticesOk) issues.push(`expected >= ${test.minVertices} vertices, got ${vertexCount}`);
+                if (!trianglesOk) issues.push(`expected >= ${test.minTriangles} triangles, got ${triangleCount}`);
+                logTest(test.name, false, issues.join('; '));
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
+/**
  * Test Suite: Comparison with occt-import-js
  */
 async function testComparisonWithOcctImport(page) {
@@ -1013,6 +1107,7 @@ async function main() {
             testHolesAndComplexFaces,
             testExternalRealWorldFiles,
             testAP214StepnetFiles,
+            testAP224ManufacturingFiles,
             testComparisonWithOcctImport,
         ];
 
