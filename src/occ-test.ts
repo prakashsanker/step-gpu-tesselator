@@ -967,7 +967,8 @@ function buildShapeColorMap(
   oc: any,
   shape: any,
   shapeToolInput: any,
-  colorToolInput: any
+  colorToolInput: any,
+  docHandle?: any  // Optional: Handle_TDocStd_Document for XCAFPrs_DocumentExplorer
 ): Map<number, RGBColor> {
   const faceColorMap = new Map<number, RGBColor>();
 
@@ -975,6 +976,179 @@ function buildShapeColorMap(
     console.log('[ShapeColorMap] Missing shapeTool or colorTool');
     return faceColorMap;
   }
+
+  // === PRIMARY APPROACH: Use XCAFPrs_DocumentExplorer ===
+  // This is the canonical way to iterate XCAF documents with colors
+  if (docHandle && oc.XCAFPrs_DocumentExplorer) {
+    console.log('[ShapeColorMap] Trying XCAFPrs_DocumentExplorer approach...');
+    try {
+      let explorer = null;
+      let explorerInitialized = false;
+
+      // Try different constructors
+      // XCAFPrs_DocumentExplorer_1: default constructor, then Init
+      // XCAFPrs_DocumentExplorer_2: takes document handle
+      // XCAFPrs_DocumentExplorer_3: takes document handle + flags
+      if (oc.XCAFPrs_DocumentExplorer_2) {
+        try {
+          explorer = new oc.XCAFPrs_DocumentExplorer_2(docHandle);
+          explorerInitialized = true;
+          console.log('[ShapeColorMap] Created explorer via XCAFPrs_DocumentExplorer_2');
+        } catch (e) {
+          console.log('[ShapeColorMap] XCAFPrs_DocumentExplorer_2 failed:', e);
+        }
+      }
+
+      if (!explorerInitialized && oc.XCAFPrs_DocumentExplorer_1) {
+        try {
+          explorer = new oc.XCAFPrs_DocumentExplorer_1();
+          // Init_1 or Init_2 to initialize with document
+          if (explorer.Init_1) {
+            explorer.Init_1(docHandle);
+            explorerInitialized = true;
+            console.log('[ShapeColorMap] Created explorer via XCAFPrs_DocumentExplorer_1 + Init_1');
+          } else if (explorer.Init_2) {
+            explorer.Init_2(docHandle);
+            explorerInitialized = true;
+            console.log('[ShapeColorMap] Created explorer via XCAFPrs_DocumentExplorer_1 + Init_2');
+          }
+        } catch (e) {
+          console.log('[ShapeColorMap] XCAFPrs_DocumentExplorer_1 failed:', e);
+        }
+      }
+
+      if (explorerInitialized && explorer) {
+        let nodeCount = 0;
+        let nodesWithColor = 0;
+        let facesColored = 0;
+
+        // Iterate through the document
+        while (explorer.More()) {
+          nodeCount++;
+          try {
+            // Get the current node - returns XCAFPrs_DocumentNode
+            const current = explorer.Current_1 ? explorer.Current_1() : explorer.Current_2();
+
+            if (current) {
+              // XCAFPrs_DocumentNode has: Id (label), LocalTrsf, Location, Style, etc.
+              // Try to get the style which contains color info
+              let style = null;
+              let nodeShape = null;
+
+              // Get style - XCAFPrs_Style contains color information
+              if (current.Style) {
+                style = current.Style();
+              }
+
+              // Get the shape from the node
+              if (current.RefLabel) {
+                const refLabel = current.RefLabel();
+                if (shapeToolInput.GetShape) {
+                  nodeShape = shapeToolInput.GetShape(refLabel);
+                }
+              } else if (current.Label) {
+                const label = current.Label();
+                if (shapeToolInput.GetShape) {
+                  nodeShape = shapeToolInput.GetShape(label);
+                }
+              } else if (current.Id) {
+                const label = current.Id();
+                if (shapeToolInput.GetShape) {
+                  nodeShape = shapeToolInput.GetShape(label);
+                }
+              }
+
+              // Extract color from style
+              let nodeColor: RGBColor | null = null;
+              if (style) {
+                // XCAFPrs_Style has GetColorSurf, GetColorCurv, GetColorSurfRGBA, etc.
+                try {
+                  if (style.IsSetColorSurf && style.IsSetColorSurf()) {
+                    const surfColor = style.GetColorSurfRGBA ? style.GetColorSurfRGBA() : style.GetColorSurf();
+                    if (surfColor) {
+                      if (surfColor.GetRGB) {
+                        const rgb = surfColor.GetRGB();
+                        nodeColor = { r: rgb.Red(), g: rgb.Green(), b: rgb.Blue() };
+                      } else {
+                        nodeColor = { r: surfColor.Red(), g: surfColor.Green(), b: surfColor.Blue() };
+                      }
+                    }
+                  }
+                } catch (styleErr) {
+                  // Try alternative methods
+                }
+
+                // Fallback to curve color if surface color not set
+                if (!nodeColor) {
+                  try {
+                    if (style.IsSetColorCurv && style.IsSetColorCurv()) {
+                      const curvColor = style.GetColorCurv();
+                      if (curvColor) {
+                        nodeColor = { r: curvColor.Red(), g: curvColor.Green(), b: curvColor.Blue() };
+                      }
+                    }
+                  } catch (styleErr) {
+                    // No curve color
+                  }
+                }
+              }
+
+              // If we have a color and shape, map all faces
+              if (nodeColor && nodeShape && !nodeShape.IsNull()) {
+                nodesWithColor++;
+
+                // Iterate faces in this shape
+                const faceExplorer = new oc.TopExp_Explorer_2(
+                  nodeShape,
+                  oc.TopAbs_ShapeEnum.TopAbs_FACE,
+                  oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                );
+
+                while (faceExplorer.More()) {
+                  const face = faceExplorer.Current();
+                  const hashCode = face.HashCode(2147483647);
+                  if (!faceColorMap.has(hashCode)) {
+                    faceColorMap.set(hashCode, nodeColor);
+                    facesColored++;
+                  }
+                  faceExplorer.Next();
+                }
+              }
+
+              if (nodeCount <= 5) {
+                const depth = explorer.CurrentDepth ? explorer.CurrentDepth() : -1;
+                console.log(`[ShapeColorMap] Node ${nodeCount}: depth=${depth}, hasColor=${!!nodeColor}, hasShape=${!!(nodeShape && !nodeShape.IsNull())}`);
+              }
+            }
+          } catch (nodeErr) {
+            if (nodeCount <= 3) {
+              console.log(`[ShapeColorMap] Error processing node ${nodeCount}:`, nodeErr);
+            }
+          }
+
+          explorer.Next();
+        }
+
+        console.log(`[ShapeColorMap] XCAFPrs_DocumentExplorer: ${nodeCount} nodes, ${nodesWithColor} with colors, ${facesColored} faces colored`);
+
+        if (faceColorMap.size > 0) {
+          console.log(`[ShapeColorMap] SUCCESS: XCAFPrs_DocumentExplorer extracted ${faceColorMap.size} face colors`);
+          return faceColorMap; // Return early if we got colors
+        }
+      }
+    } catch (explorerErr) {
+      console.log('[ShapeColorMap] XCAFPrs_DocumentExplorer failed:', explorerErr);
+    }
+  } else {
+    if (!docHandle) {
+      console.log('[ShapeColorMap] No docHandle provided for XCAFPrs_DocumentExplorer');
+    }
+    if (!oc.XCAFPrs_DocumentExplorer) {
+      console.log('[ShapeColorMap] XCAFPrs_DocumentExplorer not available');
+    }
+  }
+
+  // === FALLBACK APPROACHES below ===
 
   // colorTool and shapeTool might be Handles - try to unwrap them
   let colorTool = colorToolInput;
@@ -1552,6 +1726,7 @@ async function loadStepFile(fileContent: string, fileName: string): Promise<Step
   let colorTool: any = null;
   let shapeTool: any = null;
   let doc: any = null;
+  let xcafDocHandle: any = null;  // Handle for XCAFPrs_DocumentExplorer
 
   // Try XCAF reader first (supports colors)
   const hasXCAF = oc.STEPCAFControl_Reader_1 || oc.STEPCAFControl_Reader;
@@ -1570,6 +1745,7 @@ async function loadStepFile(fileContent: string, fileName: string): Promise<Step
         throw new Error('Failed to create XCAF document');
       }
       doc = docHandle.get();
+      xcafDocHandle = docHandle;  // Store for XCAFPrs_DocumentExplorer
 
       // Create XCAF STEP reader
       let cafReader;
@@ -2046,7 +2222,8 @@ async function loadStepFile(fileContent: string, fileName: string): Promise<Step
   diagnoseXCAFColorExtraction(oc, shape, colorTool, shapeTool);
 
   // Build shape color map from XCAF labels for color propagation
-  const shapeColorMap = buildShapeColorMap(oc, shape, shapeTool, colorTool);
+  // Pass xcafDocHandle to enable XCAFPrs_DocumentExplorer approach
+  const shapeColorMap = buildShapeColorMap(oc, shape, shapeTool, colorTool, xcafDocHandle);
 
   // IMPORTANT: Unwrap colorTool and shapeTool handles before returning
   // The tools from XCAFDoc_DocumentTool are Handles - getFaceColor needs the actual tool
