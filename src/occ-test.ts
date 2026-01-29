@@ -1210,32 +1210,50 @@ function buildShapeColorMap(
   let colorsFoundViaLabel = 0;
 
   // Helper to get color from a shape directly
-  // Shape-based GetColor methods: GetColor_6, GetColor_7, GetColor_8
-  // Signature: (shape, colorType, out_color) → 3 args, returns bool
+  // Shape-based GetColor methods have DIFFERENT output types:
+  // - GetColor_6: (shape, colorType, out_TDF_Label) → returns color LABEL
+  // - GetColor_7: (shape, colorType, out_Quantity_Color) → returns RGB color (what we need!)
+  // - GetColor_8: (shape, colorType, out_Quantity_ColorRGBA) → returns RGBA color
   let shapeColorAttempts = 0;
   let shapeColorErrors: string[] = [];
 
   const getShapeColor = (shape: any): RGBColor | null => {
     if (!shape || shape.IsNull()) return null;
 
-    const color = new oc.Quantity_Color_1();
     // XCAFDoc_ColorType: 0=Gen, 1=Surf, 2=Curv
     for (const colorType of [1, 0, 2]) {
-      // Try shape-based GetColor variants (GetColor_6, GetColor_7, GetColor_8 are shape-based)
-      for (const methodName of ['GetColor_6', 'GetColor_7', 'GetColor_8']) {
-        try {
-          if (typeof colorTool[methodName] === 'function') {
-            shapeColorAttempts++;
-            const hasColor = colorTool[methodName](shape, colorType, color);
-            if (hasColor) {
-              colorsFoundViaShape++;
-              return { r: color.Red(), g: color.Green(), b: color.Blue() };
-            }
+      // Try GetColor_7 first - it takes Quantity_Color as output
+      try {
+        if (typeof colorTool.GetColor_7 === 'function') {
+          const color = new oc.Quantity_Color_1();
+          shapeColorAttempts++;
+          const hasColor = colorTool.GetColor_7(shape, colorType, color);
+          if (hasColor) {
+            colorsFoundViaShape++;
+            return { r: color.Red(), g: color.Green(), b: color.Blue() };
           }
-        } catch (e: any) {
-          if (shapeColorErrors.length < 3) {
-            shapeColorErrors.push(`${methodName}(colorType=${colorType}): ${e.message || e}`);
+        }
+      } catch (e: any) {
+        if (shapeColorErrors.length < 3) {
+          shapeColorErrors.push(`GetColor_7(colorType=${colorType}): ${e.message || e}`);
+        }
+      }
+
+      // Fallback to GetColor_8 with Quantity_ColorRGBA if GetColor_7 didn't work
+      try {
+        if (typeof colorTool.GetColor_8 === 'function' && oc.Quantity_ColorRGBA_1) {
+          const colorRGBA = new oc.Quantity_ColorRGBA_1();
+          shapeColorAttempts++;
+          const hasColor = colorTool.GetColor_8(shape, colorType, colorRGBA);
+          if (hasColor) {
+            colorsFoundViaShape++;
+            const rgb = colorRGBA.GetRGB();
+            return { r: rgb.Red(), g: rgb.Green(), b: rgb.Blue() };
           }
+        }
+      } catch (e: any) {
+        if (shapeColorErrors.length < 6) {
+          shapeColorErrors.push(`GetColor_8(colorType=${colorType}): ${e.message || e}`);
         }
       }
     }
@@ -1460,26 +1478,25 @@ function buildShapeColorMap(
       // If direct shape lookup fails, try finding the label for this shape
       // occt-import-js uses shapeTool->Search() which is the correct approach
       if (!solidColor && shapeTool) {
-        // Try Search method first (like occt-import-js does)
-        // Search signature: (shape, out_label) → bool - finds label for exact shape match
-        for (const searchMethodName of ['Search', 'Search_1', 'Search_2']) {
-          if (typeof shapeTool[searchMethodName] === 'function') {
-            try {
-              const solidLabel = new oc.TDF_Label();
-              const found = shapeTool[searchMethodName](solid, solidLabel);
-              if (found && solidLabel && !solidLabel.IsNull()) {
-                solidColor = getLabelColor(solidLabel);
-                if (solidColor && solidIndex < 3) {
-                  console.log(`[ShapeColorMap] Solid ${solidIndex} found color via ${searchMethodName} label lookup`);
-                }
-                break;
-              } else if (solidIndex === 0) {
-                console.log(`[ShapeColorMap] Solid 0: ${searchMethodName} returned found=${found}`);
+        // Try Search method (like occt-import-js does)
+        // Search signature in emscripten needs ALL 5 args (no default params):
+        // Search(shape, out_label, findInstance, findComponent, findSubShape) → bool
+        if (typeof shapeTool.Search === 'function') {
+          try {
+            const solidLabel = new oc.TDF_Label();
+            // Pass all 5 arguments - findInstance=true, findComponent=true, findSubShape=true
+            const found = shapeTool.Search(solid, solidLabel, true, true, true);
+            if (found && solidLabel && !solidLabel.IsNull()) {
+              solidColor = getLabelColor(solidLabel);
+              if (solidColor && solidIndex < 3) {
+                console.log(`[ShapeColorMap] Solid ${solidIndex} found color via Search`);
               }
-            } catch (e: any) {
-              if (solidIndex === 0) {
-                console.log(`[ShapeColorMap] Solid 0: ${searchMethodName} error: ${e.message || e}`);
-              }
+            } else if (solidIndex === 0) {
+              console.log(`[ShapeColorMap] Solid 0: Search returned found=${found}, label.IsNull=${solidLabel?.IsNull?.()}`);
+            }
+          } catch (e: any) {
+            if (solidIndex === 0) {
+              console.log(`[ShapeColorMap] Solid 0: Search(5 args) error: ${e.message || e}`);
             }
           }
         }
