@@ -743,6 +743,135 @@ async function testExternalRealWorldFiles(page) {
 }
 
 /**
+ * Test Suite: AP214 STEPnet Files
+ * Files from steptools.com AP214 collection (various CAD sources)
+ */
+async function testAP214StepnetFiles(page) {
+    log('\n[Suite] AP214 STEPnet Files (multi-CAD sources)', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const tests = [
+        // AS1 assembly model from various CAD systems
+        {
+            name: 'as1-ac-214 (AutoCAD)',
+            path: 'step-examples/external/steptools-ap214/as1-ac-214.stp',
+            minVertices: 100,
+            minTriangles: 100,
+        },
+        {
+            name: 'as1-ec-214 (Euclid)',
+            path: 'step-examples/external/steptools-ap214/as1-ec-214.stp',
+            minVertices: 100,
+            minTriangles: 100,
+        },
+        {
+            name: 'as1-md-214 (MicroStation)',
+            path: 'step-examples/external/steptools-ap214/as1-md-214.stp',
+            minVertices: 100,
+            minTriangles: 100,
+        },
+        // NOTE: as1-tc-214 (Theorem Solutions) skipped - causes stack overflow, needs investigation
+        {
+            name: 'as1-ug-214 (Unigraphics)',
+            path: 'step-examples/external/steptools-ap214/as1-ug-214.stp',
+            minVertices: 100,
+            minTriangles: 100,
+        },
+        // D2 and F1 models from debis
+        {
+            name: 'd2-db-214 (debis)',
+            path: 'step-examples/external/steptools-ap214/d2-db-214.stp',
+            minVertices: 20,
+            minTriangles: 20,
+        },
+        {
+            name: 'f1-db-214 (debis)',
+            path: 'step-examples/external/steptools-ap214/f1-db-214.stp',
+            minVertices: 100,
+            minTriangles: 100,
+        },
+        // IO1 model from various CAD systems
+        {
+            name: 'io1-ac-214 (AutoCAD)',
+            path: 'step-examples/external/steptools-ap214/io1-ac-214.stp',
+            minVertices: 50,
+            minTriangles: 50,
+        },
+        {
+            name: 'io1-ca-214 (CADDS)',
+            path: 'step-examples/external/steptools-ap214/io1-ca-214.stp',
+            minVertices: 50,
+            minTriangles: 50,
+        },
+        {
+            name: 'io1-ec-214 (Euclid)',
+            path: 'step-examples/external/steptools-ap214/io1-ec-214.stp',
+            minVertices: 50,
+            minTriangles: 50,
+        },
+        {
+            name: 'io1-md-214 (MicroStation)',
+            path: 'step-examples/external/steptools-ap214/io1-md-214.stp',
+            minVertices: 50,
+            minTriangles: 50,
+        },
+        // NOTE: io1-tc-214 (Theorem Solutions) skipped - causes stack overflow, needs investigation
+        {
+            name: 'io1-ug-214 (Unigraphics)',
+            path: 'step-examples/external/steptools-ap214/io1-ug-214.stp',
+            minVertices: 50,
+            minTriangles: 50,
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            const result = await page.evaluate(async (stepText) => {
+                return await window.testHarness.parseStep(stepText);
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            const vertexCount = result.mesh.vertexCount;
+            const triangleCount = result.mesh.triangleCount;
+
+            const verticesOk = vertexCount >= test.minVertices;
+            const trianglesOk = triangleCount >= test.minTriangles;
+
+            if (verticesOk && trianglesOk) {
+                logTest(test.name, true, `${vertexCount} vertices, ${triangleCount} triangles, ${result.timing.total.toFixed(0)}ms`);
+                passed++;
+            } else {
+                const issues = [];
+                if (!verticesOk) issues.push(`expected >= ${test.minVertices} vertices, got ${vertexCount}`);
+                if (!trianglesOk) issues.push(`expected >= ${test.minTriangles} triangles, got ${triangleCount}`);
+                logTest(test.name, false, issues.join('; '));
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
+/**
  * Test Suite: Comparison with occt-import-js
  */
 async function testComparisonWithOcctImport(page) {
@@ -883,6 +1012,7 @@ async function main() {
             testCurvedSurfaces,
             testHolesAndComplexFaces,
             testExternalRealWorldFiles,
+            testAP214StepnetFiles,
             testComparisonWithOcctImport,
         ];
 
