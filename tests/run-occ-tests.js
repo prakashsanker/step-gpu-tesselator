@@ -623,6 +623,82 @@ async function testHolesAndComplexFaces(page) {
 }
 
 /**
+ * Test Suite: External Real-World STEP Files
+ * Files from steptools.com AP203e2 sample collection (Catia V5 exports)
+ */
+async function testExternalRealWorldFiles(page) {
+    log('\n[Suite] External Real-World Files (steptools.com)', 'blue');
+    let passed = 0;
+    let failed = 0;
+
+    const tests = [
+        {
+            name: '123Block_Color (simple block with colors)',
+            path: 'step-examples/external/steptools/123Block_Color.stp',
+            minVertices: 8,
+            minTriangles: 12,
+        },
+        {
+            name: 'boxy_with_flatness (complex Catia model)',
+            path: 'step-examples/external/steptools/boxy_with_flatness.stp',
+            minVertices: 1000,
+            minTriangles: 1000,
+        },
+        {
+            name: 'boxy_with_perp (complex Catia model)',
+            path: 'step-examples/external/steptools/boxy_with_perp.stp',
+            minVertices: 1000,
+            minTriangles: 1000,
+        },
+    ];
+
+    for (const test of tests) {
+        try {
+            let stepContent;
+            try {
+                stepContent = loadStepFile(test.path);
+            } catch (e) {
+                logTest(test.name, false, `Failed to load file: ${e.message}`);
+                failed++;
+                continue;
+            }
+
+            const result = await page.evaluate(async (stepText) => {
+                return await window.testHarness.parseStep(stepText);
+            }, stepContent);
+
+            if (!result.success) {
+                logTest(test.name, false, result.error);
+                failed++;
+                continue;
+            }
+
+            const vertexCount = result.mesh.vertexCount;
+            const triangleCount = result.mesh.triangleCount;
+
+            const verticesOk = vertexCount >= test.minVertices;
+            const trianglesOk = triangleCount >= test.minTriangles;
+
+            if (verticesOk && trianglesOk) {
+                logTest(test.name, true, `${vertexCount} vertices, ${triangleCount} triangles, ${result.timing.total.toFixed(0)}ms`);
+                passed++;
+            } else {
+                const issues = [];
+                if (!verticesOk) issues.push(`expected >= ${test.minVertices} vertices, got ${vertexCount}`);
+                if (!trianglesOk) issues.push(`expected >= ${test.minTriangles} triangles, got ${triangleCount}`);
+                logTest(test.name, false, issues.join('; '));
+                failed++;
+            }
+        } catch (e) {
+            logTest(test.name, false, e.message);
+            failed++;
+        }
+    }
+
+    return { passed, failed };
+}
+
+/**
  * Test Suite: Comparison with occt-import-js
  */
 async function testComparisonWithOcctImport(page) {
@@ -762,6 +838,7 @@ async function main() {
             testMultiFaceModels,
             testCurvedSurfaces,
             testHolesAndComplexFaces,
+            testExternalRealWorldFiles,
             testComparisonWithOcctImport,
         ];
 
