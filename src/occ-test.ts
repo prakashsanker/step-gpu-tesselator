@@ -59,6 +59,7 @@ import {
   tessellateCone,
   tessellateTorus,
   tessellateBSplineSurface,
+  tessellateTrimmedSurface,
 } from './surface-tessellation';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -1150,6 +1151,19 @@ function buildShapeColorMap(
 
   // === FALLBACK APPROACHES below ===
 
+  // DIAGNOSTIC: Check for static GetShape method
+  console.log('\n=== STATIC METHOD CHECK ===');
+  const shapeToolStaticMethods = Object.keys(oc).filter(k => k.includes('XCAFDoc_ShapeTool') && k.includes('GetShape'));
+  console.log('[Static] XCAFDoc_ShapeTool GetShape methods:', shapeToolStaticMethods.length > 0 ? shapeToolStaticMethods.join(', ') : 'NONE');
+
+  // Check if XCAFDoc_ShapeTool has static methods
+  if (oc.XCAFDoc_ShapeTool) {
+    const staticMethods = Object.getOwnPropertyNames(oc.XCAFDoc_ShapeTool).filter(k => typeof oc.XCAFDoc_ShapeTool[k] === 'function');
+    console.log('[Static] XCAFDoc_ShapeTool class methods:', staticMethods.slice(0, 15).join(', '));
+    console.log('[Static] Has GetShape:', typeof oc.XCAFDoc_ShapeTool.GetShape === 'function');
+    console.log('[Static] Has GetShape_1:', typeof oc.XCAFDoc_ShapeTool.GetShape_1 === 'function');
+  }
+
   // colorTool and shapeTool might be Handles - try to unwrap them
   let colorTool = colorToolInput;
   if (typeof colorToolInput.get === 'function') {
@@ -1353,8 +1367,22 @@ function buildShapeColorMap(
     labelsProcessed++;
 
     try {
-      // Get shape for this label
-      const shape = shapeTool.GetShape(label);
+      // Get shape for this label using STATIC method
+      let shape: any = null;
+
+      // Use static GetShape_1(label, outShape) - 2 args
+      if (oc.XCAFDoc_ShapeTool && typeof oc.XCAFDoc_ShapeTool.GetShape_1 === 'function') {
+        try {
+          const outShape = new oc.TopoDS_Shape();
+          const success = oc.XCAFDoc_ShapeTool.GetShape_1(label, outShape);
+          if (success && outShape && !outShape.IsNull()) {
+            shape = outShape;
+          }
+        } catch (e) {
+          // GetShape_1 failed
+        }
+      }
+
       if (shape && !shape.IsNull()) {
         labelsWithShape++;
       }
@@ -1365,6 +1393,33 @@ function buildShapeColorMap(
       if (!color && shape && !shape.IsNull()) {
         color = getShapeColor(shape);
         colorSource = 'shape';
+      }
+
+      // DIAGNOSTIC: If no color found, try IsSet_2 on shape (limit logging)
+      if (!color && shape && !shape.IsNull() && labelsProcessed <= 20) {
+        for (const colorType of [0, 1, 2]) {
+          if (typeof colorTool.IsSet_2 === 'function') {
+            try {
+              const isSet = colorTool.IsSet_2(shape, colorType);
+              if (isSet) {
+                console.log(`[processLabel] Depth ${depth}: IsSet_2(shape, ${colorType}) = TRUE but getLabelColor/getShapeColor returned null!`);
+
+                // Try GetColor_7 directly
+                if (typeof colorTool.GetColor_7 === 'function') {
+                  const outColor = new oc.Quantity_Color_1();
+                  const hasColor = colorTool.GetColor_7(shape, colorType, outColor);
+                  if (hasColor) {
+                    console.log(`[processLabel] GetColor_7 SUCCESS: RGB(${outColor.Red().toFixed(3)}, ${outColor.Green().toFixed(3)}, ${outColor.Blue().toFixed(3)})`);
+                    color = { r: outColor.Red(), g: outColor.Green(), b: outColor.Blue() };
+                    colorSource = 'IsSet_2+GetColor_7';
+                  }
+                }
+              }
+            } catch (e) {
+              // Silent
+            }
+          }
+        }
       }
 
       if (color) {
@@ -1382,9 +1437,9 @@ function buildShapeColorMap(
         mapFacesToColor(shape, effectiveColor);
       }
 
-      // Traverse children
-      if (oc.TDF_ChildIterator_1) {
-        const childIter = new oc.TDF_ChildIterator_1(label, false);
+      // Traverse children using TDF_ChildIterator_2(label, allLevels)
+      if (oc.TDF_ChildIterator_2) {
+        const childIter = new oc.TDF_ChildIterator_2(label, false);
         while (childIter.More()) {
           processLabel(childIter.Value(), effectiveColor, depth + 1);
           childIter.Next();
@@ -1413,13 +1468,19 @@ function buildShapeColorMap(
       const traverseForColors = (label: any, depth: number) => {
         if (depth > 10) return;
 
-        // Check if this label has a shape
+        // Check if this label has a shape using STATIC GetShape_1(label, outShape)
         let labelShape = null;
         try {
-          if (shapeTool.GetShape) {
-            labelShape = shapeTool.GetShape(label);
+          if (oc.XCAFDoc_ShapeTool?.GetShape_1) {
+            const outShape = new oc.TopoDS_Shape();
+            const success = oc.XCAFDoc_ShapeTool.GetShape_1(label, outShape);
+            if (success && outShape && !outShape.IsNull()) {
+              labelShape = outShape;
+            }
           }
-        } catch (e) {}
+        } catch (e) {
+          // GetShape_1 failed
+        }
 
         // Check if this label has a color
         const labelColor = getLabelColor(label);
@@ -1432,10 +1493,10 @@ function buildShapeColorMap(
           }
         }
 
-        // Traverse children using TDF_ChildIterator
+        // Traverse children using TDF_ChildIterator_2(label, allLevels)
         try {
-          if (oc.TDF_ChildIterator_1) {
-            const childIter = new oc.TDF_ChildIterator_1(label, false);
+          if (oc.TDF_ChildIterator_2) {
+            const childIter = new oc.TDF_ChildIterator_2(label, false);
             while (childIter.More()) {
               traverseForColors(childIter.Value(), depth + 1);
               childIter.Next();
@@ -1584,22 +1645,188 @@ function buildShapeColorMap(
 
     console.log(`[ShapeColorMap] Processing ${labels.Length()} free shapes for face colors...`);
 
+    // DIAGNOSTIC: Examine each free shape label in detail
     for (let i = 1; i <= labels.Length(); i++) {
       const label = labels.Value(i);
+      console.log(`\n=== FREE SHAPE LABEL ${i} ===`);
+
+      // Check label type using STATIC methods on XCAFDoc_ShapeTool
+      try {
+        const ST = oc.XCAFDoc_ShapeTool;
+        const isShape = ST?.IsShape ? ST.IsShape(label) : 'N/A';
+        const isAssembly = ST?.IsAssembly ? ST.IsAssembly(label) : 'N/A';
+        const isComponent = ST?.IsComponent ? ST.IsComponent(label) : 'N/A';
+        const isReference = ST?.IsReference ? ST.IsReference(label) : 'N/A';
+        const isSimpleShape = ST?.IsSimpleShape ? ST.IsSimpleShape(label) : 'N/A';
+        const isCompound = ST?.IsCompound ? ST.IsCompound(label) : 'N/A';
+        const isSubShape = ST?.IsSubShape_1 ? ST.IsSubShape_1(label) : 'N/A';
+
+        console.log(`[Label ${i}] IsShape=${isShape}, IsAssembly=${isAssembly}, IsComponent=${isComponent}`);
+        console.log(`[Label ${i}] IsReference=${isReference}, IsSimpleShape=${isSimpleShape}, IsCompound=${isCompound}, IsSubShape=${isSubShape}`);
+      } catch (e: any) {
+        console.log(`[Label ${i}] Error checking label type: ${e.message || e}`);
+      }
+
+      // Check if label has shape using STATIC GetShape_1(label, outShape)
+      try {
+        let shape = null;
+        if (oc.XCAFDoc_ShapeTool?.GetShape_1) {
+          const outShape = new oc.TopoDS_Shape();
+          const success = oc.XCAFDoc_ShapeTool.GetShape_1(label, outShape);
+          if (success && outShape && !outShape.IsNull()) {
+            shape = outShape;
+          }
+        }
+        const hasShape = shape && !shape.IsNull();
+        if (hasShape) {
+          const shapeType = shape.ShapeType ? shape.ShapeType() : 'unknown';
+          console.log(`[Label ${i}] Has shape, type=${shapeType}`);
+        } else {
+          console.log(`[Label ${i}] No shape (IsNull or undefined)`);
+        }
+      } catch (e: any) {
+        console.log(`[Label ${i}] GetShape_1 error: ${e.message || e}`);
+      }
+
+      // Check if label has direct color
+      const labelColor = getLabelColor(label);
+      console.log(`[Label ${i}] Direct color: ${labelColor ? `RGB(${labelColor.r.toFixed(2)}, ${labelColor.g.toFixed(2)}, ${labelColor.b.toFixed(2)})` : 'none'}`);
+
+      // OPTION 2: Try IsSet_1 and IsSet_2 to check if color IS assigned
+      // IsSet checks if a color attribute exists without retrieving it
+      try {
+        const colorTypes = [
+          { val: 0, name: 'XCAFDoc_ColorGen' },
+          { val: 1, name: 'XCAFDoc_ColorSurf' },
+          { val: 2, name: 'XCAFDoc_ColorCurv' }
+        ];
+
+        for (const ct of colorTypes) {
+          // Try IsSet_1(label, colorType) - label-based
+          if (typeof colorTool.IsSet_1 === 'function') {
+            try {
+              const isSet = colorTool.IsSet_1(label, ct.val);
+              if (isSet) {
+                console.log(`[Label ${i}] IsSet_1(${ct.name}) = TRUE - color IS set!`);
+              }
+            } catch (e: any) {
+              console.log(`[Label ${i}] IsSet_1(${ct.name}) error: ${e.message || e}`);
+            }
+          }
+
+          // Try IsSet_2(shape, colorType) - shape-based
+          if (typeof colorTool.IsSet_2 === 'function') {
+            try {
+              // Get the shape from this label first
+              let labelShape = null;
+              if (oc.XCAFDoc_ShapeTool?.GetShape_1) {
+                const outShape = new oc.TopoDS_Shape();
+                const success = oc.XCAFDoc_ShapeTool.GetShape_1(label, outShape);
+                if (success && outShape && !outShape.IsNull()) {
+                  labelShape = outShape;
+                }
+              }
+
+              if (labelShape && !labelShape.IsNull()) {
+                const isSet = colorTool.IsSet_2(labelShape, ct.val);
+                if (isSet) {
+                  console.log(`[Label ${i}] IsSet_2(shape, ${ct.name}) = TRUE - shape has color!`);
+
+                  // OPTION 3: Try GetColor_7 directly on this XCAF shape
+                  if (typeof colorTool.GetColor_7 === 'function') {
+                    try {
+                      const color = new oc.Quantity_Color_1();
+                      const hasColor = colorTool.GetColor_7(labelShape, ct.val, color);
+                      if (hasColor) {
+                        console.log(`[Label ${i}] GetColor_7(xcafShape, ${ct.name}) = RGB(${color.Red().toFixed(3)}, ${color.Green().toFixed(3)}, ${color.Blue().toFixed(3)})`);
+                      } else {
+                        console.log(`[Label ${i}] GetColor_7(xcafShape, ${ct.name}) returned false despite IsSet=true`);
+                      }
+                    } catch (e: any) {
+                      console.log(`[Label ${i}] GetColor_7 error: ${e.message || e}`);
+                    }
+                  }
+                }
+              }
+            } catch (e: any) {
+              // IsSet_2 failed silently
+            }
+          }
+        }
+      } catch (e: any) {
+        console.log(`[Label ${i}] IsSet diagnostic error: ${e.message || e}`);
+      }
+
+      // Count children using TDF_ChildIterator_2(label, allLevels)
+      // Note: TDF_ChildIterator_1 = default ctor (0 args), TDF_ChildIterator_2 = (label, allLevels)
+      try {
+        if (oc.TDF_ChildIterator_2) {
+          let childCount = 0;
+          const childIter = new oc.TDF_ChildIterator_2(label, false);
+          while (childIter.More()) {
+            childCount++;
+            childIter.Next();
+          }
+          console.log(`[Label ${i}] Child count: ${childCount}`);
+        } else {
+          console.log(`[Label ${i}] TDF_ChildIterator_2 not available`);
+        }
+      } catch (e: any) {
+        console.log(`[Label ${i}] Error counting children: ${e.message || e}`);
+      }
+
       processLabel(label, null, 0);
     }
 
-    console.log(`[ShapeColorMap] Label traversal stats: ${labelsProcessed} processed, ${labelsWithShape} with shapes, ${labelsWithColor} with colors`);
+    console.log(`\n[ShapeColorMap] Label traversal stats: ${labelsProcessed} processed, ${labelsWithShape} with shapes, ${labelsWithColor} with colors`);
 
-    // Also check colorTool's GetColors for any additional colored shapes
+    // DIAGNOSTIC: Check where the 24 colors are stored
+    console.log(`\n=== COLOR LABELS DIAGNOSTIC ===`);
     if (colorTool.GetColors) {
       const colorLabels = new oc.TDF_LabelSequence_1();
       colorTool.GetColors(colorLabels);
-      // Color labels found in document - could be used for additional shape lookups
+      console.log(`[ColorLabels] GetColors returned ${colorLabels.Length()} color labels`);
+
+      // Examine first few color labels
+      for (let i = 1; i <= Math.min(colorLabels.Length(), 5); i++) {
+        const colorLabel = colorLabels.Value(i);
+        console.log(`\n--- Color Label ${i} ---`);
+
+        // Try to get the color from this label
+        const color = getLabelColor(colorLabel);
+        console.log(`[ColorLabel ${i}] Color: ${color ? `RGB(${color.r.toFixed(2)}, ${color.g.toFixed(2)}, ${color.b.toFixed(2)})` : 'none'}`);
+
+        // Check if this color label has a shape using STATIC GetShape_1(label, outShape)
+        try {
+          let shape = null;
+          if (oc.XCAFDoc_ShapeTool?.GetShape_1) {
+            const outShape = new oc.TopoDS_Shape();
+            const success = oc.XCAFDoc_ShapeTool.GetShape_1(colorLabel, outShape);
+            if (success && outShape && !outShape.IsNull()) {
+              shape = outShape;
+            }
+          }
+          const hasShape = shape && !shape.IsNull();
+          console.log(`[ColorLabel ${i}] Has shape: ${hasShape}`);
+        } catch (e) {
+          console.log(`[ColorLabel ${i}] GetShape_1 failed`);
+        }
+
+        // Try GetShapesOfColor - get shapes that have this color
+        try {
+          if (typeof colorTool.GetShapesOfColor === 'function') {
+            const shapesWithColor = new oc.TDF_LabelSequence_1();
+            colorTool.GetShapesOfColor(colorLabel, shapesWithColor);
+            console.log(`[ColorLabel ${i}] Shapes with this color: ${shapesWithColor.Length()}`);
+          }
+        } catch (e: any) {
+          console.log(`[ColorLabel ${i}] GetShapesOfColor failed: ${e.message || e}`);
+        }
+      }
     }
-  } catch (e) {
+  } catch (e: any) {
     // TDF_LabelSequence not available - expected in OpenCascade.js
-    console.log('[ShapeColorMap] TDF_LabelSequence fallback not available (expected)');
+    console.log('[ShapeColorMap] TDF_LabelSequence fallback error:', e.message || e);
   }
 
   // Log summary of what was found
@@ -1758,8 +1985,9 @@ function matchSolidsAndBuildColorMap(
 
 /**
  * Load a STEP file and return the TopoDS_Shape with color information
+ * Accepts either Uint8Array (for large files) or string
  */
-async function loadStepFile(fileContent: string, fileName: string): Promise<StepLoadResult> {
+async function loadStepFile(fileContent: Uint8Array | string, fileName: string): Promise<StepLoadResult> {
   const oc = await initOC();
 
   // Debug APIs logged only when DEBUG_OCC is true
@@ -1770,8 +1998,25 @@ async function loadStepFile(fileContent: string, fileName: string): Promise<Step
       Object.keys(oc).filter(k => k.startsWith('XCAFDoc')).slice(0, 20));
   }
 
-  // Write file to virtual filesystem
-  oc.FS.createDataFile('/', fileName, fileContent, true, true, true);
+  // Convert to Uint8Array if string was passed
+  let fileData: Uint8Array;
+  let fileContentString: string;
+
+  if (typeof fileContent === 'string') {
+    // Legacy string input - convert to Uint8Array
+    const encoder = new TextEncoder();
+    fileData = encoder.encode(fileContent);
+    fileContentString = fileContent;
+  } else {
+    // Uint8Array input (preferred for large files)
+    fileData = fileContent;
+    // Decode to string for STEP color parsing (done lazily later if needed)
+    const decoder = new TextDecoder('utf-8');
+    fileContentString = decoder.decode(fileContent);
+  }
+
+  // Write file to virtual filesystem using writeFile (handles large files better)
+  oc.FS.writeFile('/' + fileName, fileData);
 
   let shape: any = null;
   let colorTool: any = null;
@@ -1834,7 +2079,7 @@ async function loadStepFile(fileContent: string, fileName: string): Promise<Step
       console.log('[XCAF] Reader methods:', readerMethods.filter(m => m.startsWith('Set') || m.startsWith('Get')).join(', '));
 
       // Read file
-      const readResult = cafReader.ReadFile(fileName);
+      const readResult = cafReader.ReadFile('/' + fileName);
       console.log('[XCAF] ReadFile result:', readResult, 'type:', typeof readResult, 'value:', readResult?.value);
 
       // IFSelect_RetDone is typically 1 in OpenCascade (0=RetVoid, 1=RetDone, 2=RetError...)
@@ -2190,7 +2435,7 @@ async function loadStepFile(fileContent: string, fileName: string): Promise<Step
       throw new Error('STEPControl_Reader not found');
     }
 
-    const readResult = reader.ReadFile(fileName);
+    const readResult = reader.ReadFile('/' + fileName);
     logOCC('ReadFile result:', readResult);
 
     // IFSelect_RetDone is typically 0 in OpenCascade
@@ -2199,7 +2444,7 @@ async function loadStepFile(fileContent: string, fileName: string): Promise<Step
                    readResult === 0 ||
                    (typeof readResult === 'object' && (readResult.value === 0 || readResult.value === 1));
     if (!isDone) {
-      oc.FS.unlink(fileName);
+      oc.FS.unlink('/' + fileName);
       const resultValue = typeof readResult === 'object' ? JSON.stringify(readResult) : readResult;
       throw new Error(`Failed to read STEP file: ${resultValue}`);
     }
@@ -2247,21 +2492,21 @@ async function loadStepFile(fileContent: string, fileName: string): Promise<Step
   }
 
   // Clean up
-  oc.FS.unlink(fileName);
+  oc.FS.unlink('/' + fileName);
 
   // Parse colors directly from STEP text as fallback
   logOCC('Parsing colors from STEP text...');
-  const colorEntities = parseStepColors(fileContent);
-  const stepColors = buildFaceColorMap(fileContent, colorEntities);
+  const colorEntities = parseStepColors(fileContentString);
+  const stepColors = buildFaceColorMap(fileContentString, colorEntities);
 
   // Extract face ID order from STEP text (correlates OCC face index to STEP entity ID)
-  const faceIdOrder = extractFaceIdOrder(fileContent);
+  const faceIdOrder = extractFaceIdOrder(fileContentString);
 
   // Build geometry-based color map for more reliable face matching
-  const geometryColorMap = buildGeometryColorMap(fileContent, stepColors);
+  const geometryColorMap = buildGeometryColorMap(fileContentString, stepColors);
 
   // Build solid-level color map for solid-based matching
-  const solidColorMap = buildSolidColorMap(fileContent, colorEntities);
+  const solidColorMap = buildSolidColorMap(fileContentString, colorEntities);
 
   // Build OCC solid face counts for matching (also returns faceToSolid map)
   const { solidMap: occSolidFaceCounts, faceToSolid } = buildOCCSolidFaceCounts(oc, shape);
@@ -2715,6 +2960,15 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
         wireIndex++;
         continue;
       }
+
+      // Count total edges for debugging
+      let totalEdgesInWire = 0;
+      const tempExplorer = new oc.TopExp_Explorer_2(wire, oc.TopAbs_ShapeEnum.TopAbs_EDGE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+      while (tempExplorer.More()) {
+        totalEdgesInWire++;
+        tempExplorer.Next();
+      }
+      console.log(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex}: TopExp_Explorer found ${totalEdgesInWire} edges`);
 
       let edgeIndex = 0;
       while (edgeExplorer.More()) {
@@ -3391,6 +3645,18 @@ async function extractFacesWithEdges(
       // Extract boundary edges
       const { outerLoop, innerLoops } = await extractFaceEdges(oc, face, faceIndex);
 
+      // Debug logging for edge extraction
+      console.log(`[extractFacesWithEdges] Face ${faceIndex}: surfaceType=${surfaceType}, outerLoop=${outerLoop.length} edges, innerLoops=${innerLoops.length}`);
+      if (outerLoop.length === 0) {
+        console.warn(`[extractFacesWithEdges] Face ${faceIndex} has 0 edges in outerLoop!`);
+      } else if (outerLoop.length > 0 && outerLoop.length < 5) {
+        console.log(`[extractFacesWithEdges] Face ${faceIndex} outerLoop edges:`, outerLoop.map(e => ({
+          curveType: e.curveType,
+          start: [e.startPoint.x.toFixed(2), e.startPoint.y.toFixed(2), e.startPoint.z.toFixed(2)],
+          end: [e.endPoint.x.toFixed(2), e.endPoint.y.toFixed(2), e.endPoint.z.toFixed(2)]
+        })));
+      }
+
       // Extract face color using multiple strategies:
       // 1. Try shapeColorMap first (face HashCode lookup - most reliable)
       // 2. Try XCAF direct lookup
@@ -3707,6 +3973,10 @@ async function tessellatePlanarFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   tessellationProfile.occEdgesToPolygon.calls++;
 
   if (outer.length < 3) {
+    console.warn(`[tessellatePlanarFace] Not enough vertices: ${outer.length} (need >= 3). outerLoop has ${face.outerLoop.length} edges`);
+    if (face.outerLoop.length > 0) {
+      console.warn(`[tessellatePlanarFace] First edge:`, JSON.stringify(face.outerLoop[0]));
+    }
     return { vertices: [], triangles: [] };
   }
 
@@ -3882,7 +4152,31 @@ function getFaceTrimLoopsUV(
   const isUPeriodic = ['Cylinder', 'Sphere', 'Cone', 'Torus'].includes(face.surfaceType);
   const isVPeriodic = face.surfaceType === 'Torus';
 
+  // Debug: show outer3d for torus
+  if (face.surfaceType === 'Torus') {
+    console.log(`[getFaceTrimLoopsUV] Torus outer3d has ${outer3d.length} points`);
+    if (outer3d.length > 0) {
+      console.log(`[getFaceTrimLoopsUV] First 5 points: ${outer3d.slice(0, 5).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)})`).join(', ')}`);
+    }
+    console.log(`[getFaceTrimLoopsUV] outerLoop has ${face.outerLoop.length} edges`);
+    face.outerLoop.forEach((e, i) => {
+      console.log(`[getFaceTrimLoopsUV] Edge ${i}: curveType=${e.curveType}, sampledPoints=${e.sampledPoints?.length || 0}`);
+    });
+  }
+
   const uvOuter = projectPointsToUV(oc, sa, outer3d, { wrapU: isUPeriodic, wrapV: isVPeriodic });
+
+  // Debug: show uvOuter for torus
+  if (face.surfaceType === 'Torus') {
+    console.log(`[getFaceTrimLoopsUV] uvOuter has ${uvOuter.length} points after projection`);
+    if (uvOuter.length > 0) {
+      console.log(`[getFaceTrimLoopsUV] UV First 10: ${uvOuter.slice(0, 10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
+      // Also show middle and end
+      const mid = Math.floor(uvOuter.length / 2);
+      console.log(`[getFaceTrimLoopsUV] UV Middle 10 (${mid}): ${uvOuter.slice(mid, mid+10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
+      console.log(`[getFaceTrimLoopsUV] UV Last 10: ${uvOuter.slice(-10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
+    }
+  }
   const uvHoles = face.innerLoops
     .map((loop) => occEdgesToPolygon(loop))
     .filter((loop3d) => loop3d.length >= 3)
@@ -3924,6 +4218,65 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
     const oc = await initOC();
     const loops = getFaceTrimLoopsUV(oc, face);
     if (loops) {
+      // Check if the UV boundary is degenerate (all points have same U or same V)
+      // This happens for complete periodic surfaces like full torus where the boundary
+      // in 3D maps to a line in UV space
+      const uvOuter = loops.uvOuter;
+      if (uvOuter.length >= 3) {
+        const uValues = uvOuter.map(p => p[0]);
+        const vValues = uvOuter.map(p => p[1]);
+        const uMin = Math.min(...uValues);
+        const uMax = Math.max(...uValues);
+        const vMin = Math.min(...vValues);
+        const vMax = Math.max(...vValues);
+        const uSpan = uMax - uMin;
+        const vSpan = vMax - vMin;
+
+        // Check if UV boundary represents the full periodic domain
+        // For a complete torus, the 3D boundary edges form a "seam" that maps to a
+        // rectangle in UV space that doesn't actually enclose the domain center.
+        const tolerance = 0.1; // ~6 degrees
+        const centerU = (uMin + uMax) / 2;
+        const centerV = (vMin + vMax) / 2;
+        console.log(`[tessellateCurvedFace] UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+        console.log(`[tessellateCurvedFace] UV center: (${centerU.toFixed(3)}, ${centerV.toFixed(3)}), spans: uSpan=${uSpan.toFixed(3)}, vSpan=${vSpan.toFixed(3)}`);
+
+        // For periodic surfaces (torus), if the UV boundary spans close to 2π in both dimensions,
+        // check if the bounding box center is actually inside the polygon.
+        // If not, the boundary is a "seam rectangle" that doesn't enclose the intended area.
+        const PI = Math.PI;
+        const isNearFullPeriod = uSpan > 5.5 && vSpan > 5.5; // ~315 degrees
+
+        if (face.surfaceType === 'Torus' && isNearFullPeriod) {
+          // Quick point-in-polygon test for the center
+          const centerInside = isPointInPolygonSimple([centerU, centerV], uvOuter);
+          console.log(`[tessellateCurvedFace] Torus center (${centerU.toFixed(3)}, ${centerV.toFixed(3)}) inside polygon: ${centerInside}`);
+          if (!centerInside) {
+            console.log(`[tessellateCurvedFace] Torus UV boundary doesn't enclose center - falling back to full surface`);
+            throw new Error('Torus seam boundary - use full surface tessellation');
+          }
+        }
+
+        if (uSpan < tolerance || vSpan < tolerance) {
+          console.log(`[tessellateCurvedFace] UV boundary degenerate - falling back to full surface`);
+          throw new Error('Degenerate UV boundary - use full surface tessellation');
+        }
+      }
+
+      // Simple point-in-polygon test (ray casting algorithm)
+      function isPointInPolygonSimple(point: [number, number], polygon: [number, number][]): boolean {
+        const [x, y] = point;
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+          const [xi, yi] = polygon[i];
+          const [xj, yj] = polygon[j];
+          if (((yi > y) !== (yj > y)) && (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) {
+            inside = !inside;
+          }
+        }
+        return inside;
+      }
+
       let surface: any | null = null;
 
       if (face.surfaceType === 'Cylinder' && params.radius !== undefined && params.placement) {
@@ -4444,7 +4797,7 @@ async function runCheckpoint5(stepFileContent: string): Promise<{
  *
  * The tessellation still uses our existing GPU-accelerated tessellator.
  */
-export async function parseStepWithOCC(stepFileContent: string): Promise<Mesh> {
+export async function parseStepWithOCC(stepFileContent: Uint8Array | string): Promise<Mesh> {
   console.log('[parseStepWithOCC] Starting...');
   const startTime = performance.now();
 
@@ -4516,9 +4869,16 @@ export async function parseStepWithOcctImport(stepFileContent: string): Promise<
   const coloredFaceCount = orderedFaceColors.filter(c => c !== null).length;
   console.log(`[parseStepWithOcctImport] ${coloredFaceCount}/${faceIds.length} faces have colors`);
 
-  // Initialize occt-import-js
+  // Initialize occt-import-js with custom WASM path
   const initStart = performance.now();
-  const occt = await occtimportjs();
+  const occt = await occtimportjs({
+    locateFile: (file: string) => {
+      if (file.endsWith('.wasm')) {
+        return '/occt-import-js.wasm';
+      }
+      return file;
+    }
+  });
   console.log(`[parseStepWithOcctImport] WASM initialized in ${(performance.now() - initStart).toFixed(0)}ms`);
 
   // Convert string to Uint8Array
@@ -4700,6 +5060,100 @@ export async function parseStepWithOcctImport(stepFileContent: string): Promise<
   console.log(`[parseStepWithOcctImport] Complete in ${(endTime - startTime).toFixed(0)}ms: ${mesh.positions.length / 3} vertices, ${mesh.indices.length / 3} triangles`);
 
   return mesh;
+}
+
+/**
+ * Parse STEP file using occt-import-js for comparison tests.
+ * Returns a simplified result suitable for comparison with our OCC tessellator.
+ */
+export async function parseStepWithOcctImportSimple(stepFileContent: string | Uint8Array): Promise<{
+  success: boolean;
+  meshCount: number;
+  vertexCount: number;
+  triangleCount: number;
+  boundingBox: { min: [number, number, number]; max: [number, number, number] };
+  totalTime: number;
+}> {
+  const startTime = performance.now();
+
+  // Initialize occt-import-js with custom WASM path
+  // The WASM file is in the public directory to ensure it's served correctly
+  const occt = await occtimportjs({
+    locateFile: (file: string) => {
+      if (file.endsWith('.wasm')) {
+        return '/occt-import-js.wasm';
+      }
+      return file;
+    }
+  });
+
+  // Convert to Uint8Array if needed
+  let fileBuffer: Uint8Array;
+  if (typeof stepFileContent === 'string') {
+    fileBuffer = new TextEncoder().encode(stepFileContent);
+  } else {
+    fileBuffer = stepFileContent;
+  }
+
+  // Parse the STEP file
+  const result = occt.ReadStepFile(fileBuffer, null);
+  const parseTime = performance.now() - startTime;
+
+  if (!result || !result.success) {
+    return {
+      success: false,
+      meshCount: 0,
+      vertexCount: 0,
+      triangleCount: 0,
+      boundingBox: { min: [0, 0, 0], max: [0, 0, 0] },
+      totalTime: parseTime,
+    };
+  }
+
+  if (!result.meshes || result.meshes.length === 0) {
+    return {
+      success: false,
+      meshCount: 0,
+      vertexCount: 0,
+      triangleCount: 0,
+      boundingBox: { min: [0, 0, 0], max: [0, 0, 0] },
+      totalTime: parseTime,
+    };
+  }
+
+  // Count totals
+  let totalVertices = 0;
+  let totalIndices = 0;
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+
+  for (const mesh of result.meshes) {
+    totalVertices += mesh.attributes.position.array.length / 3;
+    totalIndices += mesh.index.array.length;
+
+    // Compute bounding box
+    const pos = mesh.attributes.position.array;
+    for (let i = 0; i < pos.length; i += 3) {
+      minX = Math.min(minX, pos[i]);
+      maxX = Math.max(maxX, pos[i]);
+      minY = Math.min(minY, pos[i + 1]);
+      maxY = Math.max(maxY, pos[i + 1]);
+      minZ = Math.min(minZ, pos[i + 2]);
+      maxZ = Math.max(maxZ, pos[i + 2]);
+    }
+  }
+
+  return {
+    success: true,
+    meshCount: result.meshes.length,
+    vertexCount: totalVertices,
+    triangleCount: totalIndices / 3,
+    boundingBox: {
+      min: [minX, minY, minZ],
+      max: [maxX, maxY, maxZ],
+    },
+    totalTime: parseTime,
+  };
 }
 
 // Export for use in browser

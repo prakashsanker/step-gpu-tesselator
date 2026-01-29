@@ -33,40 +33,60 @@ DATA;
 #23 = AXIS2_PLACEMENT_3D ( 'NONE', #20, #21, #22 );
 
 /* ============================================ */
-/* Geometry (remapped from original file)       */
+/* Geometry                                     */
 /* ============================================ */
 #25 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));
 #26 = DIRECTION('', (0.0, 0.0, 1.0));
 #27 = DIRECTION('', (1.0, 0.0, 0.0));
 #28 = AXIS2_PLACEMENT_3D('', #25, #26, #27);
 #29 = PLANE('', #28);
+
+/* Triangle vertices: P0=(0,0,0), P1=(2,0,0), P2=(1,1.732,0) */
 #34 = CARTESIAN_POINT('', (0.0, 0.0, 0.0));                 /* P0 */
 #35 = CARTESIAN_POINT('', (2.0, 0.0, 0.0));                 /* P1 */
 #36 = CARTESIAN_POINT('', (1.0, 1.7320508075688772, 0.0));  /* P2 */
+
 #44 = VERTEX_POINT('', #34);
 #45 = VERTEX_POINT('', #35);
 #46 = VERTEX_POINT('', #36);
+
+/* Edge curves: each LINE must pass through BOTH vertices of its edge */
 #54 = EDGE_CURVE('', #44, #45, #64, .T.);  /* P0 -> P1 */
 #55 = EDGE_CURVE('', #45, #46, #65, .T.);  /* P1 -> P2 */
 #56 = EDGE_CURVE('', #46, #44, #66, .T.);  /* P2 -> P0 */
+
+/* Line definitions - direction must be along the edge */
+/* Edge P0->P1: direction is (1, 0, 0) */
 #64 = LINE('', #34, #124);
+/* Edge P1->P2: direction is (-1, 1.732, 0) normalized = (-0.5, 0.866, 0) */
 #65 = LINE('', #35, #125);
+/* Edge P2->P0: direction is (-1, -1.732, 0) normalized = (-0.5, -0.866, 0) */
 #66 = LINE('', #36, #126);
+
+/* Directions for each edge */
+#127 = DIRECTION('', (1.0, 0.0, 0.0));                      /* P0->P1 direction */
+#128 = DIRECTION('', (-0.5, 0.8660254037844386, 0.0));      /* P1->P2 direction */
+#129 = DIRECTION('', (-0.5, -0.8660254037844386, 0.0));     /* P2->P0 direction */
+
+/* Vectors with magnitude 1.0 */
+#124 = VECTOR('', #127, 1.0);
+#125 = VECTOR('', #128, 1.0);
+#126 = VECTOR('', #129, 1.0);
+
+/* Oriented edges (all forward) */
 #74 = ORIENTED_EDGE('', *, *, #54, .T.);
 #75 = ORIENTED_EDGE('', *, *, #55, .T.);
 #76 = ORIENTED_EDGE('', *, *, #56, .T.);
+
 #84 = EDGE_LOOP('', (#74, #75, #76));
 #94 = FACE_OUTER_BOUND('', #84, .T.);
 #104 = ADVANCED_FACE('', (#94), #29, .T.);
-#124 = VECTOR('', #27, 1.0);
-#125 = VECTOR('', #27, 1.0);
-#126 = VECTOR('', #27, 1.0);
 
 /* ============================================ */
 /* Shape Representation                         */
 /* ============================================ */
-#127 = ADVANCED_BREP_SHAPE_REPRESENTATION ( 'triangle', ( #104, #23 ), #10 );
-#128 = SHAPE_DEFINITION_REPRESENTATION ( #8, #127 );
+#130 = ADVANCED_BREP_SHAPE_REPRESENTATION ( 'triangle', ( #104, #23 ), #10 );
+#131 = SHAPE_DEFINITION_REPRESENTATION ( #8, #130 );
 
 ENDSEC;
 END-ISO-10303-21;
