@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Quick Test External Files</title>
+  <style>
+    body { font-family: monospace; padding: 20px; }
+    pre { background: #f5f5f5; padding: 10px; }
+  </style>
+</head>
+<body>
+  <h1>Quick Test External STEP Files</h1>
+  <div id="output">Loading...</div>
+
+  <script type="module">
+    import { parseStepWithOCC } from '../src/occ-test.ts';
+
+    const output = document.getElementById('output');
+    output.innerHTML = '<pre>';
+
+    const files = [
+      'step-examples/external/steptools/123Block_Color.stp',
+      'step-examples/external/steptools/123Block_Dimension.stp',
+      'step-examples/external/steptools/123Block_Short_Note.stp',
+      'step-examples/external/steptools/boxy_with_cylindricity.stp',
+      'step-examples/external/steptools/boxy_with_diamsize.stp',
+      'step-examples/external/steptools/boxy_with_flatness.stp',
+      'step-examples/external/steptools/boxy_with_limitsandfits.stp',
+      'step-examples/external/steptools/boxy_with_linearsize.stp',
+      'step-examples/external/steptools/boxy_with_perp.stp',
+      'step-examples/external/steptools/boxy_with_surfacetex.stp',
+    ];
+
+    for (const file of files) {
+      try {
+        output.innerHTML += `Testing: ${file}...\n`;
+        const response = await fetch('/' + file);
+        const content = await response.text();
+
+        const mesh = await parseStepWithOCC(content);
+        const vertices = mesh.positions.length / 3;
+        const triangles = mesh.indices.length / 3;
+
+        output.innerHTML += `  ✓ ${file.split('/').pop()}: ${vertices} vertices, ${triangles} triangles\n\n`;
+      } catch (e) {
+        output.innerHTML += `  ✗ ${file}: ${e.message}\n\n`;
+      }
+    }
+
+    output.innerHTML += '</pre>';
+  </script>
+</body>
+</html>

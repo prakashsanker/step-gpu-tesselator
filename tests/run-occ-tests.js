@@ -632,21 +632,65 @@ async function testExternalRealWorldFiles(page) {
     let failed = 0;
 
     const tests = [
+        // 123Block variants (simple block with different annotations)
         {
-            name: '123Block_Color (simple block with colors)',
+            name: '123Block_Color (block with colors)',
             path: 'step-examples/external/steptools/123Block_Color.stp',
             minVertices: 8,
             minTriangles: 12,
         },
         {
-            name: 'boxy_with_flatness (complex Catia model)',
+            name: '123Block_Dimension (block with dimensions)',
+            path: 'step-examples/external/steptools/123Block_Dimension.stp',
+            minVertices: 8,
+            minTriangles: 12,
+        },
+        {
+            name: '123Block_Short_Note (block with notes)',
+            path: 'step-examples/external/steptools/123Block_Short_Note.stp',
+            minVertices: 8,
+            minTriangles: 12,
+        },
+        // Boxy variants (complex Catia models with various GD&T annotations)
+        {
+            name: 'boxy_with_cylindricity',
+            path: 'step-examples/external/steptools/boxy_with_cylindricity.stp',
+            minVertices: 1000,
+            minTriangles: 1000,
+        },
+        {
+            name: 'boxy_with_diamsize',
+            path: 'step-examples/external/steptools/boxy_with_diamsize.stp',
+            minVertices: 1000,
+            minTriangles: 1000,
+        },
+        {
+            name: 'boxy_with_flatness',
             path: 'step-examples/external/steptools/boxy_with_flatness.stp',
             minVertices: 1000,
             minTriangles: 1000,
         },
         {
-            name: 'boxy_with_perp (complex Catia model)',
+            name: 'boxy_with_limitsandfits',
+            path: 'step-examples/external/steptools/boxy_with_limitsandfits.stp',
+            minVertices: 1000,
+            minTriangles: 1000,
+        },
+        {
+            name: 'boxy_with_linearsize',
+            path: 'step-examples/external/steptools/boxy_with_linearsize.stp',
+            minVertices: 1000,
+            minTriangles: 1000,
+        },
+        {
+            name: 'boxy_with_perp',
             path: 'step-examples/external/steptools/boxy_with_perp.stp',
+            minVertices: 1000,
+            minTriangles: 1000,
+        },
+        {
+            name: 'boxy_with_surfacetex',
+            path: 'step-examples/external/steptools/boxy_with_surfacetex.stp',
             minVertices: 1000,
             minTriangles: 1000,
         },
