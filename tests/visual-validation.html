@@ -156,6 +156,11 @@
                 <option value="step-examples/complex/rocky_house.step">Rocky House</option>
                 <option value="step-examples/complex/conical-surface.step">Conical Surface</option>
             </optgroup>
+            <optgroup label="Solids (c8)">
+                <option value="step-examples/c8-solids/simple-cube.step">Simple Cube</option>
+                <option value="step-examples/c8-solids/tetrahedron.step">Tetrahedron</option>
+                <option value="step-examples/c8-solids/colored-solid.step">Colored Solid</option>
+            </optgroup>
             <optgroup label="B-Spline Surfaces">
                 <option value="step-examples/c5-bspline/simple-bspline-surface.step">Simple B-Spline</option>
                 <option value="step-examples/c5-bspline/bspline-bowl.step">B-Spline Bowl</option>
@@ -349,13 +354,11 @@
             }
             geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
 
-            if (mesh.vertexColors && mesh.vertexColors.length > 0) {
-                geometry.setAttribute('color', new THREE.BufferAttribute(mesh.vertexColors, 3));
-            }
-
+            // Note: We ignore vertex colors for visual comparison to ensure both renders
+            // use the same color. This allows fair pixel comparison between our pipeline
+            // and occt-import-js reference.
             const material = new THREE.MeshStandardMaterial({
-                color: mesh.vertexColors ? undefined : 0x6699ff,
-                vertexColors: mesh.vertexColors && mesh.vertexColors.length > 0,
+                color: 0x6699ff,  // Same as reference for fair pixel comparison
                 metalness: 0.2,
                 roughness: 0.5,
                 side: THREE.DoubleSide,

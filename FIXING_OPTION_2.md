@@ -146,9 +146,62 @@ The triangle count differences don't matter if visual output is correct.
 
 ---
 
+### Fix #2: Cylinder Full-Circle UV Boundary Handling
+**Date:** 2026-02-01
+**Problem:** Cylindrical surfaces (walls of rings/tubes) not rendering - only flat faces visible
+
+**Investigation:**
+Looking at `conical-surface.step`, the model has:
+- 2 cylindrical surfaces (outer and inner walls)
+- 2 planar surfaces (top and bottom caps)
+- 1 conical surface (connecting outer to inner)
+
+The cylindrical walls were not rendering, making rings look like flat discs.
+
+**Root Cause:**
+Full 360° cylinders have a "seam rectangle" UV boundary that wraps around. When projected to UV space:
+- Two circles at different V values (top and bottom edges)
+- Two vertical seam lines connecting them
+
+This forms a degenerate polygon that doesn't properly enclose interior points for the point-in-polygon test. Unlike cones (which had handling for this case), cylinders were missing this check.
+
+**Changes Made:**
+1. **Added cylinder center check** (`occ-test.ts`): Detect when cylinder UV boundary spans ~2π in U and the center isn't inside the polygon, then fall back to rectangular tessellation
+2. **Fixed visual comparison color** (`visual-validation.html`): Removed vertex colors from our pipeline's visual comparison so both renders use the same blue color
+
+```javascript
+// Added check for full cylinders (similar to existing cone/sphere/torus checks)
+if (face.surfaceType === 'Cylinder' && uSpan > 5.5) {
+  const centerInside = isPointInPolygonSimple([centerU, centerV], uvOuter);
+  if (!centerInside) {
+    throw new Error('Cylinder seam boundary - use full surface tessellation');
+  }
+}
+```
+
+**Test Results After Fix:**
+- Passed: 113
+- Failed: 3
+- Errors: 3
+- Pass Rate: **95.0%** (+17.7pp improvement from 77.3%)
+
+**Remaining Failures:**
+| File | Visual Diff | Issue |
+|------|-------------|-------|
+| bspline-saddle.step | 25.3% | Reference produces 0 tris (reference bug) |
+| bspline-wave.step | 25.3% | Reference produces 0 tris (reference bug) |
+| quarter-cylinder-hole.step | 6.2% | Trimmed surface issue |
+
+**Errors (Timeouts):**
+- nissan.step - Reference failed
+- rocky_house.step - Timeout
+- rotor-201nal.step - Timeout
+
+---
+
 ### Fix #4: [TODO] Complex Files Missing Geometry
 **Date:** TBD
-**Problem:** Complex files (nissan, rocky_house, etc.) missing 52% of triangles
+**Problem:** Complex files (nissan, rocky_house, etc.) timing out or failing
 
 **Investigation:**
 - [ ] Check which face types are being skipped

@@ -2973,6 +2973,7 @@ interface FaceWithEdgesInfo {
   occSurface?: any; // Handle<Geom_Surface> (used for UV projection on curved faces)
   surfaceParams?: SurfaceParams; // For curved surfaces
   color?: RGBColor; // Face color from STEP styling
+  isReversed?: boolean; // True if face orientation is REVERSED (normals should flip)
 }
 
 /**
@@ -3758,8 +3759,25 @@ async function extractFacesWithEdges(
       // Extract boundary edges
       const { outerLoop, innerLoops } = await extractFaceEdges(oc, face, faceIndex);
 
+      // Extract face orientation (FORWARD or REVERSED)
+      // REVERSED means the face normal should be flipped relative to the surface normal
+      let isReversed = false;
+      try {
+        const orientation = face.Orientation_1();
+        // Compare by value property (opencascade.js enum pattern)
+        if (oc.TopAbs_Orientation && oc.TopAbs_Orientation.TopAbs_REVERSED) {
+          isReversed = orientation.value === oc.TopAbs_Orientation.TopAbs_REVERSED.value;
+        }
+        if (faceIndex < 5) {
+          console.log(`[extractFacesWithEdges] Face ${faceIndex}: orientation=${isReversed ? 'REVERSED' : 'FORWARD'} (raw: ${orientation.value})`);
+        }
+      } catch (e) {
+        // Orientation not available, assume FORWARD
+        logOCC(`Face ${faceIndex}: Could not get orientation:`, e);
+      }
+
       // Debug logging for edge extraction
-      console.log(`[extractFacesWithEdges] Face ${faceIndex}: surfaceType=${surfaceType}, outerLoop=${outerLoop.length} edges, innerLoops=${innerLoops.length}`);
+      console.log(`[extractFacesWithEdges] Face ${faceIndex}: surfaceType=${surfaceType}, outerLoop=${outerLoop.length} edges, innerLoops=${innerLoops.length}, reversed=${isReversed}`);
       if (outerLoop.length === 0) {
         console.warn(`[extractFacesWithEdges] Face ${faceIndex} has 0 edges in outerLoop!`);
       } else if (outerLoop.length > 0 && outerLoop.length < 5) {
@@ -3940,7 +3958,8 @@ async function extractFacesWithEdges(
         innerLoops,
         occSurface: surface,
         surfaceParams,
-        color
+        color,
+        isReversed
       });
 
       // Warn if we have a B-spline surface but couldn't extract params
@@ -4405,6 +4424,18 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           if (!centerInside) {
             console.log(`[tessellateCurvedFace] Sphere UV boundary doesn't enclose center - falling back to full surface`);
             throw new Error('Sphere seam boundary - use full surface tessellation');
+          }
+        }
+
+        // For cylinders with full-circle (U spans ~2π), the UV boundary forms a "seam rectangle":
+        // two circles at different V values connected by seam lines. This degenerate polygon
+        // doesn't properly enclose interior points, so fall back to rectangular tessellation.
+        if (face.surfaceType === 'Cylinder' && uSpan > 5.5) {
+          const centerInside = isPointInPolygonSimple([centerU, centerV], uvOuter);
+          console.log(`[tessellateCurvedFace] Cylinder center (${centerU.toFixed(3)}, ${centerV.toFixed(3)}) inside polygon: ${centerInside}`);
+          if (!centerInside) {
+            console.log(`[tessellateCurvedFace] Cylinder UV boundary doesn't enclose center - falling back to full surface`);
+            throw new Error('Cylinder seam boundary - use full surface tessellation');
           }
         }
 
