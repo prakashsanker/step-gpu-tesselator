@@ -9,235 +9,103 @@ This document tracks our progress fixing Option 2 to achieve correct tessellatio
 - Tessellation: Custom CPU-based (ear-clipping for planar, grid-based for curved)
 - Rendering: Three.js
 
+**Reference:** occt-import-js (uses OpenCASCADE's built-in tessellator)
+
 **Goal:** Get Option 2 working correctly with ALL 119 test files before GPU optimization.
 
 ---
 
-## Baseline Status (2026-02-01)
+## True Baseline (AI Visual Comparison - 2026-02-01)
 
-**Visual Test Results:**
-- **Passed:** 70 (58.8%)
-- **Failed:** 48
-- **Errors:** 1
-- **Total:** 119 files
+Previous pixel-based comparison gave false positives. We now use Claude AI vision to semantically compare renders.
 
----
-
-## Issues Identified
-
-### Priority 1: Curved Surface Tessellation (Critical)
-
-| Issue | File | Our Tris | Ref Tris | Diff | Status |
-|-------|------|----------|----------|------|--------|
-| Cone 93% missing | cone.step | 2366 | 1841 | +29% | ✅ FIXED |
-| Sphere 2x over | sphere.step | 6212 | 3004 | +107% | ✅ PASSES |
-| Torus 29% missing | torus.step | 4096 | 5760 | -29% | ✅ PASSES |
-| Cylinder 11% extra | cylinder.step | 312 | 280 | +11% | ✅ PASSES |
-
-### Priority 2: Complex Files Missing Geometry
-
-| Issue | Files | Our Tris | Ref Tris | Diff | Status |
-|-------|-------|----------|----------|------|--------|
-| Missing curved geometry | nissan, rocky_house, cube, etc. | 630 | 1318 | -52% | TODO |
-
-### Priority 3: Multi-Face Coordinate Issues
-
-| Issue | File | Visual Diff | Status |
-|-------|------|-------------|--------|
-| Position error | unit-box.step | 16.7% | TODO |
-| Position error | triangular-prism.step | 13.4% | TODO |
-| Position error | two-triangles.step | 13.4% | TODO |
-| Position error | pyramid.step | 11.5% | TODO |
-
----
-
-## Fix Log
-
-### Fix #0: Baseline Established
-**Date:** 2026-02-01
-**Changes:**
-- Created visual comparison test suite (`tests/run-visual-tests.js`)
-- Uses existing `visual-validation.html` with pixelmatch comparison
-- Tests all 119 STEP files automatically
-
-**Test Results:**
-- Passed: 70
-- Failed: 48
-- Errors: 1
-- Pass Rate: 58.8%
-
----
-
-### Fix #1: Cone Tessellation + Color Matching
-**Date:** 2026-02-01
-**Problem:** Cone produces only 130 triangles vs 1841 expected (93% missing)
-
-**Investigation:**
-- [x] Check UV boundary extraction for conical surfaces
-- [x] Check point-in-polygon test in `tessellateTrimmedSurface`
-- [x] Check grid density calculation
-- [x] Check `evaluateSurface` for cone surface type
-
-**Root Cause:**
-1. **Degenerate UV boundary for full cones**: The UV boundary for a full 360° cone forms a "lollipop" shape - the apex is a single point at v=0 connected to the circular base at v=height. The point-in-polygon test fails because the polygon doesn't properly enclose interior points.
-2. **Insufficient height samples**: The fallback `tessellateCone` was using only 2 height samples (default), resulting in very few triangles.
-3. **Color mismatch**: Visual validation used different colors for our pipeline (blue `0x6699ff`) vs reference (orange `0xff9966`), causing pixel comparison to fail even when geometry was correct.
-
-**Changes Made:**
-1. **Added cone center check** (`occ-test.ts:4388-4396`): Detect when cone UV boundary doesn't enclose the center point and fall back to rectangular tessellation
-2. **Added sphere center check** (`occ-test.ts:4398-4406`): Same fix for spheres
-3. **Increased cone height samples** (`occ-test.ts:4473-4475`): Calculate height samples proportional to height range (`heightRange * 8`)
-4. **Fixed color matching** (`visual-validation.html:398`): Changed reference color to match our pipeline for accurate pixel comparison
-
-**Benchmark - Curved Surface Results:**
-| Surface | Visual Diff | Status |
-|---------|-------------|--------|
-| cone.step | 2.6% | ✅ PASS |
-| cylinder.step | 2.3% | ✅ PASS |
-| sphere.step | 0.0% | ✅ PASS |
-| torus.step | 0.0% | ✅ PASS |
-
-**Test Results After Fix:**
-- Passed: 92
-- Failed: 24
+**Pass Rate: 68.9% (82/119)**
+- Passed: 82
+- Failed: 34
 - Errors: 3
-- Pass Rate: 77.3% (+18.5pp improvement)
 
-**Summary:**
-The core issue was that full 360° cones and spheres have degenerate UV boundaries - the UV polygon forms a "lollipop" shape where the apex is a single point connected to the circular base. The point-in-polygon test fails for interior points because the polygon doesn't properly enclose them. The fix detects this by checking if the UV center point is inside the boundary; if not, it falls back to rectangular tessellation that covers the full UV range. Additionally, cone height sampling was increased from 2 samples to `heightRange * 8` for proper tessellation density. The color matching fix ensures visual tests compare identical geometries without false failures due to different render colors.
+### Passed Tests (82)
 
----
+| Category | Files |
+|----------|-------|
+| **benchmark** | plate-large-10x10, plate-medium-5x5, plate-small-2x2, plate-xlarge-20x20, simple-square |
+| **c1-triangulation/concave** | arrow, ccw-pentagon-concave, concave_pentagon_single_reflex, cw-pentagon-concave, l-shape |
+| **c1-triangulation/convex** | ccw-square, convex-heptagon, convex_pentagon_simple, cw-square, hexagon, triangle |
+| **c2-holes/2.2-projection** | tilted-square-45deg, tilted-triangle-no-plane, vertical-wall-xz |
+| **c2-holes/2.3-winding** | both-wrong, correct-winding, square-cw |
+| **c2-holes/2.4-topology** | hole-outside-outer, self-intersecting-outer |
+| **c2-holes/2.5-triangulation** | square-with-4-holes, square-with-arrow-hole, square-with-diamond-hole, square-with-right-hole, square-with-square-hole, square-with-three-holes, square-with-triangle-hole |
+| **c3-curves** | rotor |
+| **c4-multiface** | pyramid, tetrahedron, triangular-prism, two-triangles, unit-box, wedge |
+| **c4-surfaces** | cone, cylinder, sphere, torus |
+| **c5-bspline** | bspline-dome |
+| **c6-trimmed** | full-cylinder-window |
+| **c8-solids** | colored-solid, simple-cube, tetrahedron |
+| **complex** | air, conical-surface, cube, raw-material, rocky_house_car, rocky_house_roof, rocky_house_sofa, rocky_house_table, rocky_house_terrain |
+| **external/steptools-ap214** | as1-ac-214, as1-ec-214, as1-md-214, as1-tc-214, as1-ug-214, d2-db-214, f1-db-214, io1-ac-214, io1-ca-214, io1-md-214, io1-tc-214, io1-ug-214 |
+| **external/steptools-ap224** | ap224_995277945, ap224_995602415, ap224_997423743, ap224_997865309 |
+| **external/steptools** | 123Block_Color, 123Block_Dimension, 123Block_Short_Note, boxy_with_cylindricity, boxy_with_diamsize, boxy_with_flatness, boxy_with_limitsandfits, boxy_with_linearsize, boxy_with_perp, boxy_with_surfacetex |
 
-### Fix #1b: Cone V-Parameter Interpretation
-**Date:** 2026-02-01
-**Problem:** Cone base cap appeared "sunken" below the top rim of the conical surface
+### Failed Tests (34)
 
-**Root Cause:**
-Our `evaluateCone` function treated V as **height along axis**, but OpenCascade uses V as **distance along the cone generator (slant line)**.
+| File | Issue |
+|------|-------|
+| **benchmark/plate-xxlarge-30x30.step** | Shows triangular shape instead of flat rectangular plate |
+| **c1-triangulation/concave/almost_collinear_pentagon.step** | Appears as quadrilateral, should be pentagon |
+| **c1-triangulation/convex/octagon.step** | Shows flat 2D octagon instead of 3D prism |
+| **c1-triangulation/convex/square.step** | Both pipelines render 0 triangles |
+| **c1-triangulation/convex/tilted-rectangle.step** | Both pipelines render 0 triangles |
+| **c2-holes/2.2-projection/tilted-hexagon.step** | Shows triangle instead of hexagon |
+| **c2-holes/2.3-winding/square-with-ccw-hole.step** | Shows triangle, missing square and hole |
+| **c2-holes/2.4-topology/holes-intersect.step** | Shows solid triangle, missing holes |
+| **c2-holes/2.4-topology/valid-square-with-hole.step** | Shows solid triangle, missing square and hole |
+| **c2-holes/2.5-triangulation/concentric-squares.step** | Shows triangle instead of concentric squares |
+| **c2-holes/2.5-triangulation/hexagon-with-3-holes.step** | Shows triangle instead of hexagon with holes |
+| **c2-holes/2.5-triangulation/hexagon-with-triangle-hole.step** | Different geometry between pipelines |
+| **c2-holes/2.5-triangulation/l-shape-with-hole.step** | Different geometry between pipelines |
+| **c2-holes/2.5-triangulation/octagon-with-square-hole.step** | Different geometry between pipelines |
+| **c2-holes/2.5-triangulation/pentagon-with-hole.step** | Different geometry between pipelines |
+| **c2-holes/2.5-triangulation/rectangle-with-6-holes.step** | Different geometry between pipelines |
+| **c2-holes/2.5-triangulation/square-with-two-holes.step** | Missing holes in both pipelines |
+| **c2-holes/2.5-triangulation/star-with-center-hole.step** | Shows rectangle instead of star |
+| **c2-holes/2.5-triangulation/thin-rectangle-with-slot.step** | Missing slot in both pipelines |
+| **c2-holes/2.5-triangulation/triangle-with-triangle-hole.step** | Shows rectangle instead of triangle with hole |
+| **c3-curves/quarter-circle.step** | Shows flat rectangle instead of curved geometry |
+| **c3-curves/rounded-cube.step** | Shows flat rectangle instead of rounded cube |
+| **c5-bspline/bspline-bowl.step** | Different orientation/shape |
+| **c5-bspline/bspline-saddle.step** | Reference renders 0 triangles (reference bug) |
+| **c5-bspline/bspline-wave.step** | Reference renders 0 triangles (reference bug) |
+| **c5-bspline/simple-bspline-surface.step** | Different curvature/geometry |
+| **c6-trimmed/cylinder-two-holes.step** | Solid cylinder, missing holes in walls |
+| **c6-trimmed/cylinder-with-hole.step** | Solid cylinder, missing hole |
+| **c6-trimmed/half-cylinder.step** | Missing top/bottom flat circular caps |
+| **c6-trimmed/pipe-with-porthole.step** | Simple cylinder, missing porthole feature |
+| **c6-trimmed/quarter-cylinder-hole.step** | Full cylinder instead of quarter with hole |
+| **external/steptools-ap214/io1-ec-214.stp** | Missing bolt holes around flange |
+| **external/steptools-ap224/ap224_995288709.stp** | Missing cylindrical feature in middle |
+| **external/steptools-ap224/ap224_995315479.stp** | Extra internal features in our render |
 
-For a cone with height h=2 and base radius r=1:
-- Our interpretation: vMax = 2.0 (height)
-- OpenCascade's interpretation: vMax = √(h² + r²) = √5 ≈ 2.236 (slant distance)
+### Errors (3)
 
-**Fix (`surfaces.ts:evaluateCone`):**
-```javascript
-// OLD (wrong): V as height
-localRadius = radius + v * tan(semiAngle)
-z = v
-
-// NEW (correct): V as slant distance
-localRadius = radius + v * sin(semiAngle)
-z = v * cos(semiAngle)
-```
-
-**Result:** Cone visual diff improved from 2.6% to **0.0%**
-
----
-
-### Fix #2: Sphere/Torus - RESOLVED BY FIX #1
-**Date:** 2026-02-01
-**Problem:** Sphere produces 2x triangles, Torus 29% missing
-
-**Status:** ✅ Both now pass visual tests (0.0% visual diff) after color matching fix.
-- Sphere: 6212 vs 3004 tris (2x more) - visually correct
-- Torus: 4096 vs 5760 tris (29% less) - visually correct
-
-The triangle count differences don't matter if visual output is correct.
-
----
-
-### Fix #2: Cylinder Full-Circle UV Boundary Handling
-**Date:** 2026-02-01
-**Problem:** Cylindrical surfaces (walls of rings/tubes) not rendering - only flat faces visible
-
-**Investigation:**
-Looking at `conical-surface.step`, the model has:
-- 2 cylindrical surfaces (outer and inner walls)
-- 2 planar surfaces (top and bottom caps)
-- 1 conical surface (connecting outer to inner)
-
-The cylindrical walls were not rendering, making rings look like flat discs.
-
-**Root Cause:**
-Full 360° cylinders have a "seam rectangle" UV boundary that wraps around. When projected to UV space:
-- Two circles at different V values (top and bottom edges)
-- Two vertical seam lines connecting them
-
-This forms a degenerate polygon that doesn't properly enclose interior points for the point-in-polygon test. Unlike cones (which had handling for this case), cylinders were missing this check.
-
-**Changes Made:**
-1. **Added cylinder center check** (`occ-test.ts`): Detect when cylinder UV boundary spans ~2π in U and the center isn't inside the polygon, then fall back to rectangular tessellation
-2. **Fixed visual comparison color** (`visual-validation.html`): Removed vertex colors from our pipeline's visual comparison so both renders use the same blue color
-
-```javascript
-// Added check for full cylinders (similar to existing cone/sphere/torus checks)
-if (face.surfaceType === 'Cylinder' && uSpan > 5.5) {
-  const centerInside = isPointInPolygonSimple([centerU, centerV], uvOuter);
-  if (!centerInside) {
-    throw new Error('Cylinder seam boundary - use full surface tessellation');
-  }
-}
-```
-
-**Test Results After Fix:**
-- Passed: 113
-- Failed: 3
-- Errors: 3
-- Pass Rate: **95.0%** (+17.7pp improvement from 77.3%)
-
-**Remaining Failures:**
-| File | Visual Diff | Issue |
-|------|-------------|-------|
-| bspline-saddle.step | 25.3% | Reference produces 0 tris (reference bug) |
-| bspline-wave.step | 25.3% | Reference produces 0 tris (reference bug) |
-| quarter-cylinder-hole.step | 6.2% | Trimmed surface issue |
-
-**Errors (Timeouts):**
-- nissan.step - Reference failed
-- rocky_house.step - Timeout
-- rotor-201nal.step - Timeout
+| File | Error |
+|------|-------|
+| **complex/nissan.step** | Reference failed to parse |
+| **complex/rocky_house.step** | Timeout |
+| **complex/rotor-201nal.step** | Timeout |
 
 ---
 
-### Fix #4: [TODO] Complex Files Missing Geometry
-**Date:** TBD
-**Problem:** Complex files (nissan, rocky_house, etc.) timing out or failing
+## Failure Analysis by Category
 
-**Investigation:**
-- [ ] Check which face types are being skipped
-- [ ] Check for exceptions in `tessellateCurvedFaceFromOCC`
-- [ ] Check BSpline surface handling
-
-**Root Cause:** TBD
-
-**Changes Made:**
-- TBD
-
-**Test Results After Fix:**
-- Passed: TBD
-- Failed: TBD
-- Pass Rate: TBD
-
----
-
-### Fix #5: [TODO] Multi-Face Coordinate Transforms
-**Date:** TBD
-**Problem:** Multi-face models have correct triangles but wrong positions (10-17% visual diff)
-
-**Investigation:**
-- [ ] Check coordinate system between our pipeline and reference
-- [ ] Check Y/Z axis handling
-- [ ] Check mesh assembly in `tessellateOCCShape`
-
-**Root Cause:** TBD
-
-**Changes Made:**
-- TBD
-
-**Test Results After Fix:**
-- Passed: TBD
-- Failed: TBD
-- Pass Rate: TBD
+| Category | Passed | Failed | Root Cause |
+|----------|--------|--------|------------|
+| **c6-trimmed (cylinders)** | 1/6 | 5 | Inner hole bounds on curved surfaces not tessellated |
+| **c2-holes (flat faces)** | 8/22 | 14 | Many show wrong shapes or missing holes |
+| **c5-bspline** | 1/5 | 4 | 2 are reference bugs, 2 are geometry issues |
+| **c1-triangulation** | 12/16 | 4 | 2 render 0 triangles in both pipelines |
+| **c3-curves** | 1/3 | 2 | Curved edges not tessellating |
+| **external** | 17/20 | 3 | Complex models with missing features |
+| **benchmark** | 5/6 | 1 | Large plate renders wrong |
 
 ---
 
@@ -248,23 +116,20 @@ if (face.surfaceType === 'Cylinder' && uSpan > 5.5) {
 | `src/occ-test.ts` | Main tessellation pipeline, `tessellateCurvedFaceFromOCC` |
 | `src/surface-tessellation.ts` | `tessellateTrimmedSurface`, grid-based curved surface tessellation |
 | `src/surfaces.ts` | `evaluateSurface`, surface point evaluation |
-| `tests/run-visual-tests.js` | Automated visual comparison test runner |
+| `tests/run-visual-tests-ai.js` | AI-powered visual comparison test runner |
 | `tests/visual-validation.html` | Manual visual comparison page |
-| `tests/visual-results/visual-test-report.json` | Latest test results |
+| `tests/visual-results-ai/ai-test-report.json` | Latest AI test results |
 
 ---
 
 ## Commands
 
 ```bash
-# Run visual tests
-npm run test:visual
+# Run AI visual tests (requires OPENROUTER_API_KEY)
+OPENROUTER_API_KEY=<key> node tests/run-visual-tests-ai.js
 
-# Run visual tests and save screenshots for failures
-npm run test:visual:save
-
-# Run visual tests for specific pattern
-node tests/run-visual-tests.js cone
+# Run pixel-based visual tests (less accurate)
+node tests/run-visual-tests.js
 
 # Start dev server for manual testing
 yarn dev
@@ -275,31 +140,17 @@ yarn dev
 
 ## Progress Chart
 
-| Checkpoint | Date | Passed | Failed | Errors | Pass Rate |
-|------------|------|--------|--------|--------|-----------|
-| Baseline | 2026-02-01 | 70 | 48 | 1 | 58.8% |
-| Fix #1 (Cone/Color) | 2026-02-01 | 92 | 24 | 3 | 77.3% |
-| Fix #1b (Cone V-param) | 2026-02-01 | 92 | 24 | 3 | 77.3% |
-| Fix #4 | TBD | TBD | TBD | TBD | TBD |
-| **Target** | - | **119** | **0** | **0** | **100%** |
-
-**Note:** Fix #1b improved cone visual quality (2.6% → 0.0%) but didn't change pass count since cone was already passing.
+| Checkpoint | Date | Passed | Failed | Errors | Pass Rate | Method |
+|------------|------|--------|--------|--------|-----------|--------|
+| **True Baseline** | 2026-02-01 | 82 | 34 | 3 | 68.9% | AI Vision |
+| **Target** | - | 119 | 0 | 0 | 100% | - |
 
 ---
 
-## Remaining Issues (24 failures, 3 errors)
+## Next Steps
 
-### BSpline Failures (2)
-- `bspline-saddle.step` - Reference XCAF transfer fails (0 triangles)
-- `bspline-wave.step` - Reference XCAF transfer fails (0 triangles)
-
-### External AP214 Files (13)
-Various steptools AP214 files with 6.8-17.7% visual diff - likely color or position issues.
-
-### c8-solids and complex (7)
-Files showing identical triangle counts (7.1-8.0% diff) suggest rendering or camera issues, not tessellation.
-
-### Timeouts (3 errors)
-- `nissan.step` - Reference failed
-- `rocky_house.step` - Timeout
-- `rotor-201nal.step` - Timeout
+Priority issues to fix:
+1. **Cylinder trimming (5 failures)** - Inner hole bounds on curved surfaces
+2. **Flat face holes (14 failures)** - Many c2-holes tests failing
+3. **BSpline surfaces (2 real failures)** - Different geometry/orientation
+4. **Curved edges (2 failures)** - quarter-circle, rounded-cube
