@@ -89,11 +89,48 @@ This document tracks our progress fixing Option 2 to achieve correct tessellatio
 3. **Increased cone height samples** (`occ-test.ts:4473-4475`): Calculate height samples proportional to height range (`heightRange * 8`)
 4. **Fixed color matching** (`visual-validation.html:398`): Changed reference color to match our pipeline for accurate pixel comparison
 
+**Benchmark - Curved Surface Results:**
+| Surface | Visual Diff | Status |
+|---------|-------------|--------|
+| cone.step | 2.6% | ✅ PASS |
+| cylinder.step | 2.3% | ✅ PASS |
+| sphere.step | 0.0% | ✅ PASS |
+| torus.step | 0.0% | ✅ PASS |
+
 **Test Results After Fix:**
 - Passed: 92
 - Failed: 24
 - Errors: 3
 - Pass Rate: 77.3% (+18.5pp improvement)
+
+**Summary:**
+The core issue was that full 360° cones and spheres have degenerate UV boundaries - the UV polygon forms a "lollipop" shape where the apex is a single point connected to the circular base. The point-in-polygon test fails for interior points because the polygon doesn't properly enclose them. The fix detects this by checking if the UV center point is inside the boundary; if not, it falls back to rectangular tessellation that covers the full UV range. Additionally, cone height sampling was increased from 2 samples to `heightRange * 8` for proper tessellation density. The color matching fix ensures visual tests compare identical geometries without false failures due to different render colors.
+
+---
+
+### Fix #1b: Cone V-Parameter Interpretation
+**Date:** 2026-02-01
+**Problem:** Cone base cap appeared "sunken" below the top rim of the conical surface
+
+**Root Cause:**
+Our `evaluateCone` function treated V as **height along axis**, but OpenCascade uses V as **distance along the cone generator (slant line)**.
+
+For a cone with height h=2 and base radius r=1:
+- Our interpretation: vMax = 2.0 (height)
+- OpenCascade's interpretation: vMax = √(h² + r²) = √5 ≈ 2.236 (slant distance)
+
+**Fix (`surfaces.ts:evaluateCone`):**
+```javascript
+// OLD (wrong): V as height
+localRadius = radius + v * tan(semiAngle)
+z = v
+
+// NEW (correct): V as slant distance
+localRadius = radius + v * sin(semiAngle)
+z = v * cos(semiAngle)
+```
+
+**Result:** Cone visual diff improved from 2.6% to **0.0%**
 
 ---
 
@@ -189,9 +226,11 @@ yarn dev
 |------------|------|--------|--------|--------|-----------|
 | Baseline | 2026-02-01 | 70 | 48 | 1 | 58.8% |
 | Fix #1 (Cone/Color) | 2026-02-01 | 92 | 24 | 3 | 77.3% |
-| Fix #2 | TBD | TBD | TBD | TBD | TBD |
-| Fix #3 | TBD | TBD | TBD | TBD | TBD |
+| Fix #1b (Cone V-param) | 2026-02-01 | 92 | 24 | 3 | 77.3% |
+| Fix #4 | TBD | TBD | TBD | TBD | TBD |
 | **Target** | - | **119** | **0** | **0** | **100%** |
+
+**Note:** Fix #1b improved cone visual quality (2.6% → 0.0%) but didn't change pass count since cone was already passing.
 
 ---
 
