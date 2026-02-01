@@ -147,10 +147,30 @@ yarn dev
 
 ---
 
+## Fixed Test Files (2026-02-01)
+
+**Issue:** 10 STEP test files in `c2-holes/2.5-triangulation/` were malformed. All LINE entities shared a single VECTOR direction `(1,0,0)` regardless of actual edge direction. OpenCascade handles this for simple shapes (squares) but fails for complex polygons (hexagons, pentagons, stars).
+
+**Fixed files:**
+- `triangle-with-triangle-hole.step`
+- `concentric-squares.step`
+- `pentagon-with-hole.step`
+- `thin-rectangle-with-slot.step`
+- `hexagon-with-triangle-hole.step`
+- `l-shape-with-hole.step`
+- `square-with-two-holes.step`
+- `octagon-with-square-hole.step`
+- `star-with-center-hole.step`
+- `rectangle-with-6-holes.step`
+
+**Fix script:** `scripts/fix-step-directions.cjs` - Computes proper normalized direction vectors for each edge based on vertex coordinates.
+
+---
+
 ## Next Steps
 
 Priority issues to fix:
-1. **Cylinder trimming (5 failures)** - Inner hole bounds on curved surfaces
-2. **Flat face holes (14 failures)** - Many c2-holes tests failing
+1. **Re-run AI visual tests** - Verify c2-holes pass rate after test file fixes
+2. **Cylinder trimming (5 failures)** - Inner hole bounds on curved surfaces
 3. **BSpline surfaces (2 real failures)** - Different geometry/orientation
 4. **Curved edges (2 failures)** - quarter-circle, rounded-cube
