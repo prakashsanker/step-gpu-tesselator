@@ -4079,8 +4079,29 @@ function occEdgesToPolygon(edges: EdgeInfo[]): Vec3[] {
         polygon.push([pt.x, pt.y, pt.z]);
       }
     } else {
-      // For line edges, just use the start point
+      // For line edges, add start point
+      // We don't skip end point for LINE edges because they need proper polygon closure
       polygon.push([edge.startPoint.x, edge.startPoint.y, edge.startPoint.z]);
+
+      // For LINE edges, also add intermediate points if the edge is long
+      // This helps with UV projection on curved surfaces like cylinders
+      const dx = edge.endPoint.x - edge.startPoint.x;
+      const dy = edge.endPoint.y - edge.startPoint.y;
+      const dz = edge.endPoint.z - edge.startPoint.z;
+      const length = Math.sqrt(dx*dx + dy*dy + dz*dz);
+
+      // Add intermediate points for lines longer than 0.1 units
+      if (length > 0.1) {
+        const numSegments = Math.max(2, Math.ceil(length / 0.1));
+        for (let j = 1; j < numSegments; j++) {
+          const t = j / numSegments;
+          polygon.push([
+            edge.startPoint.x + t * dx,
+            edge.startPoint.y + t * dy,
+            edge.startPoint.z + t * dz
+          ]);
+        }
+      }
     }
   }
 
@@ -4325,8 +4346,28 @@ function getFaceTrimLoopsUV(
       console.log(`[getFaceTrimLoopsUV] UV Last 10: ${uvOuter.slice(-10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
     }
   }
+  // Debug: log inner loop edge info for cylinders
+  if (face.surfaceType === 'Cylinder' && face.innerLoops.length > 0) {
+    console.log(`[getFaceTrimLoopsUV] Cylinder has ${face.innerLoops.length} inner loops`);
+    face.innerLoops.forEach((loop, loopIdx) => {
+      console.log(`[getFaceTrimLoopsUV] Inner loop ${loopIdx}: ${loop.length} edges`);
+      loop.forEach((e, edgeIdx) => {
+        console.log(`  Edge ${edgeIdx}: curveType=${e.curveType}, sampledPoints=${e.sampledPoints?.length || 0}, start=(${e.startPoint.x.toFixed(3)},${e.startPoint.y.toFixed(3)},${e.startPoint.z.toFixed(3)}), end=(${e.endPoint.x.toFixed(3)},${e.endPoint.y.toFixed(3)},${e.endPoint.z.toFixed(3)})`);
+      });
+    });
+  }
+
   const uvHoles = face.innerLoops
-    .map((loop) => occEdgesToPolygon(loop))
+    .map((loop, loopIdx) => {
+      const poly3d = occEdgesToPolygon(loop);
+      if (face.surfaceType === 'Cylinder') {
+        console.log(`[getFaceTrimLoopsUV] Inner loop ${loopIdx} -> 3D polygon: ${poly3d.length} points`);
+        if (poly3d.length > 0) {
+          console.log(`  First 5 3D: ${poly3d.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)},${p[2].toFixed(2)})`).join(' ')}`);
+        }
+      }
+      return poly3d;
+    })
     .filter((loop3d) => loop3d.length >= 3)
     .map((loop3d) => projectPointsToUV(oc, sa, loop3d, { wrapU: isUPeriodic, wrapV: isVPeriodic }))
     .filter((loop2d) => loop2d.length >= 3);
@@ -4433,9 +4474,60 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         if (face.surfaceType === 'Cylinder' && uSpan > 5.5) {
           const centerInside = isPointInPolygonSimple([centerU, centerV], uvOuter);
           console.log(`[tessellateCurvedFace] Cylinder center (${centerU.toFixed(3)}, ${centerV.toFixed(3)}) inside polygon: ${centerInside}`);
+          console.log(`[tessellateCurvedFace] Cylinder has ${loops.uvHoles.length} holes`);
+
+          // DEBUG: Log the UV boundary shape
+          console.log(`[tessellateCurvedFace] Cylinder UV outer boundary (${uvOuter.length} points):`);
+          console.log(`  First 10: ${uvOuter.slice(0, 10).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
+          // Show middle section to understand shape
+          const mid = Math.floor(uvOuter.length / 2);
+          console.log(`  Middle 10 [${mid}]: ${uvOuter.slice(mid, mid+10).map((p, i) => `[${mid+i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
+          console.log(`  Last 10: ${uvOuter.slice(-10).map((p, i) => `[${uvOuter.length-10+i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
+
+          // DEBUG: Log hole UV coordinates
+          loops.uvHoles.forEach((hole, h) => {
+            console.log(`[tessellateCurvedFace] Hole ${h} UV boundary (${hole.length} points):`);
+            const holeUVals = hole.map(p => p[0]);
+            const holeVVals = hole.map(p => p[1]);
+            console.log(`  Hole U range: [${Math.min(...holeUVals).toFixed(3)}, ${Math.max(...holeUVals).toFixed(3)}]`);
+            console.log(`  Hole V range: [${Math.min(...holeVVals).toFixed(3)}, ${Math.max(...holeVVals).toFixed(3)}]`);
+            console.log(`  Hole first 5: ${hole.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
+          });
+
           if (!centerInside) {
-            console.log(`[tessellateCurvedFace] Cylinder UV boundary doesn't enclose center - falling back to full surface`);
-            throw new Error('Cylinder seam boundary - use full surface tessellation');
+            // For full cylinders with holes, we CAN'T fall back to tessellateCylinder
+            // because it doesn't support holes. Instead, construct a proper rectangular
+            // UV boundary that covers the full surface.
+            if (loops.uvHoles.length > 0) {
+              console.log(`[tessellateCurvedFace] Full cylinder with ${loops.uvHoles.length} holes - constructing rectangular UV boundary`);
+
+              // The UV coordinates use range [-π, π] for U (angle)
+              // Construct a proper rectangle that encloses the full cylinder
+              const PI = Math.PI;
+              const rectBoundary: Vec2[] = [
+                [-PI, vMin],
+                [PI, vMin],
+                [PI, vMax],
+                [-PI, vMax]
+              ];
+
+              // Replace the degenerate seam boundary with the rectangle
+              loops.uvOuter = rectBoundary;
+              console.log(`[tessellateCurvedFace] Using rectangular boundary: U=[-π, π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+
+              // Verify hole is within the boundary
+              loops.uvHoles.forEach((hole, h) => {
+                const holeUs = hole.map(p => p[0]);
+                const holeUMin = Math.min(...holeUs);
+                const holeUMax = Math.max(...holeUs);
+                if (holeUMin < -PI || holeUMax > PI) {
+                  console.warn(`[tessellateCurvedFace] Hole ${h} extends outside [-π, π]: [${holeUMin.toFixed(3)}, ${holeUMax.toFixed(3)}]`);
+                }
+              });
+            } else {
+              console.log(`[tessellateCurvedFace] Cylinder UV boundary doesn't enclose center - falling back to full surface`);
+              throw new Error('Cylinder seam boundary - use full surface tessellation');
+            }
           }
         }
 

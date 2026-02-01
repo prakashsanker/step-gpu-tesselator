@@ -603,6 +603,38 @@ export async function tessellateTrimmedSurface(
     const testInHole = continuousHoles.some(hole => isPointInPolygon([testU, testV], hole));
     console.log(`[tessellateTrimmedSurface] Test point (${testU.toFixed(3)}, ${testV.toFixed(3)}): insideBoundary=${testInside}, insideHole=${testInHole}`);
 
+    // Debug: trace through point-in-polygon for the center point
+    if (!testInside && continuousHoles.length === 0) {
+        console.log(`[DEBUG] Tracing point-in-polygon for center point:`);
+        let crossings = 0;
+        for (let i = 0, j = continuousBoundary.length - 1; i < continuousBoundary.length; j = i++) {
+            const [xi, yi] = continuousBoundary[i];
+            const [xj, yj] = continuousBoundary[j];
+            const yCrossesRay = ((yi > testV) !== (yj > testV));
+            if (yCrossesRay) {
+                const xIntersect = (xj - xi) * (testV - yi) / (yj - yi) + xi;
+                if (testU < xIntersect) {
+                    crossings++;
+                    if (crossings <= 10) {
+                        console.log(`  Crossing ${crossings}: edge [${j}]->[${i}] from (${xj.toFixed(2)},${yj.toFixed(2)}) to (${xi.toFixed(2)},${yi.toFixed(2)}), intersect at x=${xIntersect.toFixed(2)}`);
+                    }
+                }
+            }
+        }
+        console.log(`[DEBUG] Total crossings: ${crossings} -> inside=${crossings % 2 === 1}`);
+
+        // Show boundary polygon structure
+        console.log(`[DEBUG] Boundary polygon (${continuousBoundary.length} points):`);
+        console.log(`  First 5: ${continuousBoundary.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
+        const quarter = Math.floor(continuousBoundary.length / 4);
+        console.log(`  At ${quarter}: (${continuousBoundary[quarter][0].toFixed(2)},${continuousBoundary[quarter][1].toFixed(2)})`);
+        const half = Math.floor(continuousBoundary.length / 2);
+        console.log(`  At ${half}: (${continuousBoundary[half][0].toFixed(2)},${continuousBoundary[half][1].toFixed(2)})`);
+        const threeQuarter = Math.floor(continuousBoundary.length * 3 / 4);
+        console.log(`  At ${threeQuarter}: (${continuousBoundary[threeQuarter][0].toFixed(2)},${continuousBoundary[threeQuarter][1].toFixed(2)})`);
+        console.log(`  Last 5: ${continuousBoundary.slice(-5).map((p, i) => `[${continuousBoundary.length-5+i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
+    }
+
     // Additional diagnostic: test a point that SHOULD be inside the hole
     if (continuousHoles.length > 0) {
         const hole = continuousHoles[0];
