@@ -13,7 +13,7 @@
  * - Triangle aspect ratio control (C7.4)
  */
 
-import { constrainedDelaunayTriangulation } from "./cdt-gpu";
+import { constrainedDelaunayTriangulation, cdtWithHoles } from "./cdt-gpu";
 import { evaluateSurface, surfaceNormal } from "./surfaces";
 import { createRectangularUVBoundary } from "./uv-extraction";
 import {
@@ -471,6 +471,48 @@ export async function tessellateTrimmedSurface(
         }
     }
 
+    // ===== Use CDT with holes for proper hole support =====
+    // CDT (Constrained Delaunay Triangulation) with cavity-based constraint recovery
+    // ensures hole boundary edges are preserved in the triangulation
+    if (continuousHoles.length > 0) {
+        console.log(`[tessellateTrimmedSurface] Using CDT with ${continuousHoles.length} holes`);
+
+        // If boundary is sparse (e.g., just 4 rectangle corners), densify it
+        // to get better triangulation quality on curved surfaces
+        let denseBoundary: Vec2[];
+        if (continuousBoundary.length <= 8) {
+            denseBoundary = [];
+            for (let i = 0; i < continuousBoundary.length; i++) {
+                const p1 = continuousBoundary[i];
+                const p2 = continuousBoundary[(i + 1) % continuousBoundary.length];
+                // Add points along this edge
+                const edgePoints = Math.max(8, gridDensity);
+                for (let t = 0; t < edgePoints; t++) {
+                    const u = p1[0] + (p2[0] - p1[0]) * (t / edgePoints);
+                    const v = p1[1] + (p2[1] - p1[1]) * (t / edgePoints);
+                    denseBoundary.push([u, v]);
+                }
+            }
+            console.log(`[tessellateTrimmedSurface] Densified boundary from ${continuousBoundary.length} to ${denseBoundary.length} points`);
+        } else {
+            denseBoundary = continuousBoundary;
+        }
+
+        // Use CDT with holes - proper Constrained Delaunay Triangulation
+        // that recovers constraint edges using cavity-based approach
+        const triangles = await cdtWithHoles(denseBoundary, continuousHoles);
+        console.log(`[tessellateTrimmedSurface] CDT with holes generated ${triangles.length} triangles`);
+
+        // Build combined vertex array (boundary + all holes)
+        const allVertices: Vec2[] = [...denseBoundary];
+        for (const hole of continuousHoles) {
+            allVertices.push(...hole);
+        }
+
+        return evaluateUVMesh(surface, allVertices, triangles);
+    }
+    // ===== End CDT with holes =====
+
     // Find UV bounding box from the continuous boundary
     let uMin = Infinity, uMax = -Infinity;
     let vMin = Infinity, vMax = -Infinity;
@@ -560,6 +602,59 @@ export async function tessellateTrimmedSurface(
     const testInside = isPointInPolygon([testU, testV], continuousBoundary);
     const testInHole = continuousHoles.some(hole => isPointInPolygon([testU, testV], hole));
     console.log(`[tessellateTrimmedSurface] Test point (${testU.toFixed(3)}, ${testV.toFixed(3)}): insideBoundary=${testInside}, insideHole=${testInHole}`);
+
+    // Additional diagnostic: test a point that SHOULD be inside the hole
+    if (continuousHoles.length > 0) {
+        const hole = continuousHoles[0];
+        const holeUs = hole.map(p => p[0]);
+        const holeVs = hole.map(p => p[1]);
+        const holeCenterU = (Math.min(...holeUs) + Math.max(...holeUs)) / 2;
+        const holeCenterV = (Math.min(...holeVs) + Math.max(...holeVs)) / 2;
+        const holeCenterInHole = isPointInPolygon([holeCenterU, holeCenterV], hole);
+        console.log(`[tessellateTrimmedSurface] Hole center (${holeCenterU.toFixed(3)}, ${holeCenterV.toFixed(3)}): insideHole=${holeCenterInHole}`);
+
+        // Debug: manually trace through point-in-polygon for the hole center
+        let debugCrossings = 0;
+        const testX = holeCenterU;
+        const testY = holeCenterV;
+        for (let i = 0, j = hole.length - 1; i < hole.length; j = i++) {
+            const [xi, yi] = hole[i];
+            const [xj, yj] = hole[j];
+            const yCrossesRay = ((yi > testY) !== (yj > testY));
+            if (yCrossesRay) {
+                const xIntersect = (xj - xi) * (testY - yi) / (yj - yi) + xi;
+                if (testX < xIntersect) {
+                    debugCrossings++;
+                    if (debugCrossings <= 5) {
+                        console.log(`[DEBUG] Crossing ${debugCrossings}: edge [${j}]->[${i}] from (${xj.toFixed(2)},${yj.toFixed(2)}) to (${xi.toFixed(2)},${yi.toFixed(2)}), intersect at x=${xIntersect.toFixed(2)}`);
+                    }
+                }
+            }
+        }
+        console.log(`[DEBUG] Total crossings: ${debugCrossings} -> inside=${debugCrossings % 2 === 1}`);
+
+        // Check if all hole points are in expected range
+        const outOfRangeU = hole.filter(p => p[0] < -4 || p[0] > 7);
+        const outOfRangeV = hole.filter(p => p[1] < -1 || p[1] > 3);
+        if (outOfRangeU.length > 0 || outOfRangeV.length > 0) {
+            console.log(`[DEBUG] WARNING: ${outOfRangeU.length} points have U outside [-4,7], ${outOfRangeV.length} have V outside [-1,3]`);
+        }
+
+        // Show the polygon vertices at key positions
+        console.log(`[DEBUG] Hole polygon shape (${hole.length} points):`);
+        console.log(`  [0]: (${hole[0][0].toFixed(3)}, ${hole[0][1].toFixed(3)})`);
+        console.log(`  [1]: (${hole[1][0].toFixed(3)}, ${hole[1][1].toFixed(3)})`);
+        const mid = Math.floor(hole.length / 2);
+        console.log(`  [${mid}]: (${hole[mid][0].toFixed(3)}, ${hole[mid][1].toFixed(3)})`);
+        console.log(`  [${hole.length-2}]: (${hole[hole.length-2][0].toFixed(3)}, ${hole[hole.length-2][1].toFixed(3)})`);
+        console.log(`  [${hole.length-1}]: (${hole[hole.length-1][0].toFixed(3)}, ${hole[hole.length-1][1].toFixed(3)})`);
+
+        // Check if first point at V=0.6, last points approaching first
+        const firstV = hole[0][1];
+        const lastV = hole[hole.length-1][1];
+        console.log(`[DEBUG] First point V=${firstV.toFixed(3)}, last point V=${lastV.toFixed(3)}`);
+        console.log(`[DEBUG] Test point V=${testY.toFixed(3)} - should be between ${Math.min(firstV, lastV).toFixed(3)} and ${Math.max(firstV, lastV).toFixed(3)} for the vertical edges`);
+    }
 
     // Create triangles from the grid
     const triangles: [number, number, number][] = [];
