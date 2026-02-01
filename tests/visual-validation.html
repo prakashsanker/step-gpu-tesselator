@@ -150,6 +150,59 @@
             <optgroup label="Complex">
                 <option value="step-examples/complex/rotor-201nal.step">Rotor</option>
                 <option value="step-examples/complex/cube.step">Cube</option>
+                <option value="step-examples/complex/nissan.step">Nissan</option>
+                <option value="step-examples/complex/air.step">Air</option>
+                <option value="step-examples/complex/raw-material.step">Raw Material</option>
+                <option value="step-examples/complex/rocky_house.step">Rocky House</option>
+                <option value="step-examples/complex/conical-surface.step">Conical Surface</option>
+            </optgroup>
+            <optgroup label="B-Spline Surfaces">
+                <option value="step-examples/c5-bspline/simple-bspline-surface.step">Simple B-Spline</option>
+                <option value="step-examples/c5-bspline/bspline-bowl.step">B-Spline Bowl</option>
+                <option value="step-examples/c5-bspline/bspline-dome.step">B-Spline Dome</option>
+                <option value="step-examples/c5-bspline/bspline-saddle.step">B-Spline Saddle</option>
+                <option value="step-examples/c5-bspline/bspline-wave.step">B-Spline Wave</option>
+            </optgroup>
+            <optgroup label="Trimmed Surfaces">
+                <option value="step-examples/c6-trimmed/half-cylinder.step">Half Cylinder</option>
+                <option value="step-examples/c6-trimmed/cylinder-with-hole.step">Cylinder with Hole</option>
+                <option value="step-examples/c6-trimmed/cylinder-two-holes.step">Cylinder Two Holes</option>
+                <option value="step-examples/c6-trimmed/quarter-cylinder-hole.step">Quarter Cylinder Hole</option>
+                <option value="step-examples/c6-trimmed/pipe-with-porthole.step">Pipe with Porthole</option>
+                <option value="step-examples/c6-trimmed/full-cylinder-window.step">Full Cylinder Window</option>
+            </optgroup>
+            <optgroup label="Real World - AP203 (Catia V5)">
+                <option value="step-examples/external/steptools/123Block_Color.stp">123Block Color</option>
+                <option value="step-examples/external/steptools/123Block_Dimension.stp">123Block Dimension</option>
+                <option value="step-examples/external/steptools/123Block_Short_Note.stp">123Block Short Note</option>
+                <option value="step-examples/external/steptools/boxy_with_cylindricity.stp">Boxy Cylindricity</option>
+                <option value="step-examples/external/steptools/boxy_with_diamsize.stp">Boxy Diamsize</option>
+                <option value="step-examples/external/steptools/boxy_with_flatness.stp">Boxy Flatness</option>
+                <option value="step-examples/external/steptools/boxy_with_limitsandfits.stp">Boxy Limits & Fits</option>
+                <option value="step-examples/external/steptools/boxy_with_linearsize.stp">Boxy Linear Size</option>
+                <option value="step-examples/external/steptools/boxy_with_perp.stp">Boxy Perpendicularity</option>
+                <option value="step-examples/external/steptools/boxy_with_surfacetex.stp">Boxy Surface Texture</option>
+            </optgroup>
+            <optgroup label="Real World - AP214 (Multi-CAD)">
+                <option value="step-examples/external/steptools-ap214/as1-ac-214.stp">AS1 AutoCAD</option>
+                <option value="step-examples/external/steptools-ap214/as1-ec-214.stp">AS1 Euclid</option>
+                <option value="step-examples/external/steptools-ap214/as1-md-214.stp">AS1 MicroStation</option>
+                <option value="step-examples/external/steptools-ap214/as1-ug-214.stp">AS1 Unigraphics</option>
+                <option value="step-examples/external/steptools-ap214/d2-db-214.stp">D2 Debis</option>
+                <option value="step-examples/external/steptools-ap214/f1-db-214.stp">F1 Debis</option>
+                <option value="step-examples/external/steptools-ap214/io1-ac-214.stp">IO1 AutoCAD</option>
+                <option value="step-examples/external/steptools-ap214/io1-ca-214.stp">IO1 CADDS</option>
+                <option value="step-examples/external/steptools-ap214/io1-ec-214.stp">IO1 Euclid</option>
+                <option value="step-examples/external/steptools-ap214/io1-md-214.stp">IO1 MicroStation</option>
+                <option value="step-examples/external/steptools-ap214/io1-ug-214.stp">IO1 Unigraphics</option>
+            </optgroup>
+            <optgroup label="Real World - AP224 (Manufacturing)">
+                <option value="step-examples/external/steptools-ap224/ap224_995277945.stp">AP224 Part 1</option>
+                <option value="step-examples/external/steptools-ap224/ap224_995288709.stp">AP224 Part 2</option>
+                <option value="step-examples/external/steptools-ap224/ap224_995315479.stp">AP224 Part 3</option>
+                <option value="step-examples/external/steptools-ap224/ap224_995602415.stp">AP224 Part 4</option>
+                <option value="step-examples/external/steptools-ap224/ap224_997423743.stp">AP224 Part 5</option>
+                <option value="step-examples/external/steptools-ap224/ap224_997865309.stp">AP224 Part 6</option>
             </optgroup>
         </select>
         <button id="runBtn" disabled>Run Comparison</button>
@@ -342,7 +395,7 @@
             }
 
             const material = new THREE.MeshStandardMaterial({
-                color: 0xff9966,  // Orange to distinguish from our pipeline
+                color: 0x6699ff,  // Same as our pipeline for pixel comparison
                 metalness: 0.2,
                 roughness: 0.5,
                 side: THREE.DoubleSide,

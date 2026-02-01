@@ -1,0 +1,1435 @@
+{
+  "timestamp": "2026-02-01T05:28:43.258Z",
+  "config": {
+    "pixelThreshold": 0.05,
+    "colorThreshold": 0.1
+  },
+  "summary": {
+    "passed": 92,
+    "failed": 24,
+    "errors": 3,
+    "total": 119
+  },
+  "results": [
+    {
+      "file": "step-examples/complex/nissan.step",
+      "status": "error",
+      "error": "Reference failed",
+      "ours": {
+        "triangles": 0
+      },
+      "reference": {
+        "triangles": null
+      },
+      "diffPercent": null
+    },
+    {
+      "file": "step-examples/complex/rocky_house.step",
+      "status": "error",
+      "error": "Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed.",
+      "ours": null,
+      "reference": null,
+      "diffPercent": null
+    },
+    {
+      "file": "step-examples/complex/rotor-201nal.step",
+      "status": "error",
+      "error": "Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed.",
+      "ours": null,
+      "reference": null,
+      "diffPercent": null
+    },
+    {
+      "file": "step-examples/c5-bspline/bspline-saddle.step",
+      "status": "fail",
+      "diffPercent": 0.2534795321637427,
+      "ours": {
+        "triangles": 512
+      },
+      "reference": {
+        "triangles": 0
+      },
+      "triangleDiff": 1
+    },
+    {
+      "file": "step-examples/c5-bspline/bspline-wave.step",
+      "status": "fail",
+      "diffPercent": 0.2534795321637427,
+      "ours": {
+        "triangles": 512
+      },
+      "reference": {
+        "triangles": 0
+      },
+      "triangleDiff": 1
+    },
+    {
+      "file": "step-examples/c6-trimmed/quarter-cylinder-hole.step",
+      "status": "fail",
+      "diffPercent": 0.07074074074074074,
+      "ours": {
+        "triangles": 2172
+      },
+      "reference": {
+        "triangles": 118
+      },
+      "triangleDiff": 0.9456721915285451
+    },
+    {
+      "file": "step-examples/c8-solids/colored-solid.step",
+      "status": "fail",
+      "diffPercent": 0.07074074074074074,
+      "ours": {
+        "triangles": 2172
+      },
+      "reference": {
+        "triangles": 118
+      },
+      "triangleDiff": 0.9456721915285451
+    },
+    {
+      "file": "step-examples/c8-solids/simple-cube.step",
+      "status": "fail",
+      "diffPercent": 0.07074074074074074,
+      "ours": {
+        "triangles": 2172
+      },
+      "reference": {
+        "triangles": 118
+      },
+      "triangleDiff": 0.9456721915285451
+    },
+    {
+      "file": "step-examples/c8-solids/tetrahedron.step",
+      "status": "fail",
+      "diffPercent": 0.07074074074074074,
+      "ours": {
+        "triangles": 2172
+      },
+      "reference": {
+        "triangles": 118
+      },
+      "triangleDiff": 0.9456721915285451
+    },
+    {
+      "file": "step-examples/complex/air.step",
+      "status": "fail",
+      "diffPercent": 0.07074074074074074,
+      "ours": {
+        "triangles": 2172
+      },
+      "reference": {
+        "triangles": 118
+      },
+      "triangleDiff": 0.9456721915285451
+    },
+    {
+      "file": "step-examples/complex/conical-surface.step",
+      "status": "fail",
+      "diffPercent": 0.08013157894736841,
+      "ours": {
+        "triangles": 9332
+      },
+      "reference": {
+        "triangles": 1318
+      },
+      "triangleDiff": 0.8587655379339906
+    },
+    {
+      "file": "step-examples/complex/cube.step",
+      "status": "fail",
+      "diffPercent": 0.08013157894736841,
+      "ours": {
+        "triangles": 9332
+      },
+      "reference": {
+        "triangles": 1318
+      },
+      "triangleDiff": 0.8587655379339906
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/as1-ac-214.stp",
+      "status": "fail",
+      "diffPercent": 0.0728849902534113,
+      "ours": {
+        "triangles": 70051
+      },
+      "reference": {
+        "triangles": 3848
+      },
+      "triangleDiff": 0.9450685928823286
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/as1-md-214.stp",
+      "status": "fail",
+      "diffPercent": 0.07359649122807017,
+      "ours": {
+        "triangles": 23530
+      },
+      "reference": {
+        "triangles": 3848
+      },
+      "triangleDiff": 0.8364640883977901
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/as1-tc-214.stp",
+      "status": "fail",
+      "diffPercent": 0.07359649122807017,
+      "ours": {
+        "triangles": 23530
+      },
+      "reference": {
+        "triangles": 3848
+      },
+      "triangleDiff": 0.8364640883977901
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/as1-ug-214.stp",
+      "status": "fail",
+      "diffPercent": 0.07347953216374269,
+      "ours": {
+        "triangles": 43429
+      },
+      "reference": {
+        "triangles": 3848
+      },
+      "triangleDiff": 0.9113956112275208
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/d2-db-214.stp",
+      "status": "fail",
+      "diffPercent": 0.17710526315789474,
+      "ours": {
+        "triangles": 24
+      },
+      "reference": {
+        "triangles": 24
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/f1-db-214.stp",
+      "status": "fail",
+      "diffPercent": 0.12611111111111112,
+      "ours": {
+        "triangles": 5487
+      },
+      "reference": {
+        "triangles": 442
+      },
+      "triangleDiff": 0.9194459631857117
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/io1-ac-214.stp",
+      "status": "fail",
+      "diffPercent": 0.07010233918128655,
+      "ours": {
+        "triangles": 23220
+      },
+      "reference": {
+        "triangles": 2116
+      },
+      "triangleDiff": 0.9088716623600345
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/io1-ca-214.stp",
+      "status": "fail",
+      "diffPercent": 0.07116471734892788,
+      "ours": {
+        "triangles": 201656
+      },
+      "reference": {
+        "triangles": 2184
+      },
+      "triangleDiff": 0.9891696750902527
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/io1-ec-214.stp",
+      "status": "fail",
+      "diffPercent": 0.06824561403508772,
+      "ours": {
+        "triangles": 5248
+      },
+      "reference": {
+        "triangles": 2094
+      },
+      "triangleDiff": 0.6009908536585366
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/io1-md-214.stp",
+      "status": "fail",
+      "diffPercent": 0.06984405458089668,
+      "ours": {
+        "triangles": 24043
+      },
+      "reference": {
+        "triangles": 2104
+      },
+      "triangleDiff": 0.9124901218649919
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/io1-tc-214.stp",
+      "status": "fail",
+      "diffPercent": 0.06984405458089668,
+      "ours": {
+        "triangles": 24043
+      },
+      "reference": {
+        "triangles": 2104
+      },
+      "triangleDiff": 0.9124901218649919
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/io1-ug-214.stp",
+      "status": "fail",
+      "diffPercent": 0.06916666666666667,
+      "ours": {
+        "triangles": 5157
+      },
+      "reference": {
+        "triangles": 2100
+      },
+      "triangleDiff": 0.5927865037812682
+    },
+    {
+      "file": "step-examples/external/steptools/123Block_Color.stp",
+      "status": "fail",
+      "diffPercent": 0.09296296296296297,
+      "ours": {
+        "triangles": 12
+      },
+      "reference": {
+        "triangles": 12
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/external/steptools/123Block_Dimension.stp",
+      "status": "fail",
+      "diffPercent": 0.09296296296296297,
+      "ours": {
+        "triangles": 12
+      },
+      "reference": {
+        "triangles": 12
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/external/steptools/123Block_Short_Note.stp",
+      "status": "fail",
+      "diffPercent": 0.09296296296296297,
+      "ours": {
+        "triangles": 12
+      },
+      "reference": {
+        "triangles": 12
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/benchmark/plate-large-10x10.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 172
+      },
+      "reference": {
+        "triangles": 172
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/benchmark/plate-medium-5x5.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 127
+      },
+      "reference": {
+        "triangles": 127
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/benchmark/plate-small-2x2.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 22
+      },
+      "reference": {
+        "triangles": 22
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/benchmark/plate-xlarge-20x20.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 172
+      },
+      "reference": {
+        "triangles": 172
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/benchmark/plate-xxlarge-30x30.step",
+      "status": "pass",
+      "diffPercent": 0.03398148148148148,
+      "ours": {
+        "triangles": 81
+      },
+      "reference": {
+        "triangles": 132
+      },
+      "triangleDiff": 0.38636363636363635
+    },
+    {
+      "file": "step-examples/benchmark/simple-square.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 2
+      },
+      "reference": {
+        "triangles": 2
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/concave/almost_collinear_pentagon.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 2
+      },
+      "reference": {
+        "triangles": 2
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/concave/arrow.step",
+      "status": "pass",
+      "diffPercent": 0.0035964912280701754,
+      "ours": {
+        "triangles": 5
+      },
+      "reference": {
+        "triangles": 5
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/concave/ccw-pentagon-concave.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 3
+      },
+      "reference": {
+        "triangles": 3
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/concave/concave_pentagon_single_reflex.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 3
+      },
+      "reference": {
+        "triangles": 3
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/concave/cw-pentagon-concave.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 3
+      },
+      "reference": {
+        "triangles": 3
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/concave/l-shape.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 4
+      },
+      "reference": {
+        "triangles": 4
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/convex/ccw-square.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 4
+      },
+      "reference": {
+        "triangles": 4
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/convex/convex-heptagon.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 4
+      },
+      "reference": {
+        "triangles": 4
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/convex/convex_pentagon_simple.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 4
+      },
+      "reference": {
+        "triangles": 4
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/convex/cw-square.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 4
+      },
+      "reference": {
+        "triangles": 4
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/convex/hexagon.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 4
+      },
+      "reference": {
+        "triangles": 4
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c1-triangulation/convex/octagon.step",
+      "status": "pass",
+      "diffPercent": 0.015692007797270955,
+      "ours": {
+        "triangles": 6
+      },
+      "reference": {
+        "triangles": 5
+      },
+      "triangleDiff": 0.16666666666666666
+    },
+    {
+      "file": "step-examples/c1-triangulation/convex/square.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 0
+      },
+      "reference": {
+        "triangles": 0
+      },
+      "triangleDiff": null
+    },
+    {
+      "file": "step-examples/c1-triangulation/convex/tilted-rectangle.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 0
+      },
+      "reference": {
+        "triangles": 0
+      },
+      "triangleDiff": null
+    },
+    {
+      "file": "step-examples/c1-triangulation/convex/triangle.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.2-projection/tilted-hexagon.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.2-projection/tilted-square-45deg.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.2-projection/tilted-triangle-no-plane.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.2-projection/vertical-wall-xz.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.3-winding/both-wrong.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.3-winding/correct-winding.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.3-winding/square-cw.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.3-winding/square-with-ccw-hole.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.4-topology/hole-outside-outer.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.4-topology/holes-intersect.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.4-topology/self-intersecting-outer.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.4-topology/valid-square-with-hole.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/concentric-squares.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/hexagon-with-3-holes.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 1
+      },
+      "reference": {
+        "triangles": 1
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/hexagon-with-triangle-hole.step",
+      "status": "pass",
+      "diffPercent": 0.0275682261208577,
+      "ours": {
+        "triangles": 9
+      },
+      "reference": {
+        "triangles": 7
+      },
+      "triangleDiff": 0.2222222222222222
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/l-shape-with-hole.step",
+      "status": "pass",
+      "diffPercent": 0.0275682261208577,
+      "ours": {
+        "triangles": 9
+      },
+      "reference": {
+        "triangles": 7
+      },
+      "triangleDiff": 0.2222222222222222
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/octagon-with-square-hole.step",
+      "status": "pass",
+      "diffPercent": 0.0275682261208577,
+      "ours": {
+        "triangles": 9
+      },
+      "reference": {
+        "triangles": 7
+      },
+      "triangleDiff": 0.2222222222222222
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/pentagon-with-hole.step",
+      "status": "pass",
+      "diffPercent": 0.0275682261208577,
+      "ours": {
+        "triangles": 9
+      },
+      "reference": {
+        "triangles": 7
+      },
+      "triangleDiff": 0.2222222222222222
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/rectangle-with-6-holes.step",
+      "status": "pass",
+      "diffPercent": 0.0275682261208577,
+      "ours": {
+        "triangles": 9
+      },
+      "reference": {
+        "triangles": 7
+      },
+      "triangleDiff": 0.2222222222222222
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/square-with-4-holes.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 22
+      },
+      "reference": {
+        "triangles": 22
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/square-with-arrow-hole.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 22
+      },
+      "reference": {
+        "triangles": 22
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/square-with-diamond-hole.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 22
+      },
+      "reference": {
+        "triangles": 22
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/square-with-right-hole.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 22
+      },
+      "reference": {
+        "triangles": 22
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/square-with-square-hole.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 8
+      },
+      "reference": {
+        "triangles": 8
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/square-with-three-holes.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 17
+      },
+      "reference": {
+        "triangles": 17
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/square-with-triangle-hole.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 7
+      },
+      "reference": {
+        "triangles": 7
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/square-with-two-holes.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 10
+      },
+      "reference": {
+        "triangles": 10
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/star-with-center-hole.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 10
+      },
+      "reference": {
+        "triangles": 10
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/thin-rectangle-with-slot.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 10
+      },
+      "reference": {
+        "triangles": 10
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c2-holes/2.5-triangulation/triangle-with-triangle-hole.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 10
+      },
+      "reference": {
+        "triangles": 10
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c3-curves/quarter-circle.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 10
+      },
+      "reference": {
+        "triangles": 10
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c3-curves/rotor.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 10
+      },
+      "reference": {
+        "triangles": 10
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c3-curves/rounded-cube.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 10
+      },
+      "reference": {
+        "triangles": 10
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c4-multiface/pyramid.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 6
+      },
+      "reference": {
+        "triangles": 6
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c4-multiface/tetrahedron.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 4
+      },
+      "reference": {
+        "triangles": 4
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c4-multiface/triangular-prism.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 8
+      },
+      "reference": {
+        "triangles": 8
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c4-multiface/two-triangles.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 8
+      },
+      "reference": {
+        "triangles": 8
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c4-multiface/unit-box.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 12
+      },
+      "reference": {
+        "triangles": 7
+      },
+      "triangleDiff": 0.4166666666666667
+    },
+    {
+      "file": "step-examples/c4-multiface/wedge.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 8
+      },
+      "reference": {
+        "triangles": 8
+      },
+      "triangleDiff": 0
+    },
+    {
+      "file": "step-examples/c4-surfaces/cone.step",
+      "status": "pass",
+      "diffPercent": 0.02571150097465887,
+      "ours": {
+        "triangles": 2366
+      },
+      "reference": {
+        "triangles": 1841
+      },
+      "triangleDiff": 0.22189349112426035
+    },
+    {
+      "file": "step-examples/c4-surfaces/cylinder.step",
+      "status": "pass",
+      "diffPercent": 0.0229093567251462,
+      "ours": {
+        "triangles": 312
+      },
+      "reference": {
+        "triangles": 280
+      },
+      "triangleDiff": 0.10256410256410256
+    },
+    {
+      "file": "step-examples/c4-surfaces/sphere.step",
+      "status": "pass",
+      "diffPercent": 0.00007309941520467836,
+      "ours": {
+        "triangles": 6212
+      },
+      "reference": {
+        "triangles": 3004
+      },
+      "triangleDiff": 0.5164198325820991
+    },
+    {
+      "file": "step-examples/c4-surfaces/torus.step",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 4096
+      },
+      "reference": {
+        "triangles": 5760
+      },
+      "triangleDiff": 0.28888888888888886
+    },
+    {
+      "file": "step-examples/c5-bspline/bspline-bowl.step",
+      "status": "pass",
+      "diffPercent": 0.03009746588693957,
+      "ours": {
+        "triangles": 512
+      },
+      "reference": {
+        "triangles": 116
+      },
+      "triangleDiff": 0.7734375
+    },
+    {
+      "file": "step-examples/c5-bspline/bspline-dome.step",
+      "status": "pass",
+      "diffPercent": 0.000014619883040935673,
+      "ours": {
+        "triangles": 512
+      },
+      "reference": {
+        "triangles": 3032
+      },
+      "triangleDiff": 0.8311345646437994
+    },
+    {
+      "file": "step-examples/c5-bspline/simple-bspline-surface.step",
+      "status": "pass",
+      "diffPercent": 0.02887426900584795,
+      "ours": {
+        "triangles": 512
+      },
+      "reference": {
+        "triangles": 116
+      },
+      "triangleDiff": 0.7734375
+    },
+    {
+      "file": "step-examples/c6-trimmed/cylinder-two-holes.step",
+      "status": "pass",
+      "diffPercent": 0.02154970760233918,
+      "ours": {
+        "triangles": 388
+      },
+      "reference": {
+        "triangles": 348
+      },
+      "triangleDiff": 0.10309278350515463
+    },
+    {
+      "file": "step-examples/c6-trimmed/cylinder-with-hole.step",
+      "status": "pass",
+      "diffPercent": 0.023435672514619883,
+      "ours": {
+        "triangles": 352
+      },
+      "reference": {
+        "triangles": 308
+      },
+      "triangleDiff": 0.125
+    },
+    {
+      "file": "step-examples/c6-trimmed/full-cylinder-window.step",
+      "status": "pass",
+      "diffPercent": 0.023435672514619883,
+      "ours": {
+        "triangles": 352
+      },
+      "reference": {
+        "triangles": 320
+      },
+      "triangleDiff": 0.09090909090909091
+    },
+    {
+      "file": "step-examples/c6-trimmed/half-cylinder.step",
+      "status": "pass",
+      "diffPercent": 0.04135477582846004,
+      "ours": {
+        "triangles": 1091
+      },
+      "reference": {
+        "triangles": 78
+      },
+      "triangleDiff": 0.928505957836847
+    },
+    {
+      "file": "step-examples/c6-trimmed/pipe-with-porthole.step",
+      "status": "pass",
+      "diffPercent": 0.01047270955165692,
+      "ours": {
+        "triangles": 2401
+      },
+      "reference": {
+        "triangles": 70
+      },
+      "triangleDiff": 0.9708454810495627
+    },
+    {
+      "file": "step-examples/complex/raw-material.step",
+      "status": "pass",
+      "diffPercent": 0.0005555555555555556,
+      "ours": {
+        "triangles": 13838
+      },
+      "reference": {
+        "triangles": 332
+      },
+      "triangleDiff": 0.9760080936551525
+    },
+    {
+      "file": "step-examples/complex/rocky_house_car.step",
+      "status": "pass",
+      "diffPercent": 0.0005555555555555556,
+      "ours": {
+        "triangles": 13838
+      },
+      "reference": {
+        "triangles": 332
+      },
+      "triangleDiff": 0.9760080936551525
+    },
+    {
+      "file": "step-examples/complex/rocky_house_roof.step",
+      "status": "pass",
+      "diffPercent": 0.0005555555555555556,
+      "ours": {
+        "triangles": 13838
+      },
+      "reference": {
+        "triangles": 332
+      },
+      "triangleDiff": 0.9760080936551525
+    },
+    {
+      "file": "step-examples/complex/rocky_house_sofa.step",
+      "status": "pass",
+      "diffPercent": 0.0005555555555555556,
+      "ours": {
+        "triangles": 13838
+      },
+      "reference": {
+        "triangles": 332
+      },
+      "triangleDiff": 0.9760080936551525
+    },
+    {
+      "file": "step-examples/complex/rocky_house_table.step",
+      "status": "pass",
+      "diffPercent": 0.0005555555555555556,
+      "ours": {
+        "triangles": 13838
+      },
+      "reference": {
+        "triangles": 332
+      },
+      "triangleDiff": 0.9760080936551525
+    },
+    {
+      "file": "step-examples/complex/rocky_house_terrain.step",
+      "status": "pass",
+      "diffPercent": 0.0005555555555555556,
+      "ours": {
+        "triangles": 13838
+      },
+      "reference": {
+        "triangles": 332
+      },
+      "triangleDiff": 0.9760080936551525
+    },
+    {
+      "file": "step-examples/external/steptools-ap214/as1-ec-214.stp",
+      "status": "pass",
+      "diffPercent": 0,
+      "ours": {
+        "triangles": 258310
+      },
+      "reference": {
+        "triangles": 4688
+      },
+      "triangleDiff": 0.9818512639851341
+    },
+    {
+      "file": "step-examples/external/steptools-ap224/ap224_995277945.stp",
+      "status": "pass",
+      "diffPercent": 0.00915204678362573,
+      "ours": {
+        "triangles": 68009
+      },
+      "reference": {
+        "triangles": 4000
+      },
+      "triangleDiff": 0.9411842550250702
+    },
+    {
+      "file": "step-examples/external/steptools-ap224/ap224_995288709.stp",
+      "status": "pass",
+      "diffPercent": 0.005584795321637427,
+      "ours": {
+        "triangles": 44830
+      },
+      "reference": {
+        "triangles": 3800
+      },
+      "triangleDiff": 0.9152353334820432
+    },
+    {
+      "file": "step-examples/external/steptools-ap224/ap224_995315479.stp",
+      "status": "pass",
+      "diffPercent": 0.0005165692007797271,
+      "ours": {
+        "triangles": 27891
+      },
+      "reference": {
+        "triangles": 1352
+      },
+      "triangleDiff": 0.9515255817288731
+    },
+    {
+      "file": "step-examples/external/steptools-ap224/ap224_995602415.stp",
+      "status": "pass",
+      "diffPercent": 0.006900584795321637,
+      "ours": {
+        "triangles": 30259
+      },
+      "reference": {
+        "triangles": 2382
+      },
+      "triangleDiff": 0.9212796192868238
+    },
+    {
+      "file": "step-examples/external/steptools-ap224/ap224_997423743.stp",
+      "status": "pass",
+      "diffPercent": 0.0010233918128654971,
+      "ours": {
+        "triangles": 130358
+      },
+      "reference": {
+        "triangles": 11474
+      },
+      "triangleDiff": 0.9119808527286396
+    },
+    {
+      "file": "step-examples/external/steptools-ap224/ap224_997865309.stp",
+      "status": "pass",
+      "diffPercent": 0.0004970760233918128,
+      "ours": {
+        "triangles": 62902
+      },
+      "reference": {
+        "triangles": 7976
+      },
+      "triangleDiff": 0.8731995802995135
+    },
+    {
+      "file": "step-examples/external/steptools/boxy_with_cylindricity.stp",
+      "status": "pass",
+      "diffPercent": 0.0032651072124756336,
+      "ours": {
+        "triangles": 70727
+      },
+      "reference": {
+        "triangles": 4368
+      },
+      "triangleDiff": 0.9382414071005415
+    },
+    {
+      "file": "step-examples/external/steptools/boxy_with_diamsize.stp",
+      "status": "pass",
+      "diffPercent": 0.0032651072124756336,
+      "ours": {
+        "triangles": 70727
+      },
+      "reference": {
+        "triangles": 4368
+      },
+      "triangleDiff": 0.9382414071005415
+    },
+    {
+      "file": "step-examples/external/steptools/boxy_with_flatness.stp",
+      "status": "pass",
+      "diffPercent": 0.0032651072124756336,
+      "ours": {
+        "triangles": 70727
+      },
+      "reference": {
+        "triangles": 4368
+      },
+      "triangleDiff": 0.9382414071005415
+    },
+    {
+      "file": "step-examples/external/steptools/boxy_with_limitsandfits.stp",
+      "status": "pass",
+      "diffPercent": 0.0032651072124756336,
+      "ours": {
+        "triangles": 70727
+      },
+      "reference": {
+        "triangles": 4368
+      },
+      "triangleDiff": 0.9382414071005415
+    },
+    {
+      "file": "step-examples/external/steptools/boxy_with_linearsize.stp",
+      "status": "pass",
+      "diffPercent": 0.0032651072124756336,
+      "ours": {
+        "triangles": 70727
+      },
+      "reference": {
+        "triangles": 4368
+      },
+      "triangleDiff": 0.9382414071005415
+    },
+    {
+      "file": "step-examples/external/steptools/boxy_with_perp.stp",
+      "status": "pass",
+      "diffPercent": 0.0032651072124756336,
+      "ours": {
+        "triangles": 70727
+      },
+      "reference": {
+        "triangles": 4368
+      },
+      "triangleDiff": 0.9382414071005415
+    },
+    {
+      "file": "step-examples/external/steptools/boxy_with_surfacetex.stp",
+      "status": "pass",
+      "diffPercent": 0.0032651072124756336,
+      "ours": {
+        "triangles": 70727
+      },
+      "reference": {
+        "triangles": 4368
+      },
+      "triangleDiff": 0.9382414071005415
+    }
+  ]
+}
