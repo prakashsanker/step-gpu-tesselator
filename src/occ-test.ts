@@ -13,6 +13,7 @@ import {
 import { earClipping } from './ear-clipping';
 import { constrainedDelaunayTriangulation } from './cdt-gpu';
 import { bridgeAllHoles } from './step-parser';
+import { triangulateWithHoles } from './triangulate-fast';
 
 // Triangulation method type
 export type TriangulationMethod = 'ear-clipping' | 'cdt';
@@ -3018,6 +3019,20 @@ function getCurveTypeName(oc: any, curveHandle: any): string {
  */
 async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<{ outerLoop: EdgeInfo[]; innerLoops: EdgeInfo[][] }> {
   const wires: EdgeInfo[][] = [];
+  const wireHashes: number[] = [];
+
+  // Get the outer wire hash for comparison
+  let outerWireHash: number | null = null;
+  if (oc.BRepTools && oc.BRepTools.OuterWire) {
+    try {
+      const outerWire = oc.BRepTools.OuterWire(face);
+      if (outerWire && !outerWire.IsNull()) {
+        outerWireHash = outerWire.HashCode ? outerWire.HashCode(2147483647) : null;
+      }
+    } catch (e) {
+      // OuterWire not available for this face
+    }
+  }
 
   try {
     // Use TopExp_Explorer to iterate over wires in the face
@@ -3031,6 +3046,10 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
     while (wireExplorer.More()) {
       const wireShape = wireExplorer.Current();
       const wire = oc.TopoDS.Wire_1(wireShape);
+
+      // Track wire hash for outer wire identification
+      const wireHash = wire.HashCode ? wire.HashCode(2147483647) : wireIndex;
+      wireHashes.push(wireHash);
 
       const edges: EdgeInfo[] = [];
 
@@ -3081,6 +3100,11 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
           const edge = oc.TopoDS.Edge_1(edgeShape);
           const edgeHash = edge.HashCode ? edge.HashCode(2147483647) : edgeIndex;
           wireExplorerHashes.push(edgeHash);
+
+          // Check if curve adaptor is available (needed for curve type detection and sampling)
+          if (!oc.BRepAdaptor_Curve_2) {
+            console.warn(`[extractFaceEdges] WARNING: BRepAdaptor_Curve_2 not available - curve sampling disabled!`);
+          }
 
           // Try to use TopExp::FirstVertex and LastVertex which respect edge orientation
           // These are the proper OCC way to get vertices with correct orientation
@@ -3153,6 +3177,12 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
               // Number of samples depends on curve type and arc length
               // For circles, use more samples for full circles
               const paramRange = last - first;
+
+              // Log arc parameters for debugging (only for first few faces)
+              if (faceIndex < 3 && curveType === 'Circle') {
+                const angleDegrees = (paramRange * 180 / Math.PI).toFixed(1);
+                console.log(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex} Edge ${edgeIndex}: Circle arc ${angleDegrees}° (params: ${first.toFixed(3)} to ${last.toFixed(3)})`);
+              }
               const MIN_SAMPLES = 32;
               const MAX_SAMPLES = 256;
               let numSamples = 64; // Default for curved edges (better detail)
@@ -3181,7 +3211,35 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
                 });
               }
 
+              // Check if edge orientation requires reversing the sampled points
+              // Compare first sampled point with startPoint (which respects edge orientation)
+              if (sampledPoints.length > 0 && gotVerticesFromTopExp) {
+                const sampledFirst = sampledPoints[0];
+                const distToStart = Math.sqrt(
+                  Math.pow(sampledFirst.x - startPoint.x, 2) +
+                  Math.pow(sampledFirst.y - startPoint.y, 2) +
+                  Math.pow(sampledFirst.z - startPoint.z, 2)
+                );
+                const sampledLast = sampledPoints[sampledPoints.length - 1];
+                const distToEnd = Math.sqrt(
+                  Math.pow(sampledLast.x - startPoint.x, 2) +
+                  Math.pow(sampledLast.y - startPoint.y, 2) +
+                  Math.pow(sampledLast.z - startPoint.z, 2)
+                );
+
+                // If the last sampled point is closer to startPoint, edge is reversed
+                if (distToEnd < distToStart) {
+                  sampledPoints.reverse();
+                  console.log(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex} Edge ${edgeIndex}: Reversed sampled points (edge orientation)`);
+                }
+              }
+
             }
+          }
+
+          // Warn if a non-Line edge doesn't have sampled points (this would cause tessellation issues)
+          if (curveType !== 'Line' && (!sampledPoints || sampledPoints.length === 0)) {
+            console.warn(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex} Edge ${edgeIndex}: ${curveType} edge has NO sampled points!`);
           }
 
           edges.push({
@@ -3231,6 +3289,12 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
     console.error(`[OCC] Error extracting edges for face ${faceIndex}:`, e);
   }
 
+  console.log(`[extractFaceEdges] Face ${faceIndex}: Found ${wires.length} wire(s)`);
+  for (let i = 0; i < wires.length; i++) {
+    const w = wires[i];
+    console.log(`  Wire ${i}: ${w.length} edges, types: [${w.map(e => e.curveType).join(', ')}]`);
+  }
+
   if (wires.length === 0) {
     return { outerLoop: [], innerLoops: [] };
   }
@@ -3253,14 +3317,38 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
     return length;
   };
 
-  // Wire iteration order isn't reliable; pick the outer loop as the longest wire.
+  // Try to use BRepTools.OuterWire hash for reliable outer wire identification
   let outerIdx = 0;
-  let bestLen = -Infinity;
-  for (let i = 0; i < wires.length; i++) {
-    const len = wireApproxLength(wires[i]);
-    if (len > bestLen) {
-      bestLen = len;
-      outerIdx = i;
+  let usedOuterWire = false;
+
+  if (outerWireHash !== null) {
+    // Find which wire index matches the outer wire by comparing hash codes
+    for (let i = 0; i < wireHashes.length; i++) {
+      if (wireHashes[i] === outerWireHash) {
+        outerIdx = i;
+        usedOuterWire = true;
+        console.log(`[extractFaceEdges] Face ${faceIndex}: Using OuterWire (hash ${outerWireHash}) -> Wire ${outerIdx}`);
+        break;
+      }
+    }
+  }
+
+  // Fallback: pick the outer loop as the longest wire
+  if (!usedOuterWire) {
+    let bestLen = -Infinity;
+    const wireLengths: number[] = [];
+    for (let i = 0; i < wires.length; i++) {
+      const len = wireApproxLength(wires[i]);
+      wireLengths.push(len);
+      if (len > bestLen) {
+        bestLen = len;
+        outerIdx = i;
+      }
+    }
+
+    // Log wire lengths to debug outer/inner selection
+    if (wires.length > 1) {
+      console.log(`[extractFaceEdges] Face ${faceIndex}: Wire lengths: [${wireLengths.map(l => l.toFixed(2)).join(', ')}], selected outer: Wire ${outerIdx} (by length heuristic)`);
     }
   }
 
@@ -4064,18 +4152,22 @@ async function runCheckpoint3(stepFileContent: string): Promise<{
  * For line edges: just use the start point
  * For curved edges: use the sampled points (excluding the last one to avoid duplicates)
  */
-function occEdgesToPolygon(edges: EdgeInfo[]): Vec3[] {
+function occEdgesToPolygon(edges: EdgeInfo[], debugLabel?: string): Vec3[] {
   if (edges.length === 0) return [];
 
   const polygon: Vec3[] = [];
 
   for (let i = 0; i < edges.length; i++) {
     const edge = edges[i];
+    const hasSamples = edge.sampledPoints && edge.sampledPoints.length > 0;
+    if (debugLabel) {
+      console.log(`[occEdgesToPolygon ${debugLabel}] edge ${i}: type=${edge.curveType}, sampledPoints=${edge.sampledPoints?.length || 0}`);
+    }
 
-    if (edge.sampledPoints && edge.sampledPoints.length > 0) {
+    if (hasSamples) {
       // For curved edges, use sampled points (skip last point to avoid duplicate with next edge's start)
-      for (let j = 0; j < edge.sampledPoints.length - 1; j++) {
-        const pt = edge.sampledPoints[j];
+      for (let j = 0; j < edge.sampledPoints!.length - 1; j++) {
+        const pt = edge.sampledPoints![j];
         polygon.push([pt.x, pt.y, pt.z]);
       }
     } else {
@@ -4125,10 +4217,20 @@ async function tessellatePlanarFaceFromOCC(
 
   // 1. Convert edge data to polygon vertices
   let t0 = performance.now();
-  const outer: Vec3[] = occEdgesToPolygon(face.outerLoop);
-  const holes: Vec3[][] = face.innerLoops.map(loop => occEdgesToPolygon(loop));
+  const hasHoles = face.innerLoops.length > 0;
+  const outer: Vec3[] = occEdgesToPolygon(face.outerLoop, hasHoles ? 'outer' : undefined);
+  const holes: Vec3[][] = face.innerLoops.map((loop, i) => occEdgesToPolygon(loop, `hole${i}`));
   tessellationProfile.occEdgesToPolygon.total += performance.now() - t0;
   tessellationProfile.occEdgesToPolygon.calls++;
+
+  // Diagnostic logging for planar faces with holes
+  console.log(`[tessellatePlanarFace] outerLoop: ${face.outerLoop.length} edges -> ${outer.length} vertices`);
+  console.log(`[tessellatePlanarFace] innerLoops: ${face.innerLoops.length} loops`);
+  for (let i = 0; i < face.innerLoops.length; i++) {
+    const loop = face.innerLoops[i];
+    const holeVerts = holes[i];
+    console.log(`  - hole ${i}: ${loop.length} edges -> ${holeVerts.length} vertices, types: [${loop.map(e => e.curveType).join(', ')}]`);
+  }
 
   if (outer.length < 3) {
     console.warn(`[tessellatePlanarFace] Not enough vertices: ${outer.length} (need >= 3). outerLoop has ${face.outerLoop.length} edges`);
@@ -4166,66 +4268,46 @@ async function tessellatePlanarFaceFromOCC(
   tessellationProfile.applyWindingTo3D.total += performance.now() - t0;
   tessellationProfile.applyWindingTo3D.calls++;
 
-  // 6. Bridge holes into outer polygon (required for GPU ear-clipping)
-  t0 = performance.now();
-  const mergedPolygon2d = bridgeAllHoles(normalized.outer2d, normalized.holes2d);
-  tessellationProfile.bridgeAllHoles.total += performance.now() - t0;
-  tessellationProfile.bridgeAllHoles.calls++;
-
-  // Build 2D→3D lookup for merged polygon
-  const lookup = new Map<string, Vec3>();
-  for (let i = 0; i < normalized.outer2d.length; i++) {
-    const key = `${normalized.outer2d[i][0].toFixed(9)},${normalized.outer2d[i][1].toFixed(9)}`;
-    lookup.set(key, oriented3d.outer[i]);
-  }
-  for (let h = 0; h < normalized.holes2d.length; h++) {
-    for (let i = 0; i < normalized.holes2d[h].length; i++) {
-      const key = `${normalized.holes2d[h][i][0].toFixed(9)},${normalized.holes2d[h][i][1].toFixed(9)}`;
-      lookup.set(key, oriented3d.holes[h][i]);
-    }
-  }
-
-  // Build merged 3D vertices
-  const merged3d: Vec3[] = [];
-  let missingLookups = 0;
-  for (const pt2d of mergedPolygon2d) {
-    const key = `${pt2d[0].toFixed(9)},${pt2d[1].toFixed(9)}`;
-    const pt3d = lookup.get(key);
-    if (pt3d) {
-      merged3d.push(pt3d);
-    } else {
-      missingLookups++;
-      // FALLBACK: Use 2D coords with z=0 - THIS IS WRONG but keeps the code running
-      // The bridge creates duplicate points that may not match due to floating point
-      merged3d.push([pt2d[0], pt2d[1], 0]);
-    }
-  }
-  if (missingLookups > 0) {
-    console.warn(`[tessellatePlanarFace] Face ${face.faceIndex}: ${missingLookups} of ${mergedPolygon2d.length} points missing 3D lookup - WILL CAUSE ARTIFACTS`);
-  }
-
-  // 7. Run triangulation (ear-clipping or CDT based on parameter)
+  // 6. Triangulate based on whether we have holes
   t0 = performance.now();
   let triangles: number[][];
-  if (triangulationMethod === 'cdt') {
-    // Use CDT triangulation - edge flipping DISABLED due to shader bugs
-    triangles = await constrainedDelaunayTriangulation(
-      mergedPolygon2d as [number, number][],
-      [],
-      false // DISABLED: Edge flipping produces degenerate triangles
-    );
-  } else {
-    // Use GPU ear clipping (default)
-    const points2dAsVec3: Vec3[] = mergedPolygon2d.map(p => [p[0], p[1], 0]);
-    triangles = await earClipping(points2dAsVec3);
+  let vertices3d: Vec3[];
+
+  console.log(`[tessellatePlanarFace] After projection: outer2d=${normalized.outer2d.length} verts, holes2d=${normalized.holes2d.length} holes`);
+  if (normalized.holes2d.length > 0) {
+    for (let i = 0; i < normalized.holes2d.length; i++) {
+      console.log(`  - hole2d ${i}: ${normalized.holes2d[i].length} vertices`);
+    }
   }
+
+  if (normalized.holes2d.length > 0) {
+    // HAS HOLES: Use earcut with native hole support (no bridging needed)
+    // triangulateWithHoles expects vertices in order: outer, then holes concatenated
+    // and returns indices into that combined array
+    console.log(`[tessellatePlanarFace] Using earcut with holes: outer=${normalized.outer2d.length}, holes=${normalized.holes2d.map(h => h.length).join(',')}`);
+    triangles = triangulateWithHoles(normalized.outer2d, normalized.holes2d);
+    console.log(`[tessellatePlanarFace] earcut produced ${triangles.length} triangles`);
+
+    // Build combined 3D vertices: outer + all holes
+    vertices3d = [...oriented3d.outer];
+    for (const hole of oriented3d.holes) {
+      vertices3d.push(...hole);
+    }
+  } else {
+    // NO HOLES: Use GPU ear-clipping (faster for simple polygons)
+    console.log(`[tessellatePlanarFace] Using GPU ear-clipping (no holes)`);
+    const points2dAsVec3: Vec3[] = normalized.outer2d.map(p => [p[0], p[1], 0]);
+    triangles = await earClipping(points2dAsVec3);
+    vertices3d = oriented3d.outer;
+  }
+
   tessellationProfile.earClipping.total += performance.now() - t0;
   tessellationProfile.earClipping.calls++;
 
   tessellationProfile.tessellatePlanarFace.total += performance.now() - faceStart;
   tessellationProfile.tessellatePlanarFace.calls++;
 
-  return { vertices: merged3d, triangles };
+  return { vertices: vertices3d, triangles };
 }
 
 /**
@@ -4450,6 +4532,110 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           if (!centerInside) {
             console.log(`[tessellateCurvedFace] Torus UV boundary doesn't enclose center - falling back to full surface`);
             throw new Error('Torus seam boundary - use full surface tessellation');
+          }
+        }
+
+        // For torus with V spanning ~2π (full circle in minor radius direction), check V-seam
+        // This handles cases like half-torus where U is partial but V is full
+        // Detection: look for consecutive points with a V-jump > π (seam crossing)
+        if (face.surfaceType === 'Torus' && vSpan > 5.5) {
+          let crossesVSeam = false;
+          for (let i = 0; i < uvOuter.length; i++) {
+            const v1 = uvOuter[i][1];
+            const v2 = uvOuter[(i + 1) % uvOuter.length][1];
+            const vJump = Math.abs(v2 - v1);
+            if (vJump > PI) {
+              crossesVSeam = true;
+              console.log(`[tessellateCurvedFace] Torus V-seam detected: jump of ${vJump.toFixed(3)} at index ${i} (${v1.toFixed(3)} -> ${v2.toFixed(3)})`);
+              break;
+            }
+          }
+
+          console.log(`[tessellateCurvedFace] Torus V-seam check: vSpan=${vSpan.toFixed(3)}, crossesVSeam=${crossesVSeam}`);
+
+          if (crossesVSeam) {
+            console.log(`[tessellateCurvedFace] Torus V boundary crosses seam - shifting V to [0, 2π]`);
+
+            // Shift V coordinates from [-π, π] to [0, 2π] for continuous boundary
+            loops.uvOuter = uvOuter.map(([u, v]): Vec2 => {
+              if (v < 0) {
+                return [u, v + 2 * PI];
+              }
+              return [u, v];
+            });
+
+            // Update vMin/vMax after shift
+            const shiftedVs = loops.uvOuter.map(p => p[1]);
+            const shiftedVMin = Math.min(...shiftedVs);
+            const shiftedVMax = Math.max(...shiftedVs);
+            console.log(`[tessellateCurvedFace] Torus V shifted to [0, 2π]: V=[${shiftedVMin.toFixed(3)}, ${shiftedVMax.toFixed(3)}]`);
+
+            // Shift holes as well
+            if (loops.uvHoles.length > 0) {
+              loops.uvHoles = loops.uvHoles.map((hole, h) => {
+                const shiftedHole = hole.map(([u, v]): Vec2 => {
+                  if (v < 0) {
+                    return [u, v + 2 * PI];
+                  }
+                  return [u, v];
+                });
+                const holeVs = shiftedHole.map(p => p[1]);
+                console.log(`[tessellateCurvedFace] Torus hole ${h} V shifted to [0, 2π]: V=[${Math.min(...holeVs).toFixed(3)}, ${Math.max(...holeVs).toFixed(3)}]`);
+                return shiftedHole;
+              });
+            }
+          }
+        }
+
+        // For torus with U spanning ~2π (full circle around the axis), check U-seam
+        // This handles cases like partial-height torus rings where V is partial but U is full
+        // Detection: look for consecutive points with a U-jump > π (seam crossing)
+        if (face.surfaceType === 'Torus' && uSpan > 5.5) {
+          let crossesUSeam = false;
+          for (let i = 0; i < loops.uvOuter.length; i++) {
+            const u1 = loops.uvOuter[i][0];
+            const u2 = loops.uvOuter[(i + 1) % loops.uvOuter.length][0];
+            const uJump = Math.abs(u2 - u1);
+            if (uJump > PI) {
+              crossesUSeam = true;
+              console.log(`[tessellateCurvedFace] Torus U-seam detected: jump of ${uJump.toFixed(3)} at index ${i} (${u1.toFixed(3)} -> ${u2.toFixed(3)})`);
+              break;
+            }
+          }
+
+          console.log(`[tessellateCurvedFace] Torus U-seam check: uSpan=${uSpan.toFixed(3)}, crossesUSeam=${crossesUSeam}`);
+
+          if (crossesUSeam) {
+            console.log(`[tessellateCurvedFace] Torus U boundary crosses seam - shifting U to [0, 2π]`);
+
+            // Shift U coordinates from [-π, π] to [0, 2π] for continuous boundary
+            loops.uvOuter = loops.uvOuter.map(([u, v]): Vec2 => {
+              if (u < 0) {
+                return [u + 2 * PI, v];
+              }
+              return [u, v];
+            });
+
+            // Update uMin/uMax after shift
+            const shiftedUs = loops.uvOuter.map(p => p[0]);
+            const shiftedUMin = Math.min(...shiftedUs);
+            const shiftedUMax = Math.max(...shiftedUs);
+            console.log(`[tessellateCurvedFace] Torus U shifted to [0, 2π]: U=[${shiftedUMin.toFixed(3)}, ${shiftedUMax.toFixed(3)}]`);
+
+            // Shift holes as well
+            if (loops.uvHoles.length > 0) {
+              loops.uvHoles = loops.uvHoles.map((hole, h) => {
+                const shiftedHole = hole.map(([u, v]): Vec2 => {
+                  if (u < 0) {
+                    return [u + 2 * PI, v];
+                  }
+                  return [u, v];
+                });
+                const holeUs = shiftedHole.map(p => p[0]);
+                console.log(`[tessellateCurvedFace] Torus hole ${h} U shifted to [0, 2π]: U=[${Math.min(...holeUs).toFixed(3)}, ${Math.max(...holeUs).toFixed(3)}]`);
+                return shiftedHole;
+              });
+            }
           }
         }
 
@@ -4730,6 +4916,52 @@ async function tessellateOCCShape(
       let result: { vertices: Vec3[]; triangles: number[][] };
       const faceStart = performance.now();
 
+      // DEBUG FLAG: Set to true to skip torus faces for isolation testing
+      const SKIP_TORUS_FACES = false;
+
+      // DEBUG FLAGS: Set to true to skip specific faces for isolation testing
+      // Cylinder faces summary:
+      // Face 1:  V=[4.75, 85.00], reversed=false (half cylinder)
+      // Face 2:  V=[4.75, 57.50], reversed=false (full cylinder, crosses seam)
+      // Face 4:  V=[2.24, 4.99],  reversed=false (half cylinder, short)
+      // Face 7:  V=[2.24, 4.99],  reversed=false (full cylinder, short)
+      // Face 10: V=[0.00, 27.25], reversed=true  ⚠️ V STARTS AT 0!
+      // Face 13: V=[4.15, 54.40], reversed=true  (half cylinder)
+      // Face 15: V=[4.15, 62.37], reversed=true  (full cylinder)
+      // Face 16: V=?,            reversed=true  (hole wall)
+      // Face 17: V=?,            reversed=true  (hole wall)
+      const SKIP_FACE_10 = true;   // Skip for now - rectangular boundary creates extra geometry
+      const SKIP_FACE_16 = false;  // Hole wall cylinder
+      const SKIP_FACE_17 = false;  // Hole wall cylinder
+
+      if (SKIP_TORUS_FACES && face.surfaceType === 'Torus') {
+        console.log(`[Tessellate] SKIPPING Torus face ${face.faceIndex} (debug flag)`);
+        skippedCount++;
+        processedCount++;
+        continue;
+      }
+
+      if (SKIP_FACE_10 && face.faceIndex === 10) {
+        console.log(`[Tessellate] SKIPPING Face 10 (debug flag) - Cylinder with V starting at 0`);
+        skippedCount++;
+        processedCount++;
+        continue;
+      }
+
+      if (SKIP_FACE_16 && face.faceIndex === 16) {
+        console.log(`[Tessellate] SKIPPING Face 16 (debug flag) - Cylinder`);
+        skippedCount++;
+        processedCount++;
+        continue;
+      }
+
+      if (SKIP_FACE_17 && face.faceIndex === 17) {
+        console.log(`[Tessellate] SKIPPING Face 17 (debug flag) - Cylinder`);
+        skippedCount++;
+        processedCount++;
+        continue;
+      }
+
       if (face.surfaceType === 'Plane') {
         result = await tessellatePlanarFaceFromOCC(face, triangulationMethod);
       } else if (['Cylinder', 'Sphere', 'Cone', 'Torus', 'BSplineSurface'].includes(face.surfaceType)) {
@@ -4775,6 +5007,26 @@ async function tessellateOCCShape(
           n[1] = 0;
           n[2] = 1;
         }
+      }
+
+      // Handle REVERSED face orientation
+      // When a face is REVERSED, the surface normal should point in the opposite direction.
+      // This is common for hole inner walls - the cylinder surface naturally faces outward,
+      // but for a hole it should face inward.
+      if (face.isReversed) {
+        // Flip all normals
+        for (const n of vertexNormals) {
+          n[0] = -n[0];
+          n[1] = -n[1];
+          n[2] = -n[2];
+        }
+        // Reverse triangle winding (swap indices 1 and 2) so front face is correct
+        for (const tri of result.triangles) {
+          const temp = tri[1];
+          tri[1] = tri[2];
+          tri[2] = temp;
+        }
+        console.log(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
       }
 
       tessellationProfile.computeNormals.total += performance.now() - normalStart;
