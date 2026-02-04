@@ -4446,15 +4446,43 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           }
         }
 
-        // For cones with full-circle base (U spans ~2π), the UV boundary forms a "lollipop" shape:
-        // a single apex point connected to a circle at the base. This degenerate polygon doesn't
-        // properly enclose interior points, so we need to fall back to rectangular tessellation.
+        // For cones with full-circle base (U spans ~2π), the UV boundary crosses the ±π seam.
+        // Similar to cylinders, CDT constraint recovery fails on edges that span the seam.
+        // Use seam detection and rectangular boundary in [0, 2π] range.
         if (face.surfaceType === 'Cone' && uSpan > 5.5) {
-          const centerInside = isPointInPolygonSimple([centerU, centerV], uvOuter);
-          console.log(`[tessellateCurvedFace] Cone center (${centerU.toFixed(3)}, ${centerV.toFixed(3)}) inside polygon: ${centerInside}`);
-          if (!centerInside) {
-            console.log(`[tessellateCurvedFace] Cone UV boundary doesn't enclose center - falling back to full surface`);
-            throw new Error('Cone seam boundary - use full surface tessellation');
+          const nearPosPI = uvOuter.filter(p => p[0] > PI - 0.3).length;
+          const nearNegPI = uvOuter.filter(p => p[0] < -PI + 0.3).length;
+          const crossesSeam = nearPosPI > 2 && nearNegPI > 2;
+
+          console.log(`[tessellateCurvedFace] Cone seam check: nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, crossesSeam=${crossesSeam}`);
+
+          if (crossesSeam) {
+            console.log(`[tessellateCurvedFace] Full cone crosses seam - using rectangular UV boundary`);
+
+            const rectBoundary: Vec2[] = [
+              [0, vMin],
+              [2 * PI, vMin],
+              [2 * PI, vMax],
+              [0, vMax]
+            ];
+
+            loops.uvOuter = rectBoundary;
+            console.log(`[tessellateCurvedFace] Cone using rectangular boundary: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+
+            // Shift holes to [0, 2π] range to match outer boundary
+            if (loops.uvHoles.length > 0) {
+              loops.uvHoles = loops.uvHoles.map((hole, h) => {
+                const shiftedHole = hole.map(([u, v]): Vec2 => {
+                  if (u < 0) {
+                    return [u + 2 * PI, v];
+                  }
+                  return [u, v];
+                });
+                const holeUs = shiftedHole.map(p => p[0]);
+                console.log(`[tessellateCurvedFace] Cone hole ${h} shifted to [0, 2π]: U=[${Math.min(...holeUs).toFixed(3)}, ${Math.max(...holeUs).toFixed(3)}]`);
+                return shiftedHole;
+              });
+            }
           }
         }
 
