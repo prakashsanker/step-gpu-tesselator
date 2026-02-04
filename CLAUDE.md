@@ -97,6 +97,10 @@ All GPU operations use a shared WebGPU device obtained via `lib.ts:getGPUDevice(
 - The ear clipping algorithm runs iteratively on CPU but executes compute shaders on GPU each iteration
 
 
+## Testing
+
+**IMPORTANT**: When testing STEP file rendering, always use `tests/visual-validation.html` instead of `occ-test.html` or `occ-test.js`. The visual validation harness provides proper screenshot comparison and regression testing.
+
 ## Style
 
 1. Prefer descriptive variable names.

@@ -4469,64 +4469,51 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         }
 
         // For cylinders with full-circle (U spans ~2π), the UV boundary forms a "seam rectangle":
-        // two circles at different V values connected by seam lines. This degenerate polygon
-        // doesn't properly enclose interior points, so fall back to rectangular tessellation.
+        // two circles at different V values connected by seam lines. This causes CDT to fail
+        // because constraint edges that cross the ±π seam cannot be recovered.
+        //
+        // We detect seam boundaries by checking if the boundary has points near BOTH +π AND -π.
+        // The point-in-polygon test is NOT reliable here because the center (0, midV) appears
+        // "inside" in 2D, but the boundary doesn't properly enclose the 3D surface.
         if (face.surfaceType === 'Cylinder' && uSpan > 5.5) {
-          const centerInside = isPointInPolygonSimple([centerU, centerV], uvOuter);
-          console.log(`[tessellateCurvedFace] Cylinder center (${centerU.toFixed(3)}, ${centerV.toFixed(3)}) inside polygon: ${centerInside}`);
+          // Check if boundary crosses the seam (has points near both +π and -π)
+          const nearPosPI = uvOuter.filter(p => p[0] > PI - 0.3).length;
+          const nearNegPI = uvOuter.filter(p => p[0] < -PI + 0.3).length;
+          const crossesSeam = nearPosPI > 2 && nearNegPI > 2;
+
+          console.log(`[tessellateCurvedFace] Cylinder seam check: nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, crossesSeam=${crossesSeam}`);
           console.log(`[tessellateCurvedFace] Cylinder has ${loops.uvHoles.length} holes`);
 
-          // DEBUG: Log the UV boundary shape
-          console.log(`[tessellateCurvedFace] Cylinder UV outer boundary (${uvOuter.length} points):`);
-          console.log(`  First 10: ${uvOuter.slice(0, 10).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
-          // Show middle section to understand shape
-          const mid = Math.floor(uvOuter.length / 2);
-          console.log(`  Middle 10 [${mid}]: ${uvOuter.slice(mid, mid+10).map((p, i) => `[${mid+i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
-          console.log(`  Last 10: ${uvOuter.slice(-10).map((p, i) => `[${uvOuter.length-10+i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
+          if (crossesSeam) {
+            // The boundary crosses the ±π seam. CDT constraint recovery will fail on edges
+            // that span the seam. Use a rectangular boundary in [0, 2π] range instead.
+            // Using [0, 2π] avoids the seam detection in surface-tessellation.ts which
+            // looks for points near both ±π and would collapse [-π, π] to a line.
+            console.log(`[tessellateCurvedFace] Full cylinder crosses seam - using rectangular UV boundary`);
 
-          // DEBUG: Log hole UV coordinates
-          loops.uvHoles.forEach((hole, h) => {
-            console.log(`[tessellateCurvedFace] Hole ${h} UV boundary (${hole.length} points):`);
-            const holeUVals = hole.map(p => p[0]);
-            const holeVVals = hole.map(p => p[1]);
-            console.log(`  Hole U range: [${Math.min(...holeUVals).toFixed(3)}, ${Math.max(...holeUVals).toFixed(3)}]`);
-            console.log(`  Hole V range: [${Math.min(...holeVVals).toFixed(3)}, ${Math.max(...holeVVals).toFixed(3)}]`);
-            console.log(`  Hole first 5: ${hole.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
-          });
+            const rectBoundary: Vec2[] = [
+              [0, vMin],
+              [2 * PI, vMin],
+              [2 * PI, vMax],
+              [0, vMax]
+            ];
 
-          if (!centerInside) {
-            // For full cylinders with holes, we CAN'T fall back to tessellateCylinder
-            // because it doesn't support holes. Instead, construct a proper rectangular
-            // UV boundary that covers the full surface.
+            loops.uvOuter = rectBoundary;
+            console.log(`[tessellateCurvedFace] Using rectangular boundary: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+
+            // Shift holes to [0, 2π] range to match the outer boundary
             if (loops.uvHoles.length > 0) {
-              console.log(`[tessellateCurvedFace] Full cylinder with ${loops.uvHoles.length} holes - constructing rectangular UV boundary`);
-
-              // The UV coordinates use range [-π, π] for U (angle)
-              // Construct a proper rectangle that encloses the full cylinder
-              const PI = Math.PI;
-              const rectBoundary: Vec2[] = [
-                [-PI, vMin],
-                [PI, vMin],
-                [PI, vMax],
-                [-PI, vMax]
-              ];
-
-              // Replace the degenerate seam boundary with the rectangle
-              loops.uvOuter = rectBoundary;
-              console.log(`[tessellateCurvedFace] Using rectangular boundary: U=[-π, π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
-
-              // Verify hole is within the boundary
-              loops.uvHoles.forEach((hole, h) => {
-                const holeUs = hole.map(p => p[0]);
-                const holeUMin = Math.min(...holeUs);
-                const holeUMax = Math.max(...holeUs);
-                if (holeUMin < -PI || holeUMax > PI) {
-                  console.warn(`[tessellateCurvedFace] Hole ${h} extends outside [-π, π]: [${holeUMin.toFixed(3)}, ${holeUMax.toFixed(3)}]`);
-                }
+              loops.uvHoles = loops.uvHoles.map((hole, h) => {
+                const shiftedHole = hole.map(([u, v]): Vec2 => {
+                  if (u < 0) {
+                    return [u + 2 * PI, v];
+                  }
+                  return [u, v];
+                });
+                const holeUs = shiftedHole.map(p => p[0]);
+                console.log(`[tessellateCurvedFace] Hole ${h} shifted to [0, 2π]: U=[${Math.min(...holeUs).toFixed(3)}, ${Math.max(...holeUs).toFixed(3)}]`);
+                return shiftedHole;
               });
-            } else {
-              console.log(`[tessellateCurvedFace] Cylinder UV boundary doesn't enclose center - falling back to full surface`);
-              throw new Error('Cylinder seam boundary - use full surface tessellation');
             }
           }
         }
