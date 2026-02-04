@@ -4187,14 +4187,21 @@ async function tessellatePlanarFaceFromOCC(
 
   // Build merged 3D vertices
   const merged3d: Vec3[] = [];
+  let missingLookups = 0;
   for (const pt2d of mergedPolygon2d) {
     const key = `${pt2d[0].toFixed(9)},${pt2d[1].toFixed(9)}`;
     const pt3d = lookup.get(key);
     if (pt3d) {
       merged3d.push(pt3d);
     } else {
+      missingLookups++;
+      // FALLBACK: Use 2D coords with z=0 - THIS IS WRONG but keeps the code running
+      // The bridge creates duplicate points that may not match due to floating point
       merged3d.push([pt2d[0], pt2d[1], 0]);
     }
+  }
+  if (missingLookups > 0) {
+    console.warn(`[tessellatePlanarFace] Face ${face.faceIndex}: ${missingLookups} of ${mergedPolygon2d.length} points missing 3D lookup - WILL CAUSE ARTIFACTS`);
   }
 
   // 7. Run triangulation (ear-clipping or CDT based on parameter)
