@@ -4294,8 +4294,8 @@ async function tessellatePlanarFaceFromOCC(
       vertices3d.push(...hole);
     }
   } else {
-    // NO HOLES: Use GPU ear-clipping (faster for simple polygons)
-    console.log(`[tessellatePlanarFace] Using GPU ear-clipping (no holes)`);
+    // NO HOLES: Use GPU tessellation (faster for simple polygons)
+    console.log(`[tessellatePlanarFace] Using GPU tessellation (no holes)`);
     const points2dAsVec3: Vec3[] = normalized.outer2d.map(p => [p[0], p[1], 0]);
     triangles = await earClipping(points2dAsVec3);
     vertices3d = oriented3d.outer;
@@ -5044,7 +5044,8 @@ function computeTriangleNormal(v0: Vec3, v1: Vec3, v2: Vec3): Vec3 {
  */
 async function tessellateOCCShape(
   faces: FaceWithEdgesInfo[],
-  triangulationMethod: TriangulationMethod = 'ear-clipping'
+  triangulationMethod: TriangulationMethod = 'ear-clipping',
+  onProgress?: (percent: number) => void
 ): Promise<Mesh> {
   const shapeStart = performance.now();
   console.log(`[Tessellate] Starting tessellation of ${faces.length} faces...`);
@@ -5067,6 +5068,13 @@ async function tessellateOCCShape(
         const elapsed = ((performance.now() - shapeStart) / 1000).toFixed(1);
         const pct = ((processedCount / faces.length) * 100).toFixed(1);
         console.log(`[Tessellate] Face ${processedCount}/${faces.length} (${pct}%) - ${elapsed}s elapsed - type: ${face.surfaceType}`);
+        if (onProgress) {
+          // Map tessellation progress to 20-100% of overall progress
+          const overallPct = Math.round(20 + (processedCount / faces.length) * 80);
+          onProgress(overallPct);
+          // Yield to let the UI update
+          await new Promise(r => setTimeout(r, 0));
+        }
       }
       let result: { vertices: Vec3[]; triangles: number[][] };
       const faceStart = performance.now();
@@ -5511,12 +5519,14 @@ async function runCheckpoint5(stepFileContent: string): Promise<{
  */
 export async function parseStepWithOCC(
   stepFileContent: Uint8Array | string,
-  triangulationMethod: TriangulationMethod = 'ear-clipping'
+  triangulationMethod: TriangulationMethod = 'ear-clipping',
+  onProgress?: (percent: number) => void
 ): Promise<Mesh> {
-  console.log(`[parseStepWithOCC] Starting with ${triangulationMethod} triangulation...`);
+  console.log(`[parseStepWithOCC] Starting tessellation...`);
   const startTime = performance.now();
 
   // Step 1: Load STEP file with OCC (with color support)
+  if (onProgress) onProgress(0);
   const loadStart = performance.now();
   const { shape, colorTool, shapeTool, stepColors, shapeColorMap, faceIdOrder, geometryColorMap, solidMatchedColors, faceToSolid, solidToColor } = await loadStepFile(stepFileContent, 'input.step');
   tessellationProfile.loadStepFile.total += performance.now() - loadStart;
@@ -5526,6 +5536,7 @@ export async function parseStepWithOCC(
   console.log(`[parseStepWithOCC] Color sources: shapeColorMap=${shapeColorMap.size}, stepColors=${stepColors.size}, faceIdOrder=${faceIdOrder.length}, geometryColorMap=${geometryColorMap.size}, solidMatchedColors=${solidMatchedColors.size}, faceToSolid=${faceToSolid.size}, solidToColor=${solidToColor.size}, colorTool=${!!colorTool}`);
 
   // Step 2: Extract faces with edges, surface parameters, and colors
+  if (onProgress) onProgress(10);
   const extractStart = performance.now();
   const faces = await extractFacesWithEdges(shape, colorTool, shapeTool, stepColors, shapeColorMap, faceIdOrder, geometryColorMap, solidMatchedColors, faceToSolid, solidToColor);
   tessellationProfile.extractFacesWithEdges.total += performance.now() - extractStart;
@@ -5536,7 +5547,8 @@ export async function parseStepWithOCC(
   console.log(`[parseStepWithOCC] Extracted ${faces.length} faces (${facesWithColor} with colors)`);
 
   // Step 3: Tessellate all faces
-  const mesh = await tessellateOCCShape(faces, triangulationMethod);
+  if (onProgress) onProgress(20);
+  const mesh = await tessellateOCCShape(faces, triangulationMethod, onProgress);
 
   const endTime = performance.now();
   console.log(`[parseStepWithOCC] Complete in ${(endTime - startTime).toFixed(0)}ms: ${mesh.positions.length / 3} vertices, ${mesh.indices.length / 3} triangles`);

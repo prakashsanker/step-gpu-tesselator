@@ -321,8 +321,8 @@ export async function earClipping(points: number[][]) {
     try {
         const device = await getGPUDevice();
         
-        console.log("[EarClipping] Input points:", points);
-        console.log("[EarClipping] Number of vertices:", points.length);
+        console.log("[Tessellator] Input points:", points);
+        console.log("[Tessellator] Number of vertices:", points.length);
         
         if (points.length < 3) {
             throw new Error("Polygon must have at least 3 vertices");
@@ -343,7 +343,7 @@ export async function earClipping(points: number[][]) {
         
         // Log normalized points to verify they're correct
         const normalizedPoints = normalizePoints(points);
-        console.log("[EarClipping] Normalized points:", normalizedPoints);
+        console.log("[Tessellator] Normalized points:", normalizedPoints);
 
         // Create shaders
         const classifyShader = createClassifyPointsShader(device);
@@ -441,10 +441,10 @@ export async function earClipping(points: number[][]) {
         const maxIterations = points.length - 2; // Maximum number of triangles
         let commandEncoder = device.createCommandEncoder();
 
-        console.log("[EarClipping] Starting algorithm loop, max iterations:", maxIterations);
+        console.log("[Tessellator] Starting algorithm loop, max iterations:", maxIterations);
 
         for (let iteration = 0; iteration < maxIterations; iteration++) {
-            console.log(`[EarClipping] Iteration ${iteration + 1}/${maxIterations}`);
+            console.log(`[Tessellator] Iteration ${iteration + 1}/${maxIterations}`);
             
             // Reset vertexIsEarBuffer at the start of each iteration
             const resetEarArray = new Uint32Array(points.length);
@@ -491,7 +491,7 @@ export async function earClipping(points: number[][]) {
                 const earArray = new Uint32Array(earMapped);
                 const earArrayCopy = new Uint32Array(earArray);
                 earReadbackBuffer.unmap();
-                console.log(`[EarClipping] Iteration ${iteration + 1} - vertexIsEarBuffer:`, Array.from(earArrayCopy));
+                console.log(`[Tessellator] Iteration ${iteration + 1} - vertexIsEarBuffer:`, Array.from(earArrayCopy));
                 
                 // Read back classifiedPointsBuffer
                 const classifyReadbackBuffer = device.createBuffer({
@@ -506,7 +506,7 @@ export async function earClipping(points: number[][]) {
                 const classifyArray = new Uint32Array(classifyMapped);
                 const classifyArrayCopy = new Uint32Array(classifyArray);
                 classifyReadbackBuffer.unmap();
-                console.log(`[EarClipping] Iteration ${iteration + 1} - classifiedPointsBuffer:`, Array.from(classifyArrayCopy));
+                console.log(`[Tessellator] Iteration ${iteration + 1} - classifiedPointsBuffer:`, Array.from(classifyArrayCopy));
                 
                 // Read back triangleCount
                 const triCountReadback = device.createBuffer({
@@ -520,7 +520,7 @@ export async function earClipping(points: number[][]) {
                 const triCountMapped = triCountReadback.getMappedRange();
                 const triCountValue = new Uint32Array(triCountMapped)[0];
                 triCountReadback.unmap();
-                console.log(`[EarClipping] Iteration ${iteration + 1} - triangleCount:`, triCountValue);
+                console.log(`[Tessellator] Iteration ${iteration + 1} - triangleCount:`, triCountValue);
             }
 
             // Check if we're done (only 3 vertices left)
@@ -541,10 +541,10 @@ export async function earClipping(points: number[][]) {
             readbackBuffer.unmap();
 
             const activeCount = Array.from(activeArrayCopy).filter(x => x === 1).length;
-            console.log(`[EarClipping] After iteration ${iteration + 1}, active vertices: ${activeCount}`);
+            console.log(`[Tessellator] After iteration ${iteration + 1}, active vertices: ${activeCount}`);
             
             if (activeCount <= 3) {
-                console.log("[EarClipping] Algorithm complete, only 3 or fewer vertices remaining");
+                console.log("[Tessellator] Algorithm complete, only 3 or fewer vertices remaining");
                 // If we have exactly 3 vertices, they form the final triangle - add it
                 if (activeCount === 3) {
                     // Find the 3 active vertices
@@ -554,7 +554,7 @@ export async function earClipping(points: number[][]) {
                             activeIndices.push(i);
                         }
                     }
-                    console.log("[EarClipping] Adding final triangle with vertices:", activeIndices);
+                    console.log("[Tessellator] Adding final triangle with vertices:", activeIndices);
                     
                     // Read current triangle count
                     const finalTriCountReadback = device.createBuffer({
@@ -656,12 +656,12 @@ export async function earClipping(points: number[][]) {
             ]);
         }
 
-        console.log("[EarClipping] Number of triangles generated:", numTriangles);
-        console.log("[EarClipping] Triangles (indices):", triangles);
-        console.log("[EarClipping] Full indices array:", Array.from(indicesArrayCopy));
+        console.log("[Tessellator] Number of triangles generated:", numTriangles);
+        console.log("[Tessellator] Triangles (indices):", triangles);
+        console.log("[Tessellator] Full indices array:", Array.from(indicesArrayCopy));
         
         // Log triangle vertices with actual coordinates
-        console.log("[EarClipping] Triangles with coordinates:");
+        console.log("[Tessellator] Triangles with coordinates:");
         for (let i = 0; i < triangles.length; i++) {
             const tri = triangles[i];
             console.log(`  Triangle ${i}:`, {
