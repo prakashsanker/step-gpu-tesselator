@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>XCAF Direct Test</title>
+  <style>
+    body {
+      font-family: monospace;
+      background: #1e1e1e;
+      color: #d4d4d4;
+      padding: 20px;
+    }
+    #output {
+      white-space: pre-wrap;
+      line-height: 1.6;
+    }
+    .success { color: #4ec9b0; }
+    .error { color: #f44747; }
+    .info { color: #9cdcfe; }
+    h1 { color: #fff; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <h1>OpenCascade.js Beta XCAF API Test (Direct Load)</h1>
+  <div id="output">Loading...</div>
+
+  <script type="module">
+    const outputEl = document.getElementById('output');
+    outputEl.innerHTML = '';
+
+    function log(msg, type = 'info') {
+      const line = document.createElement('div');
+      line.className = type;
+      line.textContent = msg;
+      outputEl.appendChild(line);
+      console.log(msg);
+    }
+
+    async function main() {
+      log('Loading OpenCascade.js beta (2.0.0-beta.fdece36)...');
+
+      try {
+        // Import the OpenCascade module factory
+        const { default: opencascade } = await import('./node_modules/opencascade.js/dist/opencascade.js');
+
+        // Initialize with the proper WASM path
+        const oc = await opencascade({
+          locateFile(path) {
+            return './node_modules/opencascade.js/dist/' + path;
+          }
+        });
+
+        log('OpenCascade.js loaded!', 'success');
+
+        // Load additional dynamic libraries needed for XCAF and Document framework
+        log('\nLoading XCAF and Document framework modules...');
+        const xcafLibs = [
+          // Core geometry/topology
+          'module.TKMath.wasm',
+          'module.TKG2d.wasm',
+          'module.TKG3d.wasm',
+          'module.TKGeomBase.wasm',
+          'module.TKGeomAlgo.wasm',
+          'module.TKBRep.wasm',   // B-Rep topology
+          'module.TKTopAlgo.wasm',
+          'module.TKShHealing.wasm',
+          // Document framework
+          'module.TKCDF.wasm',    // Base document framework (TDocStd_Application etc.)
+          'module.TKLCAF.wasm',   // Label/Attribute framework
+          'module.TKCAF.wasm',    // CAF extensions
+          // XCAF
+          'module.TKVCAF.wasm',   // Visual CAF
+          'module.TKXCAF.wasm',   // Extended CAF (XCAFDoc tools)
+          // STEP I/O
+          'module.TKXSBase.wasm', // XS base classes
+          'module.TKSTEPBase.wasm',
+          'module.TKSTEP209.wasm',
+          'module.TKSTEPAttr.wasm',
+          'module.TKSTEP.wasm',
+          'module.TKXDESTEP.wasm', // STEPCAFControl_Reader
+        ];
+
+        for (const lib of xcafLibs) {
+          try {
+            const libPath = './node_modules/opencascade.js/dist/' + lib;
+            await oc.loadDynamicLibrary(libPath, {loadAsync: true, global: true, nodelete: true, allowUndefined: true});
+            log(`  Loaded ${lib}`, 'success');
+          } catch (err) {
+            log(`  Failed to load ${lib}: ${err.message}`, 'error');
+          }
+        }
+
+        // Check critical XCAF APIs
+        log('\n=== XCAF API Availability ===');
+
+        // TDF_LabelSequence - the key missing API in previous builds
+        const tdfApis = Object.keys(oc).filter(k => k.includes('TDF_LabelSequence'));
+        log(`TDF_LabelSequence APIs: ${tdfApis.length > 0 ? tdfApis.join(', ') : 'NONE'}`,
+            tdfApis.length > 0 ? 'success' : 'error');
+
+        // XCAFDoc_DocumentTool
+        const hasDocTool = typeof oc.XCAFDoc_DocumentTool !== 'undefined';
+        log(`XCAFDoc_DocumentTool: ${hasDocTool ? 'YES' : 'NO'}`,
+            hasDocTool ? 'success' : 'error');
+
+        // XCAFDoc_ColorTool APIs
+        const colorToolApis = Object.keys(oc).filter(k => k.includes('XCAFDoc_ColorTool'));
+        log(`XCAFDoc_ColorTool APIs: ${colorToolApis.length > 0 ? colorToolApis.join(', ') : 'NONE'}`,
+            colorToolApis.length > 0 ? 'success' : 'error');
+
+        // Try to create TDF_LabelSequence
+        log('\n=== Testing TDF_LabelSequence Creation ===');
+        let labelSeq = null;
+        try {
+          if (oc.TDF_LabelSequence_1) {
+            labelSeq = new oc.TDF_LabelSequence_1();
+            log('Created TDF_LabelSequence via TDF_LabelSequence_1()', 'success');
+          } else if (oc.TDF_LabelSequence) {
+            labelSeq = new oc.TDF_LabelSequence();
+            log('Created TDF_LabelSequence via TDF_LabelSequence()', 'success');
+          } else {
+            log('No TDF_LabelSequence constructor found', 'error');
+          }
+
+          if (labelSeq) {
+            const proto = Object.getPrototypeOf(labelSeq);
+            const methods = Object.getOwnPropertyNames(proto).filter(m => m !== 'constructor');
+            log(`TDF_LabelSequence methods: ${methods.slice(0, 10).join(', ')}${methods.length > 10 ? '...' : ''}`, 'info');
+          }
+        } catch (err) {
+          log(`Failed to create TDF_LabelSequence: ${err.message}`, 'error');
+        }
+
+        // Test with a simple STEP file
+        log('\n=== Testing STEP Color Extraction ===');
+
+        const testFile = '/step-examples/c8-solids/colored-solid.step';
+        try {
+          const resp = await fetch(testFile);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const stepContent = await resp.text();
+          log(`Loaded test file: ${testFile} (${(stepContent.length/1024).toFixed(1)} KB)`, 'info');
+
+          // Check available APIs
+          log('Checking TDocStd_Application: ' + (typeof oc.TDocStd_Application), 'info');
+          log('Checking Handle_TDocStd_Document_1: ' + (typeof oc.Handle_TDocStd_Document_1), 'info');
+          log('Checking TCollection_ExtendedString_2: ' + (typeof oc.TCollection_ExtendedString_2), 'info');
+
+          // Create XDE application and document (matching occ-test.ts pattern)
+          log('Creating TDocStd_Application...', 'info');
+          const app = new oc.TDocStd_Application();
+          log('Created app', 'success');
+
+          log('Creating Handle_TDocStd_Document_1...', 'info');
+          const docHandle = new oc.Handle_TDocStd_Document_1();
+          log('Created docHandle', 'success');
+
+          log('Creating TCollection_ExtendedString_2...', 'info');
+          const formatStr = new oc.TCollection_ExtendedString_2("XmlXCAF", true);
+          log('Created formatStr', 'success');
+
+          log('Calling app.NewDocument...', 'info');
+          app.NewDocument(formatStr, docHandle);
+          log('Called NewDocument', 'success');
+
+          log('Getting doc from handle...', 'info');
+          const doc = docHandle.get();
+          log('Created TDocStd_Application and document', 'success');
+
+          // Write to virtual file
+          log('Writing STEP content to virtual FS...', 'info');
+          const fileName = 'test.step';
+          oc.FS.writeFile('/' + fileName, stepContent);
+          log('Written to FS', 'success');
+
+          // Create XCAF STEP reader
+          log('Checking STEPCAFControl_Reader_1: ' + (typeof oc.STEPCAFControl_Reader_1), 'info');
+          log('Creating reader...', 'info');
+          const reader = new oc.STEPCAFControl_Reader_1();
+          log('Created reader', 'success');
+
+          log('Setting color mode...', 'info');
+          reader.SetColorMode(true);
+          reader.SetNameMode(true);
+          reader.SetLayerMode(true);
+          log('Created STEPCAFControl_Reader with color mode enabled', 'success');
+
+          log('Calling ReadFile...', 'info');
+          const readStatus = reader.ReadFile(fileName);
+          // v2 might return enum object - check for .value or the object itself
+          const statusValue = typeof readStatus === 'object' ? (readStatus.value ?? readStatus) : readStatus;
+          log(`Reader.ReadFile status: ${statusValue} (type: ${typeof readStatus})`, 'info');
+
+          // IFSelect_ReturnStatus: RetDone=0, RetError=1, RetFail=2, RetStop=3, RetVoid=4
+          // Or it might be 1=success in older versions
+          const isSuccess = statusValue === 0 || statusValue === 1 || (typeof readStatus === 'object');
+          log(`ReadFile success: ${isSuccess}`, isSuccess ? 'success' : 'error');
+
+          if (isSuccess) {
+            // Transfer to document (use handle + progress range)
+            log('Calling Transfer_1...', 'info');
+            const progress = new oc.Message_ProgressRange_1();
+            reader.Transfer_1(docHandle, progress);
+            log('Transfer completed', 'success');
+
+            // Get tools from document's Main label
+            const shapeTool = oc.XCAFDoc_DocumentTool.ShapeTool(doc.Main());
+            const colorTool = oc.XCAFDoc_DocumentTool.ColorTool(doc.Main());
+            log('Got ShapeTool and ColorTool from document', 'success');
+
+            // Unwrap handles
+            const actualShapeTool = shapeTool.get ? shapeTool.get() : shapeTool;
+            const actualColorTool = colorTool.get ? colorTool.get() : colorTool;
+
+            // Get all free shapes
+            const shapeLabels = new oc.TDF_LabelSequence_1();
+            actualShapeTool.GetFreeShapes(shapeLabels);
+            log(`GetFreeShapes found ${shapeLabels.Length()} shapes`, 'success');
+
+            // Get all colors
+            const colorLabels = new oc.TDF_LabelSequence_1();
+            actualColorTool.GetColors(colorLabels);
+            log(`GetColors found ${colorLabels.Length()} colors`, 'success');
+
+            // List the colors
+            for (let i = 1; i <= colorLabels.Length(); i++) {
+              const label = colorLabels.Value(i);
+              const color = new oc.Quantity_Color_1();
+
+              const gotColor = actualColorTool.GetColor_1(label, color);
+              if (gotColor) {
+                const r = color.Red();
+                const g = color.Green();
+                const b = color.Blue();
+                log(`  Color ${i}: RGB(${(r*255).toFixed(0)}, ${(g*255).toFixed(0)}, ${(b*255).toFixed(0)})`, 'success');
+              }
+            }
+
+            // Try to get color for each shape
+            log('\n--- Shape Colors ---');
+            for (let i = 1; i <= shapeLabels.Length(); i++) {
+              const shapeLabel = shapeLabels.Value(i);
+              const color = new oc.Quantity_Color_1();
+
+              // GetColor methods in v2 beta - try different signatures
+              let hasColor = false;
+              try {
+                // Try GetColor_1 (label, color) - gets generic color
+                hasColor = actualColorTool.GetColor_1(shapeLabel, color);
+              } catch (e) {
+                // Try alternative signatures if GetColor_1 fails
+                try {
+                  // Some versions might use different method names
+                  if (actualColorTool.GetColor) {
+                    hasColor = actualColorTool.GetColor(shapeLabel, color);
+                  }
+                } catch (e2) {
+                  log(`  Shape ${i}: Error getting color: ${e2.message}`, 'error');
+                }
+              }
+
+              if (hasColor) {
+                const r = color.Red();
+                const g = color.Green();
+                const b = color.Blue();
+                log(`  Shape ${i}: RGB(${(r*255).toFixed(0)}, ${(g*255).toFixed(0)}, ${(b*255).toFixed(0)})`, 'success');
+              } else {
+                log(`  Shape ${i}: No direct color (may inherit from parent)`, 'info');
+              }
+            }
+
+            log('\n=== SUCCESS: XCAF Color Extraction Works! ===', 'success');
+          }
+
+          // Cleanup
+          oc.FS.unlink('/' + fileName);
+
+        } catch (err) {
+          log(`Failed to load test file: ${err.message}`, 'error');
+          console.error(err);
+        }
+
+        log('\n=== Test Complete ===');
+
+      } catch (err) {
+        log(`Failed to initialize OpenCascade: ${err.message}`, 'error');
+        console.error(err);
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>

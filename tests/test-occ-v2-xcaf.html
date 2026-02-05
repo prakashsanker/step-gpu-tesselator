@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>OpenCascade.js v2 XCAF Test</title>
+  <style>
+    body { font-family: monospace; background: #1e1e1e; color: #d4d4d4; padding: 20px; }
+    .success { color: #4ec9b0; }
+    .error { color: #f44747; }
+    .info { color: #9cdcfe; }
+    #output { white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <h1>OpenCascade.js v2 XCAF API Test</h1>
+  <div id="output">Loading...</div>
+
+  <script type="module">
+    const output = document.getElementById('output');
+
+    function log(message, type = 'info') {
+      const line = document.createElement('div');
+      line.className = type;
+      line.textContent = message;
+      output.appendChild(line);
+    }
+
+    function clear() {
+      output.innerHTML = '';
+    }
+
+    async function runTest() {
+      clear();
+      log('Testing OpenCascade.js v2 XCAF APIs...', 'info');
+
+      try {
+        // Import the v2 module
+        const { initOpenCascade, TKXDESTEP, TKXCAF, TKLCAF, TKCAF, TKBRep, TKMesh } =
+          await import('opencascade.js/dist/index.js');
+
+        log('Modules imported successfully', 'success');
+        log('Loading WASM modules...', 'info');
+
+        const oc = await initOpenCascade({
+          libs: [TKXDESTEP, TKXCAF, TKLCAF, TKCAF, TKBRep, TKMesh],
+        });
+
+        log('OpenCascade.js initialized!', 'success');
+
+        // Check for required APIs
+        const checks = [
+          ['TDF_LabelSequence_1', typeof oc.TDF_LabelSequence_1],
+          ['XCAFDoc_DocumentTool', typeof oc.XCAFDoc_DocumentTool],
+          ['XCAFDoc_ShapeTool', typeof oc.XCAFDoc_ShapeTool],
+          ['XCAFDoc_ColorTool', typeof oc.XCAFDoc_ColorTool],
+          ['STEPCAFControl_Reader', typeof oc.STEPCAFControl_Reader],
+          ['Quantity_Color', typeof oc.Quantity_Color],
+          ['TDocStd_Document', typeof oc.TDocStd_Document],
+        ];
+
+        log('\n=== API Availability ===', 'info');
+        let allPassed = true;
+        for (const [name, type] of checks) {
+          const available = type !== 'undefined';
+          if (available) {
+            log(`  ${name}: AVAILABLE`, 'success');
+          } else {
+            log(`  ${name}: MISSING`, 'error');
+            allPassed = false;
+          }
+        }
+
+        if (allPassed) {
+          log('\nAll required XCAF APIs are available!', 'success');
+
+          // Try to create a TDF_LabelSequence
+          log('\n=== Testing TDF_LabelSequence ===', 'info');
+          const labelSeq = new oc.TDF_LabelSequence_1();
+          log(`  Created TDF_LabelSequence`, 'success');
+          log(`  Length(): ${labelSeq.Length()}`, 'info');
+          log(`  IsEmpty(): ${labelSeq.IsEmpty()}`, 'info');
+          labelSeq.delete();
+          log(`  Deleted successfully`, 'success');
+
+          // List some XCAF-related APIs
+          log('\n=== Available XCAF APIs ===', 'info');
+          const xcafApis = Object.keys(oc).filter(k => k.includes('XCAF') || k.includes('XDE')).slice(0, 20);
+          for (const api of xcafApis) {
+            log(`  ${api}`, 'info');
+          }
+
+          log('\n=== READY FOR COLOR EXTRACTION ===', 'success');
+          log('The v2 API has all required XCAF capabilities for proper color extraction.', 'success');
+        } else {
+          log('\nSome required APIs are missing!', 'error');
+        }
+
+      } catch (err) {
+        log(`\nError: ${err.message}`, 'error');
+        console.error(err);
+      }
+    }
+
+    runTest();
+  </script>
+</body>
+</html>

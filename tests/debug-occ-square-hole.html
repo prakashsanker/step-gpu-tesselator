@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Debug OCC Square with Hole</title>
+  <style>
+    body { font-family: monospace; padding: 20px; }
+    pre { background: #f5f5f5; padding: 10px; overflow-x: auto; white-space: pre-wrap; }
+    .error { color: red; }
+    .success { color: green; }
+    .warning { color: orange; }
+  </style>
+</head>
+<body>
+  <h1>Debug: OCC Parse Square with Triangle Hole</h1>
+  <div id="output">Loading OCC...</div>
+
+  <script type="module">
+    import { parseStepWithOCC } from '../src/occ-test.ts';
+
+    const output = document.getElementById('output');
+
+    function log(msg, type = '') {
+      const span = document.createElement('span');
+      span.className = type;
+      span.textContent = msg + '\n';
+      output.appendChild(span);
+    }
+
+    async function runTest() {
+      output.innerHTML = '<pre>';
+
+      try {
+        // Fetch the STEP file
+        log('Fetching STEP file...');
+        const response = await fetch('/step-examples/c2-holes/2.5-triangulation/square-with-triangle-hole.step');
+        const stepContent = await response.text();
+        log(`STEP file loaded: ${stepContent.length} bytes`);
+        log('');
+
+        // Parse with OCC
+        log('=== PARSING WITH OCC ===');
+        const mesh = await parseStepWithOCC(stepContent);
+
+        log('');
+        log('=== RESULTS ===');
+        log(`Vertices: ${mesh.positions.length / 3}`);
+        log(`Triangles: ${mesh.indices.length / 3}`);
+
+        // Expected: 9 vertices after bridging, 7 triangles
+        const vertexCount = mesh.positions.length / 3;
+        const triangleCount = mesh.indices.length / 3;
+
+        log('');
+        if (vertexCount >= 7 && triangleCount >= 7) {
+          log('PASS: Reasonable output', 'success');
+        } else {
+          log(`ISSUE: Expected 9 vertices and 7 triangles, got ${vertexCount} and ${triangleCount}`, 'warning');
+        }
+
+        // Show vertex positions
+        log('');
+        log('=== VERTEX POSITIONS ===');
+        for (let i = 0; i < Math.min(mesh.positions.length / 3, 20); i++) {
+          const x = mesh.positions[i * 3].toFixed(2);
+          const y = mesh.positions[i * 3 + 1].toFixed(2);
+          const z = mesh.positions[i * 3 + 2].toFixed(2);
+          log(`  [${i}]: (${x}, ${y}, ${z})`);
+        }
+
+        // Show triangles
+        log('');
+        log('=== TRIANGLES ===');
+        for (let i = 0; i < Math.min(mesh.indices.length / 3, 20); i++) {
+          const a = mesh.indices[i * 3];
+          const b = mesh.indices[i * 3 + 1];
+          const c = mesh.indices[i * 3 + 2];
+          log(`  [${i}]: ${a}, ${b}, ${c}`);
+        }
+
+      } catch (err) {
+        log(`Error: ${err.message}`, 'error');
+        log(err.stack, 'error');
+      }
+
+      output.innerHTML += '</pre>';
+    }
+
+    runTest();
+  </script>
+</body>
+</html>

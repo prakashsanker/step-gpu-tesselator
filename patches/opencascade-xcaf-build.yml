@@ -1,0 +1,158 @@
+# Custom OpenCascade.js build configuration with full XCAF color support
+#
+# This configuration adds the missing TDF_LabelSequence and related classes
+# needed for proper XCAF color extraction from STEP files.
+#
+# To build:
+# 1. Install Docker
+# 2. Run: docker run --rm -v $(pwd):/src -u $(id -u):$(id -g) donalffons/opencascade.js opencascade-xcaf-build.yml
+#
+# Reference: https://ocjs.org/docs/app-dev-workflow/custom-builds
+
+mainBuild:
+  name: opencascade.xcaf.js
+  bindings:
+    # ============================================
+    # CORE TOPOLOGY (TopoDS)
+    # ============================================
+    - symbol: TopoDS
+    - symbol: TopoDS_Shape
+    - symbol: TopoDS_Compound
+    - symbol: TopoDS_CompSolid
+    - symbol: TopoDS_Solid
+    - symbol: TopoDS_Shell
+    - symbol: TopoDS_Face
+    - symbol: TopoDS_Wire
+    - symbol: TopoDS_Edge
+    - symbol: TopoDS_Vertex
+    - symbol: TopoDS_Builder
+    - symbol: TopoDS_Iterator
+    - symbol: TopExp_Explorer
+    - symbol: TopAbs_ShapeEnum
+
+    # ============================================
+    # GEOMETRY (gp)
+    # ============================================
+    - symbol: gp_Pnt
+    - symbol: gp_Vec
+    - symbol: gp_Dir
+    - symbol: gp_Ax1
+    - symbol: gp_Ax2
+    - symbol: gp_Ax3
+    - symbol: gp_Trsf
+    - symbol: gp_Pln
+
+    # ============================================
+    # TDF - Application Framework
+    # These are critical for XCAF document traversal
+    # ============================================
+    - symbol: TDF_Label
+    - symbol: TDF_Attribute
+    - symbol: TDF_LabelSequence        # KEY: Required for iterating shapes
+    - symbol: TDF_LabelSequence_Iterator  # For iterating label sequences
+    - symbol: TDF_ChildIterator        # For traversing label tree
+    - symbol: TDF_LabelList
+    - symbol: TDF_Data
+    - symbol: TDF_TagSource
+
+    # ============================================
+    # TDocStd - Document Standard
+    # ============================================
+    - symbol: TDocStd_Document
+    - symbol: Handle_TDocStd_Document
+    - symbol: TDocStd_Application
+    - symbol: Handle_TDocStd_Application
+
+    # ============================================
+    # XCAFDoc - XCAF Document Tools
+    # These are essential for color extraction
+    # ============================================
+    - symbol: XCAFDoc_DocumentTool
+    - symbol: XCAFDoc_ShapeTool
+    - symbol: Handle_XCAFDoc_ShapeTool
+    - symbol: XCAFDoc_ColorTool
+    - symbol: Handle_XCAFDoc_ColorTool
+    - symbol: XCAFDoc_Color
+    - symbol: XCAFDoc_ColorType
+    - symbol: XCAFDoc_LayerTool
+    - symbol: Handle_XCAFDoc_LayerTool
+    - symbol: XCAFDoc_MaterialTool
+    - symbol: Handle_XCAFDoc_MaterialTool
+
+    # ============================================
+    # Quantity - Colors
+    # ============================================
+    - symbol: Quantity_Color
+    - symbol: Quantity_ColorRGBA
+    - symbol: Quantity_NameOfColor
+    - symbol: Quantity_TypeOfColor
+
+    # ============================================
+    # STEP Reading (CAF Control)
+    # ============================================
+    - symbol: STEPCAFControl_Reader
+    - symbol: STEPControl_Reader
+    - symbol: XSControl_Reader
+    - symbol: IFSelect_ReturnStatus
+
+    # ============================================
+    # BRep Tools
+    # ============================================
+    - symbol: BRep_Tool
+    - symbol: BRep_Builder
+    - symbol: BRepTools
+    - symbol: BRepMesh_IncrementalMesh
+    - symbol: BRepBuilderAPI_MakeShape
+    - symbol: BRepBuilderAPI_Transform
+    - symbol: BRepAdaptor_Surface
+    - symbol: BRepAdaptor_Curve
+
+    # ============================================
+    # Mesh / Triangulation
+    # ============================================
+    - symbol: Poly_Triangulation
+    - symbol: Handle_Poly_Triangulation
+    - symbol: Poly_Array1OfTriangle
+    - symbol: Poly_Triangle
+    - symbol: TColgp_Array1OfPnt
+    - symbol: TColgp_Array1OfPnt2d
+
+    # ============================================
+    # Standard / Message
+    # ============================================
+    - symbol: Standard_Transient
+    - symbol: Message_ProgressRange
+    - symbol: TCollection_AsciiString
+    - symbol: TCollection_ExtendedString
+    - symbol: TDataStd_GenericEmpty
+    - symbol: NCollection_BaseSequence
+
+  emccFlags:
+    - -sEXPORT_ES6=1
+    - -sUSE_ES6_IMPORT_META=0
+    - -sEXTRA_EXPORTED_RUNTIME_METHODS=["FS"]
+    - -O3
+    - -sALLOW_MEMORY_GROWTH=1
+    - -sMAXIMUM_MEMORY=4GB
+
+  # Additional C++ code to expose TDF_LabelSequence iteration
+  additionalCppCode: |
+    // Helper class to iterate TDF_LabelSequence since Iterator binding is tricky
+    class TDF_LabelSequenceHelper {
+    public:
+        static Standard_Integer Length(const TDF_LabelSequence& seq) {
+            return seq.Length();
+        }
+
+        static TDF_Label Value(const TDF_LabelSequence& seq, Standard_Integer index) {
+            return seq.Value(index);
+        }
+
+        static void Clear(TDF_LabelSequence& seq) {
+            seq.Clear();
+        }
+
+        static void Append(TDF_LabelSequence& seq, const TDF_Label& label) {
+            seq.Append(label);
+        }
+    };

@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OCC Parser Benchmark</title>
+    <style>
+        body {
+            font-family: monospace;
+            background: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+        }
+        #status {
+            padding: 10px;
+            background: #16213e;
+            border-radius: 4px;
+            margin-bottom: 20px;
+        }
+        .ready { color: #4ade80; }
+        .loading { color: #fbbf24; }
+        .error { color: #f87171; }
+    </style>
+</head>
+<body>
+    <h1>OCC Parser Benchmark (OpenCascade.js)</h1>
+    <div id="status" class="loading">Initializing...</div>
+    <div id="log"></div>
+
+    <script type="module">
+        import { parseStepWithOCC } from '../src/occ-test.ts';
+        import { getGPUDevice } from '../src/lib.ts';
+        import occtimportjs from 'occt-import-js';
+        import earcut from 'earcut';
+        import { triangulateWithEarcut } from '../src/triangulate-fast.ts';
+
+        const statusEl = document.getElementById('status');
+        const logEl = document.getElementById('log');
+
+        function logMessage(msg) {
+            const div = document.createElement('div');
+            div.textContent = msg;
+            logEl.appendChild(div);
+            console.log(msg);
+        }
+
+        let occt = null;
+
+        async function initialize() {
+            try {
+                statusEl.textContent = 'Initializing WebGPU...';
+                await getGPUDevice();
+                logMessage('WebGPU initialized');
+
+                statusEl.textContent = 'Loading occt-import-js WASM...';
+                occt = await occtimportjs({
+                    locateFile: (file) => {
+                        if (file.endsWith('.wasm')) {
+                            return '/occt-import-js.wasm';
+                        }
+                        return file;
+                    }
+                });
+                logMessage('occt-import-js initialized');
+
+                // Warm up OCC (first call loads WASM)
+                statusEl.textContent = 'Warming up OpenCascade.js...';
+                const warmupStep = `ISO-10303-21;
+HEADER;
+FILE_DESCRIPTION((''),'2;1');
+FILE_NAME('warmup.step','2024-01-01T00:00:00',(''),(''),'','','');
+FILE_SCHEMA(('AUTOMOTIVE_DESIGN'));
+ENDSEC;
+DATA;
+#1=CARTESIAN_POINT('',(0.,0.,0.));
+ENDSEC;
+END-ISO-10303-21;`;
+                try {
+                    await parseStepWithOCC(warmupStep);
+                } catch (e) {
+                    // Ignore warmup errors
+                }
+                logMessage('OpenCascade.js warmed up');
+
+                statusEl.textContent = 'Ready for benchmarks';
+                statusEl.className = 'ready';
+                window.benchmarkReady = true;
+
+            } catch (e) {
+                statusEl.textContent = `Error: ${e.message}`;
+                statusEl.className = 'error';
+                console.error(e);
+            }
+        }
+
+        // Benchmark functions exposed to Puppeteer
+        window.benchmark = {
+            /**
+             * Run OCC-based triangulation (OpenCascade.js)
+             * Returns detailed profiling data
+             */
+            async runOCC(stepText) {
+                try {
+                    // Track detailed timing
+                    const timing = {
+                        total: 0,
+                        occParsing: 0,
+                        faceExtraction: 0,
+                        tessellation: 0,
+                        planarTessellation: 0,
+                        curvedTessellation: 0,
+                        meshAssembly: 0,
+                    };
+
+                    const totalStart = performance.now();
+
+                    // Run the full pipeline
+                    const result = await parseStepWithOCC(stepText);
+
+                    timing.total = performance.now() - totalStart;
+
+                    if (!result || !result.positions) {
+                        return { success: false, error: 'No mesh returned' };
+                    }
+
+                    return {
+                        success: true,
+                        totalTime: timing.total,
+                        vertexCount: result.positions.length / 3,
+                        triangleCount: result.indices.length / 3,
+                        hasNormals: !!result.normals,
+                        hasColors: !!result.vertexColors,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            /**
+             * Run OCC-based triangulation with per-phase timing
+             * This instruments the parseStepWithOCC function
+             */
+            async runOCCProfiled(stepText) {
+                try {
+                    const timing = {
+                        total: 0,
+                        phases: [],
+                    };
+
+                    const totalStart = performance.now();
+
+                    // We can't easily instrument the existing function,
+                    // so we just measure total time for now
+                    const result = await parseStepWithOCC(stepText);
+
+                    timing.total = performance.now() - totalStart;
+
+                    if (!result || !result.positions) {
+                        return { success: false, error: 'No mesh returned' };
+                    }
+
+                    return {
+                        success: true,
+                        totalTime: timing.total,
+                        vertexCount: result.positions.length / 3,
+                        triangleCount: result.indices.length / 3,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            /**
+             * Benchmark pure earcut triangulation (no OCC parsing)
+             * Takes an array of 2D polygons and triangulates them
+             */
+            benchmarkEarcut(polygons) {
+                try {
+                    const startTime = performance.now();
+                    let totalTriangles = 0;
+
+                    for (const poly of polygons) {
+                        // Flatten to [x1, y1, x2, y2, ...]
+                        const flatCoords = [];
+                        for (const p of poly) {
+                            flatCoords.push(p[0], p[1]);
+                        }
+                        const indices = earcut(flatCoords);
+                        totalTriangles += indices.length / 3;
+                    }
+
+                    const endTime = performance.now();
+
+                    return {
+                        success: true,
+                        totalTime: endTime - startTime,
+                        triangleCount: totalTriangles,
+                        polygonCount: polygons.length,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            /**
+             * Run occt-import-js (baseline comparison)
+             */
+            async runOCCTImport(stepBase64) {
+                try {
+                    const binaryString = atob(stepBase64);
+                    const bytes = new Uint8Array(binaryString.length);
+                    for (let i = 0; i < binaryString.length; i++) {
+                        bytes[i] = binaryString.charCodeAt(i);
+                    }
+
+                    const startTotal = performance.now();
+                    const result = occt.ReadStepFile(bytes, null);
+                    const endTotal = performance.now();
+
+                    if (!result.success || !result.meshes || result.meshes.length === 0) {
+                        return { success: false, error: 'OCCT returned no meshes' };
+                    }
+
+                    let totalVertices = 0;
+                    let totalTriangles = 0;
+
+                    for (const mesh of result.meshes) {
+                        if (mesh.attributes && mesh.attributes.position) {
+                            totalVertices += mesh.attributes.position.array.length / 3;
+                        }
+                        if (mesh.index) {
+                            totalTriangles += mesh.index.array.length / 3;
+                        }
+                    }
+
+                    return {
+                        success: true,
+                        totalTime: endTotal - startTotal,
+                        vertexCount: totalVertices,
+                        triangleCount: totalTriangles,
+                        meshCount: result.meshes.length,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+        };
+
+        initialize();
+    </script>
+</body>
+</html>

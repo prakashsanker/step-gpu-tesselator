@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test: Curved Outer Boundary with Circular Hole</title>
+  <style>
+    body { font-family: monospace; margin: 20px; background: #1a1a1a; color: #fff; }
+    .test-case { margin: 20px 0; padding: 15px; background: #2a2a2a; border-radius: 8px; }
+    .test-case h3 { margin-top: 0; }
+    canvas { border: 1px solid #444; margin: 10px 0; }
+    .pass { color: #4f4; }
+    .fail { color: #f44; }
+    pre { background: #333; padding: 10px; overflow: auto; max-height: 200px; }
+  </style>
+</head>
+<body>
+  <h1>Testing Curved Outer Boundary with Hole</h1>
+  <p>This tests if earcut handles planar faces where the outer boundary is curved (not LINE edges).</p>
+
+  <div class="test-case">
+    <h3>Test 1: Circular Annulus (Circle with Circular Hole)</h3>
+    <p>Outer: circle (64 vertices), Hole: smaller circle (32 vertices)</p>
+    <canvas id="canvas1" width="400" height="400"></canvas>
+    <div id="result1"></div>
+  </div>
+
+  <div class="test-case">
+    <h3>Test 2: Rounded Hexagon with Circular Hole</h3>
+    <p>Outer: 6 arcs forming rounded hexagon (~192 vertices), Hole: circle (64 vertices)</p>
+    <canvas id="canvas2" width="400" height="400"></canvas>
+    <div id="result2"></div>
+  </div>
+
+  <div class="test-case">
+    <h3>Test 3: Simple Hexagon with Circular Hole (control)</h3>
+    <p>Outer: 6 LINE edges (6 vertices), Hole: circle (64 vertices)</p>
+    <canvas id="canvas3" width="400" height="400"></canvas>
+    <div id="result3"></div>
+  </div>
+
+  <script type="module">
+    import earcut from 'https://cdn.jsdelivr.net/npm/earcut@3.0.0/+esm';
+
+    // Helper: generate circle vertices
+    function generateCircle(cx, cy, radius, numPoints) {
+      const points = [];
+      for (let i = 0; i < numPoints; i++) {
+        const angle = (i / numPoints) * Math.PI * 2;
+        points.push([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]);
+      }
+      return points;
+    }
+
+    // Helper: generate rounded hexagon (6 arcs)
+    function generateRoundedHexagon(cx, cy, outerRadius, cornerRadius, pointsPerArc) {
+      const points = [];
+      const hexAngles = [0, Math.PI/3, 2*Math.PI/3, Math.PI, 4*Math.PI/3, 5*Math.PI/3];
+
+      for (let i = 0; i < 6; i++) {
+        const startAngle = hexAngles[i] - Math.PI/6;
+        const endAngle = hexAngles[i] + Math.PI/6;
+
+        // Generate arc for this side
+        for (let j = 0; j < pointsPerArc; j++) {
+          const t = j / pointsPerArc;
+          const angle = startAngle + t * (endAngle - startAngle);
+          points.push([
+            cx + outerRadius * Math.cos(angle),
+            cy + outerRadius * Math.sin(angle)
+          ]);
+        }
+      }
+      return points;
+    }
+
+    // Helper: generate simple hexagon
+    function generateHexagon(cx, cy, radius) {
+      const points = [];
+      for (let i = 0; i < 6; i++) {
+        const angle = (i / 6) * Math.PI * 2;
+        points.push([cx + radius * Math.cos(angle), cy + radius * Math.sin(angle)]);
+      }
+      return points;
+    }
+
+    // Triangulate with earcut
+    function triangulateWithHoles(outer, holes) {
+      const flatCoords = [];
+      const holeIndices = [];
+
+      for (const p of outer) {
+        flatCoords.push(p[0], p[1]);
+      }
+
+      let currentIndex = outer.length;
+      for (const hole of holes) {
+        holeIndices.push(currentIndex);
+        for (const p of hole) {
+          flatCoords.push(p[0], p[1]);
+        }
+        currentIndex += hole.length;
+      }
+
+      console.log(`triangulateWithHoles: outer=${outer.length}, hole=${holes[0]?.length}, holeIndices=[${holeIndices}]`);
+      const indices = earcut(flatCoords, holeIndices);
+      console.log(`  -> ${indices.length / 3} triangles`);
+
+      return { indices, flatCoords };
+    }
+
+    // Draw triangulation to canvas
+    function drawTriangulation(canvasId, outer, holes, title) {
+      const canvas = document.getElementById(canvasId);
+      const ctx = canvas.getContext('2d');
+      const resultDiv = document.getElementById(canvasId.replace('canvas', 'result'));
+
+      const { indices, flatCoords } = triangulateWithHoles(outer, holes);
+
+      // Compute bounds
+      let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (let i = 0; i < flatCoords.length; i += 2) {
+        minX = Math.min(minX, flatCoords[i]);
+        maxX = Math.max(maxX, flatCoords[i]);
+        minY = Math.min(minY, flatCoords[i + 1]);
+        maxY = Math.max(maxY, flatCoords[i + 1]);
+      }
+
+      const padding = 40;
+      const scaleX = (canvas.width - 2 * padding) / (maxX - minX);
+      const scaleY = (canvas.height - 2 * padding) / (maxY - minY);
+      const scale = Math.min(scaleX, scaleY);
+
+      function toCanvas(x, y) {
+        return [
+          padding + (x - minX) * scale,
+          canvas.height - padding - (y - minY) * scale
+        ];
+      }
+
+      // Clear canvas
+      ctx.fillStyle = '#1a1a1a';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Draw triangles
+      ctx.strokeStyle = '#666';
+      ctx.lineWidth = 0.5;
+      for (let i = 0; i < indices.length; i += 3) {
+        const i0 = indices[i], i1 = indices[i + 1], i2 = indices[i + 2];
+        const [x0, y0] = toCanvas(flatCoords[i0 * 2], flatCoords[i0 * 2 + 1]);
+        const [x1, y1] = toCanvas(flatCoords[i1 * 2], flatCoords[i1 * 2 + 1]);
+        const [x2, y2] = toCanvas(flatCoords[i2 * 2], flatCoords[i2 * 2 + 1]);
+
+        ctx.beginPath();
+        ctx.moveTo(x0, y0);
+        ctx.lineTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.closePath();
+        ctx.fillStyle = `hsl(${(i / indices.length) * 360}, 50%, 30%)`;
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      // Draw outer boundary
+      ctx.strokeStyle = '#4f4';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const [ox0, oy0] = toCanvas(outer[0][0], outer[0][1]);
+      ctx.moveTo(ox0, oy0);
+      for (let i = 1; i < outer.length; i++) {
+        const [x, y] = toCanvas(outer[i][0], outer[i][1]);
+        ctx.lineTo(x, y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+
+      // Draw holes
+      ctx.strokeStyle = '#f44';
+      ctx.lineWidth = 2;
+      for (const hole of holes) {
+        ctx.beginPath();
+        const [hx0, hy0] = toCanvas(hole[0][0], hole[0][1]);
+        ctx.moveTo(hx0, hy0);
+        for (let i = 1; i < hole.length; i++) {
+          const [x, y] = toCanvas(hole[i][0], hole[i][1]);
+          ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.stroke();
+      }
+
+      // Check if triangulation looks correct
+      const totalVerts = outer.length + holes.reduce((sum, h) => sum + h.length, 0);
+      const expectedTriangles = totalVerts + holes.length - 2;
+      const actualTriangles = indices.length / 3;
+      const ratio = actualTriangles / expectedTriangles;
+
+      const isPass = ratio > 0.8; // Allow some tolerance
+      resultDiv.innerHTML = `
+        <p>Outer vertices: ${outer.length}</p>
+        <p>Hole vertices: ${holes[0]?.length || 0}</p>
+        <p>Expected triangles: ~${expectedTriangles}</p>
+        <p>Actual triangles: ${actualTriangles}</p>
+        <p class="${isPass ? 'pass' : 'fail'}">Ratio: ${(ratio * 100).toFixed(1)}% - ${isPass ? 'PASS' : 'FAIL'}</p>
+      `;
+    }
+
+    // Run tests
+    const cx = 0, cy = 0;
+
+    // Test 1: Circular annulus
+    const outer1 = generateCircle(cx, cy, 100, 64);
+    const hole1 = generateCircle(cx, cy, 40, 32);
+    drawTriangulation('canvas1', outer1, [hole1], 'Circular Annulus');
+
+    // Test 2: Rounded hexagon with circular hole
+    const outer2 = generateRoundedHexagon(cx, cy, 100, 20, 32); // 6 arcs * 32 points = 192 vertices
+    const hole2 = generateCircle(cx, cy, 40, 64);
+    drawTriangulation('canvas2', outer2, [hole2], 'Rounded Hexagon');
+
+    // Test 3: Simple hexagon with circular hole (control)
+    const outer3 = generateHexagon(cx, cy, 100);
+    const hole3 = generateCircle(cx, cy, 40, 64);
+    drawTriangulation('canvas3', outer3, [hole3], 'Simple Hexagon');
+  </script>
+</body>
+</html>

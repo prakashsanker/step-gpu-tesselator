@@ -1,0 +1,877 @@
+{
+  "timestamp": "2026-01-31T09:28:45.529Z",
+  "config": {
+    "vitePort": 5175,
+    "timeout": 300000,
+    "headless": true,
+    "warmupRuns": 1,
+    "benchmarkRuns": 3
+  },
+  "results": [
+    {
+      "name": "Simple Square",
+      "category": "simple",
+      "fileSize": 2504,
+      "occ": {
+        "times": [
+          10.300000011920929,
+          13.974999964237213,
+          8.514999985694885
+        ],
+        "vertices": 4,
+        "triangles": 2,
+        "phases": {
+          "loadStepFile": 3.4050000309944153,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0.39500004053115845,
+          "loadStepFile_readFile": 0.9199999570846558,
+          "loadStepFile_transfer": 1.5950000286102295,
+          "loadStepFile_getTools": 0.050000011920928955,
+          "loadStepFile_colorParsing": 0.019999980926513672,
+          "extractFacesWithEdges": 0.42500001192092896,
+          "tessellateOCCShape": 4.509999990463257,
+          "tessellatePlanarFace": 4.305000007152557,
+          "tessellateCurvedFace": 0,
+          "earClipping": 4.25,
+          "computeNormals": 0.04000002145767212,
+          "meshAssembly": 0.009999990463256836
+        },
+        "avgTime": 10.929999987284342
+      },
+      "occtImport": {
+        "times": [
+          28.210000038146973,
+          47.4549999833107,
+          23.335000038146973
+        ],
+        "vertices": 4,
+        "triangles": 2,
+        "avgTime": 33.00000001986822
+      },
+      "speedup": 3.0192131800786366,
+      "success": true
+    },
+    {
+      "name": "Small Plate (4 holes)",
+      "category": "holes",
+      "fileSize": 6817,
+      "occ": {
+        "times": [
+          29.814999997615814,
+          27.0450000166893,
+          23.75
+        ],
+        "vertices": 24,
+        "triangles": 22,
+        "phases": {
+          "loadStepFile": 5.665000021457672,
+          "loadStepFile_initOC": 0,
+          "loadStepFile_createDoc": 0.3200000524520874,
+          "loadStepFile_readFile": 1.3100000023841858,
+          "loadStepFile_transfer": 3.465000033378601,
+          "loadStepFile_getTools": 0.059999942779541016,
+          "loadStepFile_colorParsing": 0.039999961853027344,
+          "extractFacesWithEdges": 0.7100000381469727,
+          "tessellateOCCShape": 17.185000002384186,
+          "tessellatePlanarFace": 17.05000001192093,
+          "tessellateCurvedFace": 0,
+          "earClipping": 16.974999964237213,
+          "computeNormals": 0.01500004529953003,
+          "meshAssembly": 0.009999990463256836
+        },
+        "avgTime": 26.87000000476837
+      },
+      "occtImport": {
+        "times": [
+          65.33999997377396,
+          22,
+          21.080000042915344
+        ],
+        "vertices": 16,
+        "triangles": 22,
+        "avgTime": 36.1400000055631
+      },
+      "speedup": 1.3449944175344126,
+      "success": true
+    },
+    {
+      "name": "Medium Plate (25 holes)",
+      "category": "holes",
+      "fileSize": 21336,
+      "occ": {
+        "times": [
+          114.07500004768372,
+          120.5349999666214,
+          99.66000002622604
+        ],
+        "vertices": 129,
+        "triangles": 127,
+        "phases": {
+          "loadStepFile": 15.3299999833107,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0.3149999976158142,
+          "loadStepFile_readFile": 3,
+          "loadStepFile_transfer": 11.455000042915344,
+          "loadStepFile_getTools": 0.029999971389770508,
+          "loadStepFile_colorParsing": 0.07499998807907104,
+          "extractFacesWithEdges": 1.8100000023841858,
+          "tessellateOCCShape": 82.33999997377396,
+          "tessellatePlanarFace": 82.09500002861023,
+          "tessellateCurvedFace": 0,
+          "earClipping": 81.9200000166893,
+          "computeNormals": 0.09499996900558472,
+          "meshAssembly": 0.02499997615814209
+        },
+        "avgTime": 111.42333334684372
+      },
+      "occtImport": {
+        "times": [
+          40.29000002145767,
+          31.819999992847443,
+          36.410000026226044
+        ],
+        "vertices": 79,
+        "triangles": 127,
+        "avgTime": 36.17333334684372
+      },
+      "speedup": 0.32464773993290696,
+      "success": true
+    },
+    {
+      "name": "Unit Box",
+      "category": "multiface",
+      "fileSize": 7032,
+      "occ": {
+        "times": [
+          19.360000014305115,
+          19.8400000333786,
+          24.030000030994415
+        ],
+        "vertices": 24,
+        "triangles": 12,
+        "phases": {
+          "loadStepFile": 6.269999980926514,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0.26999998092651367,
+          "loadStepFile_readFile": 1.4149999618530273,
+          "loadStepFile_transfer": 3.199999988079071,
+          "loadStepFile_getTools": 0.02499997615814209,
+          "loadStepFile_colorParsing": 0.030000030994415283,
+          "extractFacesWithEdges": 1.9150000214576721,
+          "tessellateOCCShape": 15.680000007152557,
+          "tessellatePlanarFace": 15.14000004529953,
+          "tessellateCurvedFace": 0,
+          "earClipping": 14.989999949932098,
+          "computeNormals": 0.039999961853027344,
+          "meshAssembly": 0.009999990463256836
+        },
+        "avgTime": 21.07666669289271
+      },
+      "occtImport": {
+        "times": [
+          59.56999999284744,
+          29.1700000166893,
+          23.9200000166893
+        ],
+        "vertices": 17,
+        "triangles": 7,
+        "avgTime": 37.55333334207535
+      },
+      "speedup": 1.7817491678956403,
+      "success": true
+    },
+    {
+      "name": "Tetrahedron",
+      "category": "multiface",
+      "fileSize": 5471,
+      "occ": {
+        "times": [
+          13.185000002384186,
+          13.915000021457672,
+          12.569999992847443
+        ],
+        "vertices": 12,
+        "triangles": 4,
+        "phases": {
+          "loadStepFile": 4.569999992847443,
+          "loadStepFile_initOC": 0.010000050067901611,
+          "loadStepFile_createDoc": 0.32499998807907104,
+          "loadStepFile_readFile": 1.2049999833106995,
+          "loadStepFile_transfer": 2.5950000286102295,
+          "loadStepFile_getTools": 0.02499997615814209,
+          "loadStepFile_colorParsing": 0.02499997615814209,
+          "extractFacesWithEdges": 1.0699999928474426,
+          "tessellateOCCShape": 6.769999980926514,
+          "tessellatePlanarFace": 6.490000069141388,
+          "tessellateCurvedFace": 0,
+          "earClipping": 6.4049999713897705,
+          "computeNormals": 0.019999980926513672,
+          "meshAssembly": 0.004999995231628418
+        },
+        "avgTime": 13.223333338896433
+      },
+      "occtImport": {
+        "times": [
+          25.085000038146973,
+          24.839999973773956,
+          21.110000014305115
+        ],
+        "vertices": 12,
+        "triangles": 4,
+        "avgTime": 23.678333342075348
+      },
+      "speedup": 1.790647844626705,
+      "success": true
+    },
+    {
+      "name": "Cylinder",
+      "category": "curved",
+      "fileSize": 3067,
+      "occ": {
+        "times": [
+          108.625,
+          100.18500000238419,
+          105.98000001907349
+        ],
+        "vertices": 359,
+        "triangles": 312,
+        "phases": {
+          "loadStepFile": 3.474999964237213,
+          "loadStepFile_initOC": 0,
+          "loadStepFile_createDoc": 0.3149999976158142,
+          "loadStepFile_readFile": 0.8649999499320984,
+          "loadStepFile_transfer": 1.8100000023841858,
+          "loadStepFile_getTools": 0.025000035762786865,
+          "loadStepFile_colorParsing": 0.014999985694885254,
+          "extractFacesWithEdges": 1.2950000166893005,
+          "tessellateOCCShape": 101.05500000715256,
+          "tessellatePlanarFace": 94.83000004291534,
+          "tessellateCurvedFace": 5.634999990463257,
+          "earClipping": 94.62999999523163,
+          "computeNormals": 0.14499998092651367,
+          "meshAssembly": 0.014999985694885254
+        },
+        "avgTime": 104.93000000715256
+      },
+      "occtImport": {
+        "times": [
+          22.894999980926514,
+          26.62000000476837,
+          31.235000014305115
+        ],
+        "vertices": 286,
+        "triangles": 280,
+        "avgTime": 26.916666666666668
+      },
+      "speedup": 0.2565202198116067,
+      "success": true
+    },
+    {
+      "name": "Sphere",
+      "category": "curved",
+      "fileSize": 2318,
+      "occ": {
+        "times": [
+          14.40499997138977,
+          93.99500000476837,
+          16.524999976158142
+        ],
+        "vertices": 3231,
+        "triangles": 6212,
+        "phases": {
+          "loadStepFile": 3.2549999952316284,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0.32499998807907104,
+          "loadStepFile_readFile": 0.800000011920929,
+          "loadStepFile_transfer": 1.7400000095367432,
+          "loadStepFile_getTools": 0.02499997615814209,
+          "loadStepFile_colorParsing": 0.014999985694885254,
+          "extractFacesWithEdges": 0.6550000309944153,
+          "tessellateOCCShape": 12.475000023841858,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 10.004999995231628,
+          "earClipping": 0,
+          "computeNormals": 1.9049999713897705,
+          "meshAssembly": 0.24500000476837158
+        },
+        "avgTime": 41.641666650772095
+      },
+      "occtImport": {
+        "times": [
+          161.69499999284744,
+          32.24000000953674,
+          31.219999969005585
+        ],
+        "vertices": 1543,
+        "triangles": 3004,
+        "avgTime": 75.05166665712993
+      },
+      "speedup": 1.802321393294626,
+      "success": true
+    },
+    {
+      "name": "Torus",
+      "category": "curved",
+      "fileSize": 2427,
+      "occ": {
+        "times": [
+          4.995000004768372,
+          6.4700000286102295,
+          4.805000007152557
+        ],
+        "vertices": 2145,
+        "triangles": 4096,
+        "phases": {
+          "loadStepFile": 2.649999976158142,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0.24000000953674316,
+          "loadStepFile_readFile": 0.6000000238418579,
+          "loadStepFile_transfer": 1.4649999737739563,
+          "loadStepFile_getTools": 0.020000040531158447,
+          "loadStepFile_colorParsing": 0.014999985694885254,
+          "extractFacesWithEdges": 0.5799999833106995,
+          "tessellateOCCShape": 1.449999988079071,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.9549999833106995,
+          "earClipping": 0,
+          "computeNormals": 0.25,
+          "meshAssembly": 0.034999966621398926
+        },
+        "avgTime": 5.4233333468437195
+      },
+      "occtImport": {
+        "times": [
+          47.660000026226044,
+          46.20999997854233,
+          45.92500001192093
+        ],
+        "vertices": 2997,
+        "triangles": 5760,
+        "avgTime": 46.59833333889643
+      },
+      "speedup": 8.592194202116639,
+      "success": true
+    },
+    {
+      "name": "Large Plate (100 holes)",
+      "category": "holes",
+      "fileSize": 77399,
+      "occ": {
+        "times": [
+          171.73500001430511,
+          160.26500004529953,
+          272.210000038147
+        ],
+        "vertices": 174,
+        "triangles": 172,
+        "phases": {
+          "loadStepFile": 31.180000007152557,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0.2849999666213989,
+          "loadStepFile_readFile": 10.589999973773956,
+          "loadStepFile_transfer": 19.5900000333786,
+          "loadStepFile_getTools": 0.02499997615814209,
+          "loadStepFile_colorParsing": 0.26499998569488525,
+          "extractFacesWithEdges": 2.5550000071525574,
+          "tessellateOCCShape": 238.25,
+          "tessellatePlanarFace": 238.08999997377396,
+          "tessellateCurvedFace": 0,
+          "earClipping": 237.77999997138977,
+          "computeNormals": 0.020000040531158447,
+          "meshAssembly": 0.014999985694885254
+        },
+        "avgTime": 201.4033333659172
+      },
+      "occtImport": {
+        "times": [
+          46.794999957084656,
+          50.75499999523163,
+          98.24500000476837
+        ],
+        "vertices": 106,
+        "triangles": 172,
+        "avgTime": 65.26499998569489
+      },
+      "speedup": 0.32405124033929944,
+      "success": true
+    },
+    {
+      "name": "XLarge Plate (400 holes)",
+      "category": "holes",
+      "fileSize": 307519,
+      "occ": {
+        "times": [
+          212.13499999046326,
+          232.15499997138977,
+          234.80000001192093
+        ],
+        "vertices": 174,
+        "triangles": 172,
+        "phases": {
+          "loadStepFile": 59.27500003576279,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0.4049999713897705,
+          "loadStepFile_readFile": 35.87000000476837,
+          "loadStepFile_transfer": 21.2950000166893,
+          "loadStepFile_getTools": 0.029999971389770508,
+          "loadStepFile_colorParsing": 1.1349999904632568,
+          "extractFacesWithEdges": 2.024999976158142,
+          "tessellateOCCShape": 173.15499997138977,
+          "tessellatePlanarFace": 172.9200000166893,
+          "tessellateCurvedFace": 0,
+          "earClipping": 172.70500004291534,
+          "computeNormals": 0.019999980926513672,
+          "meshAssembly": 0.02499997615814209
+        },
+        "avgTime": 226.3633333245913
+      },
+      "occtImport": {
+        "times": [
+          96.38999998569489,
+          92.31000000238419,
+          133.24500000476837
+        ],
+        "vertices": 106,
+        "triangles": 172,
+        "avgTime": 107.31499999761581
+      },
+      "speedup": 0.4740829639742608,
+      "success": true
+    },
+    {
+      "name": "XXLarge Plate (900 holes)",
+      "category": "holes",
+      "fileSize": 703683,
+      "occ": {
+        "times": [
+          353.64999997615814,
+          382.3949999809265,
+          402.125
+        ],
+        "vertices": 206,
+        "triangles": 81,
+        "phases": {
+          "loadStepFile": 126.55500000715256,
+          "loadStepFile_initOC": 0.010000050067901611,
+          "loadStepFile_createDoc": 0.4049999713897705,
+          "loadStepFile_readFile": 88.08499997854233,
+          "loadStepFile_transfer": 34.955000042915344,
+          "loadStepFile_getTools": 0.029999971389770508,
+          "loadStepFile_colorParsing": 2.5350000262260437,
+          "extractFacesWithEdges": 2.2049999833106995,
+          "tessellateOCCShape": 272.6050000190735,
+          "tessellatePlanarFace": 272.43000000715256,
+          "tessellateCurvedFace": 0,
+          "earClipping": 271.97000002861023,
+          "computeNormals": 0.029999971389770508,
+          "meshAssembly": 0.014999985694885254
+        },
+        "avgTime": 379.3899999856949
+      },
+      "occtImport": {
+        "times": [
+          211.38999998569489,
+          203.2049999833107,
+          204.25499999523163
+        ],
+        "vertices": 102,
+        "triangles": 132,
+        "avgTime": 206.2833333214124
+      },
+      "speedup": 0.5437236968006285,
+      "success": true
+    },
+    {
+      "name": "Rotor (141K tris)",
+      "success": false,
+      "error": "Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed."
+    },
+    {
+      "name": "Raw Material",
+      "category": "complex",
+      "fileSize": 39877,
+      "occ": {
+        "times": [
+          554.4049999713898,
+          561.7250000238419,
+          513.2700000405312
+        ],
+        "vertices": 7606,
+        "triangles": 13838,
+        "phases": {
+          "loadStepFile": 13.7049999833107,
+          "loadStepFile_initOC": 0,
+          "loadStepFile_createDoc": 0.26499998569488525,
+          "loadStepFile_readFile": 4.310000002384186,
+          "loadStepFile_transfer": 8.464999973773956,
+          "loadStepFile_getTools": 0.029999971389770508,
+          "loadStepFile_colorParsing": 0.1199999451637268,
+          "extractFacesWithEdges": 4.785000026226044,
+          "tessellateOCCShape": 494.61500000953674,
+          "tessellatePlanarFace": 915.129999935627,
+          "tessellateCurvedFace": 100.79500019550323,
+          "earClipping": 912.7399997115135,
+          "computeNormals": 1.9250000715255737,
+          "meshAssembly": 0.09999996423721313
+        },
+        "avgTime": 543.1333333452543
+      },
+      "occtImport": {
+        "times": [
+          50.99500000476837,
+          42.06999999284744,
+          49.935000002384186
+        ],
+        "vertices": 368,
+        "triangles": 332,
+        "avgTime": 47.666666666666664
+      },
+      "speedup": 0.08776236651335544,
+      "success": true
+    },
+    {
+      "name": "Cube",
+      "category": "complex",
+      "fileSize": 9390,
+      "occ": {
+        "times": [
+          329.72000002861023,
+          251.25,
+          257.83999997377396
+        ],
+        "vertices": 861,
+        "triangles": 630,
+        "phases": {
+          "loadStepFile": 40.99500000476837,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0.36000001430511475,
+          "loadStepFile_readFile": 1.6200000047683716,
+          "loadStepFile_transfer": 3.0450000166893005,
+          "loadStepFile_getTools": 0.020000040531158447,
+          "loadStepFile_colorParsing": 35.410000026226044,
+          "extractFacesWithEdges": 1.840000033378601,
+          "tessellateOCCShape": 214.6899999976158,
+          "tessellatePlanarFace": 358.05000001192093,
+          "tessellateCurvedFace": 16.275000035762787,
+          "earClipping": 357.6449999809265,
+          "computeNormals": 0.08500003814697266,
+          "meshAssembly": 0.07999998331069946
+        },
+        "avgTime": 279.6033333341281
+      },
+      "occtImport": {
+        "times": [
+          32.70999997854233,
+          31.12999999523163,
+          32.91499996185303
+        ],
+        "vertices": 1012,
+        "triangles": 1318,
+        "avgTime": 32.25166664520899
+      },
+      "speedup": 0.11534793330474358,
+      "success": true
+    },
+    {
+      "name": "Conical Surface",
+      "category": "complex",
+      "fileSize": 9390,
+      "occ": {
+        "times": [
+          252.5,
+          258.59500002861023,
+          779.4599999785423
+        ],
+        "vertices": 861,
+        "triangles": 630,
+        "phases": {
+          "loadStepFile": 38.68000000715256,
+          "loadStepFile_initOC": 0,
+          "loadStepFile_createDoc": 0.25,
+          "loadStepFile_readFile": 1.5350000262260437,
+          "loadStepFile_transfer": 2.814999997615814,
+          "loadStepFile_getTools": 0.019999980926513672,
+          "loadStepFile_colorParsing": 33.625,
+          "extractFacesWithEdges": 1.324999988079071,
+          "tessellateOCCShape": 739.1399999856949,
+          "tessellatePlanarFace": 961.5650000572205,
+          "tessellateCurvedFace": 483.76500004529953,
+          "earClipping": 961.0299999713898,
+          "computeNormals": 6.299999892711639,
+          "meshAssembly": 0.039999961853027344
+        },
+        "avgTime": 430.1850000023842
+      },
+      "occtImport": {
+        "times": [
+          30,
+          29.030000030994415,
+          29.414999961853027
+        ],
+        "vertices": 1012,
+        "triangles": 1318,
+        "avgTime": 29.481666664282482
+      },
+      "speedup": 0.0685325305720076,
+      "success": true
+    },
+    {
+      "name": "VM-002",
+      "category": "industry",
+      "fileSize": 43126,
+      "occ": {
+        "times": [
+          466.64999997615814,
+          457.9399999976158,
+          457.7950000166893
+        ],
+        "vertices": 2687,
+        "triangles": 4553,
+        "phases": {
+          "loadStepFile": 47.29000002145767,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0.23500001430511475,
+          "loadStepFile_readFile": 4.435000002384186,
+          "loadStepFile_transfer": 7.9549999833106995,
+          "loadStepFile_getTools": 0.019999980926513672,
+          "loadStepFile_colorParsing": 34.11500000953674,
+          "extractFacesWithEdges": 2.5,
+          "tessellateOCCShape": 407.36500000953674,
+          "tessellatePlanarFace": 350.7249999642372,
+          "tessellateCurvedFace": 55.36500000953674,
+          "earClipping": 350.289999961853,
+          "computeNormals": 0.15999996662139893,
+          "meshAssembly": 0.07499998807907104
+        },
+        "avgTime": 460.7949999968211
+      },
+      "occtImport": {
+        "times": [
+          72.98500001430511,
+          73.6599999666214,
+          71.66999995708466
+        ],
+        "vertices": 3043,
+        "triangles": 5750,
+        "avgTime": 72.77166664600372
+      },
+      "speedup": 0.15792633740927256,
+      "success": true
+    },
+    {
+      "name": "VM-001",
+      "category": "industry",
+      "fileSize": 336737,
+      "occ": {
+        "times": [
+          9327.04500001669,
+          9780.22000002861,
+          7494.780000030994
+        ],
+        "vertices": 57843,
+        "triangles": 95543,
+        "phases": {
+          "loadStepFile": 143.0799999833107,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0.3049999475479126,
+          "loadStepFile_readFile": 30.160000026226044,
+          "loadStepFile_transfer": 73.5799999833107,
+          "loadStepFile_getTools": 0.030000030994415283,
+          "loadStepFile_colorParsing": 38.46000003814697,
+          "extractFacesWithEdges": 21.880000054836273,
+          "tessellateOCCShape": 7320.060000002384,
+          "tessellatePlanarFace": 13860.499999701977,
+          "tessellateCurvedFace": 1014.5650003552437,
+          "earClipping": 13845.754999756813,
+          "computeNormals": 12.149999976158142,
+          "meshAssembly": 2.125
+        },
+        "avgTime": 8867.348333358765
+      },
+      "occtImport": {
+        "times": [
+          173.25999999046326,
+          166.91500002145767,
+          167.49000000953674
+        ],
+        "vertices": 3328,
+        "triangles": 3116,
+        "avgTime": 169.22166667381921
+      },
+      "speedup": 0.019083683228864612,
+      "success": true
+    },
+    {
+      "name": "BSpline Bowl",
+      "category": "bspline",
+      "fileSize": 2730,
+      "occ": {
+        "times": [
+          15.504999995231628,
+          16.57499998807907,
+          15.679999947547913
+        ],
+        "vertices": 289,
+        "triangles": 512,
+        "phases": {
+          "loadStepFile": 13.634999990463257,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0.3149999976158142,
+          "loadStepFile_readFile": 0.7299999594688416,
+          "loadStepFile_transfer": 12.129999995231628,
+          "loadStepFile_getTools": 0.025000035762786865,
+          "loadStepFile_colorParsing": 0.02499997615814209,
+          "extractFacesWithEdges": 0.44999998807907104,
+          "tessellateOCCShape": 1.4649999737739563,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 1.3349999785423279,
+          "earClipping": 0,
+          "computeNormals": 0.034999966621398926,
+          "meshAssembly": 0.009999990463256836
+        },
+        "avgTime": 15.919999976952871
+      },
+      "occtImport": {
+        "times": [
+          143.80000001192093,
+          56.63499999046326,
+          39.60499995946884
+        ],
+        "vertices": 115,
+        "triangles": 116,
+        "avgTime": 80.01333332061768
+      },
+      "speedup": 5.025963155556011,
+      "success": true
+    },
+    {
+      "name": "BSpline Dome",
+      "category": "bspline",
+      "fileSize": 2710,
+      "occ": {
+        "times": [
+          4.875,
+          4.549999952316284,
+          4.759999990463257
+        ],
+        "vertices": 289,
+        "triangles": 512,
+        "phases": {
+          "loadStepFile": 2.8299999833106995,
+          "loadStepFile_initOC": 0,
+          "loadStepFile_createDoc": 0.24500000476837158,
+          "loadStepFile_readFile": 0.6150000095367432,
+          "loadStepFile_transfer": 1.574999988079071,
+          "loadStepFile_getTools": 0.014999985694885254,
+          "loadStepFile_colorParsing": 0.02499997615814209,
+          "extractFacesWithEdges": 0.48500001430511475,
+          "tessellateOCCShape": 1.300000011920929,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 1.1899999976158142,
+          "earClipping": 0,
+          "computeNormals": 0.014999985694885254,
+          "meshAssembly": 0.009999990463256836
+        },
+        "avgTime": 4.728333314259847
+      },
+      "occtImport": {
+        "times": [
+          44.41500002145767,
+          39.00499999523163,
+          34.75499999523163
+        ],
+        "vertices": 1519,
+        "triangles": 3032,
+        "avgTime": 39.39166667064031
+      },
+      "speedup": 8.330983467650592,
+      "success": true
+    },
+    {
+      "name": "Cylinder with Hole",
+      "category": "trimmed",
+      "fileSize": 5182,
+      "occ": {
+        "times": [
+          115.77499997615814,
+          112.27500003576279,
+          173.8200000524521
+        ],
+        "vertices": 409,
+        "triangles": 352,
+        "phases": {
+          "loadStepFile": 3.349999964237213,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0.33500003814697266,
+          "loadStepFile_readFile": 0.9650000333786011,
+          "loadStepFile_transfer": 1.6449999809265137,
+          "loadStepFile_getTools": 0.014999985694885254,
+          "loadStepFile_colorParsing": 0.020000040531158447,
+          "extractFacesWithEdges": 1.0699999928474426,
+          "tessellateOCCShape": 169.2150000333786,
+          "tessellatePlanarFace": 523.5600000023842,
+          "tessellateCurvedFace": 54.3299999833107,
+          "earClipping": 522.9549999833107,
+          "computeNormals": 0.1950000524520874,
+          "meshAssembly": 0.01500004529953003
+        },
+        "avgTime": 133.95666668812433
+      },
+      "occtImport": {
+        "times": [
+          22.85999995470047,
+          22.5100000500679,
+          23.37999999523163
+        ],
+        "vertices": 312,
+        "triangles": 308,
+        "avgTime": 22.916666666666668
+      },
+      "speedup": 0.17107522330352448,
+      "success": true
+    },
+    {
+      "name": "Pipe with Porthole",
+      "category": "trimmed",
+      "fileSize": 5434,
+      "occ": {
+        "times": [
+          9.055000007152557,
+          9.414999961853027,
+          9.230000019073486
+        ],
+        "vertices": 1355,
+        "triangles": 2401,
+        "phases": {
+          "loadStepFile": 4.165000021457672,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0.24500000476837158,
+          "loadStepFile_readFile": 1.0299999713897705,
+          "loadStepFile_transfer": 2.3600000143051147,
+          "loadStepFile_getTools": 0.02499997615814209,
+          "loadStepFile_colorParsing": 0.0350000262260437,
+          "extractFacesWithEdges": 0.7250000238418579,
+          "tessellateOCCShape": 4.189999997615814,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 3.98499995470047,
+          "earClipping": 0,
+          "computeNormals": 0.06499999761581421,
+          "meshAssembly": 0.014999985694885254
+        },
+        "avgTime": 9.23333332935969
+      },
+      "occtImport": {
+        "times": [
+          26.639999985694885,
+          24.005000054836273,
+          26.865000009536743
+        ],
+        "vertices": 120,
+        "triangles": 70,
+        "avgTime": 25.83666668335597
+      },
+      "speedup": 2.798194948860108,
+      "success": true
+    }
+  ]
+}

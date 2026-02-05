@@ -1,0 +1,1224 @@
+[
+  {
+    "file": "Electronic Enclousre.STEP",
+    "cdt": {
+      "triangles": 1578592,
+      "time": 3755.4699999690056,
+      "error": null
+    },
+    "occt": {
+      "triangles": 39148,
+      "time": 3045.7349999547005,
+      "error": null
+    }
+  },
+  {
+    "file": "VM-001.STEP",
+    "cdt": {
+      "triangles": 452520,
+      "time": 2157.1800000071526,
+      "error": null
+    },
+    "occt": {
+      "triangles": 3116,
+      "time": 166.3299999833107,
+      "error": null
+    }
+  },
+  {
+    "file": "VM-002.STEP",
+    "cdt": {
+      "triangles": 556,
+      "time": 46.86500000953674,
+      "error": null
+    },
+    "occt": {
+      "triangles": 5750,
+      "time": 76.57499998807907,
+      "error": null
+    }
+  },
+  {
+    "file": "VM-004.STEP",
+    "cdt": {
+      "triangles": 2361079,
+      "time": 4188.975000023842,
+      "error": null
+    },
+    "occt": {
+      "triangles": 24616,
+      "time": 862.4049999713898,
+      "error": null
+    }
+  },
+  {
+    "file": "benchmark/plate-large-10x10.step",
+    "cdt": {
+      "triangles": 502,
+      "time": 104.02500003576279,
+      "error": null
+    },
+    "occt": {
+      "triangles": 502,
+      "time": 87.44499999284744,
+      "error": null
+    }
+  },
+  {
+    "file": "benchmark/plate-medium-5x5.step",
+    "cdt": {
+      "triangles": 127,
+      "time": 7.959999978542328,
+      "error": null
+    },
+    "occt": {
+      "triangles": 127,
+      "time": 32.3400000333786,
+      "error": null
+    }
+  },
+  {
+    "file": "benchmark/plate-small-2x2.step",
+    "cdt": {
+      "triangles": 22,
+      "time": 2.100000023841858,
+      "error": null
+    },
+    "occt": {
+      "triangles": 22,
+      "time": 28.94999998807907,
+      "error": null
+    }
+  },
+  {
+    "file": "benchmark/plate-xlarge-20x20.step",
+    "cdt": {
+      "triangles": 2002,
+      "time": 1204.6700000166893,
+      "error": null
+    },
+    "occt": {
+      "triangles": 2002,
+      "time": 578.9250000119209,
+      "error": null
+    }
+  },
+  {
+    "file": "benchmark/plate-xxlarge-30x30.step",
+    "cdt": {
+      "triangles": 1830,
+      "time": 10238.305000007153,
+      "error": null
+    },
+    "occt": {
+      "triangles": 2762,
+      "time": 2533.3599999547005,
+      "error": null
+    }
+  },
+  {
+    "file": "benchmark/simple-square.step",
+    "cdt": {
+      "triangles": 2,
+      "time": 5.685000002384186,
+      "error": null
+    },
+    "occt": {
+      "triangles": 2,
+      "time": 20.399999976158142,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/concave/almost_collinear_pentagon.step",
+    "cdt": {
+      "triangles": 3,
+      "time": 2.125,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 21.12999999523163,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/concave/arrow.step",
+    "cdt": {
+      "triangles": 5,
+      "time": 2.1049999594688416,
+      "error": null
+    },
+    "occt": {
+      "triangles": 5,
+      "time": 21.350000023841858,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/concave/ccw-pentagon-concave.step",
+    "cdt": {
+      "triangles": 3,
+      "time": 1.7300000190734863,
+      "error": null
+    },
+    "occt": {
+      "triangles": 3,
+      "time": 20.75,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/concave/concave_pentagon_single_reflex.step",
+    "cdt": {
+      "triangles": 3,
+      "time": 2.490000009536743,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 22.055000007152557,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/concave/cw-pentagon-concave.step",
+    "cdt": {
+      "triangles": 3,
+      "time": 2.084999978542328,
+      "error": null
+    },
+    "occt": {
+      "triangles": 3,
+      "time": 20.55000001192093,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/concave/l-shape.step",
+    "cdt": {
+      "triangles": 4,
+      "time": 2.4850000143051147,
+      "error": null
+    },
+    "occt": {
+      "triangles": 4,
+      "time": 21.689999997615814,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/convex/ccw-square.step",
+    "cdt": {
+      "triangles": 2,
+      "time": 2.584999978542328,
+      "error": null
+    },
+    "occt": {
+      "triangles": 2,
+      "time": 22.930000007152557,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/convex/convex-heptagon.step",
+    "cdt": {
+      "triangles": 5,
+      "time": 2.1100000143051147,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 20.74500000476837,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/convex/convex_pentagon_simple.step",
+    "cdt": {
+      "triangles": 3,
+      "time": 1.4800000190734863,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 19.569999992847443,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/convex/cw-square.step",
+    "cdt": {
+      "triangles": 2,
+      "time": 1.8850000500679016,
+      "error": null
+    },
+    "occt": {
+      "triangles": 2,
+      "time": 29.990000009536743,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/convex/hexagon.step",
+    "cdt": {
+      "triangles": 4,
+      "time": 3.4149999618530273,
+      "error": null
+    },
+    "occt": {
+      "triangles": 4,
+      "time": 22.365000009536743,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/convex/octagon.step",
+    "cdt": {
+      "triangles": 6,
+      "time": 2.540000021457672,
+      "error": null
+    },
+    "occt": {
+      "triangles": 5,
+      "time": 21.625,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/convex/square.step",
+    "cdt": {
+      "triangles": 2,
+      "time": 1.6399999856948853,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 23.22000002861023,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/convex/tilted-rectangle.step",
+    "cdt": {
+      "triangles": 2,
+      "time": 2.0049999952316284,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 20.980000019073486,
+      "error": null
+    }
+  },
+  {
+    "file": "c1-triangulation/convex/triangle.step",
+    "cdt": {
+      "triangles": 1,
+      "time": 1.2599999904632568,
+      "error": null
+    },
+    "occt": {
+      "triangles": 1,
+      "time": 21.755000054836273,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.2-projection/tilted-hexagon.step",
+    "cdt": {
+      "triangles": 4,
+      "time": 1.9150000214576721,
+      "error": null
+    },
+    "occt": {
+      "triangles": 3,
+      "time": 24.27999997138977,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.2-projection/tilted-square-45deg.step",
+    "cdt": {
+      "triangles": 2,
+      "time": 4.110000014305115,
+      "error": null
+    },
+    "occt": {
+      "triangles": 2,
+      "time": 22.055000007152557,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.2-projection/tilted-triangle-no-plane.step",
+    "cdt": {
+      "triangles": 1,
+      "time": 1.8299999833106995,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 22.399999976158142,
+      "error": "No meshes found"
+    }
+  },
+  {
+    "file": "c2-holes/2.2-projection/vertical-wall-xz.step",
+    "cdt": {
+      "triangles": 2,
+      "time": 3.3949999809265137,
+      "error": null
+    },
+    "occt": {
+      "triangles": 2,
+      "time": 27.9549999833107,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.3-winding/both-wrong.step",
+    "cdt": {
+      "triangles": 7,
+      "time": 2.5800000429153442,
+      "error": null
+    },
+    "occt": {
+      "triangles": 6,
+      "time": 24.664999961853027,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.3-winding/correct-winding.step",
+    "cdt": {
+      "triangles": 7,
+      "time": 1.4599999785423279,
+      "error": null
+    },
+    "occt": {
+      "triangles": 6,
+      "time": 22.365000009536743,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.3-winding/square-cw.step",
+    "cdt": {
+      "triangles": 2,
+      "time": 1.3100000023841858,
+      "error": null
+    },
+    "occt": {
+      "triangles": 2,
+      "time": 24.639999985694885,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.3-winding/square-with-ccw-hole.step",
+    "cdt": {
+      "triangles": 7,
+      "time": 2.7450000047683716,
+      "error": null
+    },
+    "occt": {
+      "triangles": 6,
+      "time": 22.49500000476837,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.4-topology/hole-outside-outer.step",
+    "cdt": {
+      "triangles": 5,
+      "time": 3.1700000166893005,
+      "error": null
+    },
+    "occt": {
+      "triangles": 2,
+      "time": 24.67500001192093,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.4-topology/holes-intersect.step",
+    "cdt": {
+      "triangles": 5,
+      "time": 2.450000047683716,
+      "error": null
+    },
+    "occt": {
+      "triangles": 12,
+      "time": 25.055000007152557,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.4-topology/self-intersecting-outer.step",
+    "cdt": {
+      "triangles": 2,
+      "time": 2.6299999952316284,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 22.4650000333786,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.4-topology/valid-square-with-hole.step",
+    "cdt": {
+      "triangles": 7,
+      "time": 2.400000035762787,
+      "error": null
+    },
+    "occt": {
+      "triangles": 6,
+      "time": 22.969999969005585,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/concentric-squares.step",
+    "cdt": {
+      "triangles": 8,
+      "time": 1.5299999713897705,
+      "error": null
+    },
+    "occt": {
+      "triangles": 8,
+      "time": 25.0900000333786,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/hexagon-with-3-holes.step",
+    "cdt": {
+      "triangles": 6,
+      "time": 3.6700000166893005,
+      "error": null
+    },
+    "occt": {
+      "triangles": 4,
+      "time": 23.2849999666214,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/hexagon-with-triangle-hole.step",
+    "cdt": {
+      "triangles": 9,
+      "time": 2.224999964237213,
+      "error": null
+    },
+    "occt": {
+      "triangles": 7,
+      "time": 23.314999997615814,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/l-shape-with-hole.step",
+    "cdt": {
+      "triangles": 9,
+      "time": 2.814999997615814,
+      "error": null
+    },
+    "occt": {
+      "triangles": 8,
+      "time": 24.860000014305115,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/octagon-with-square-hole.step",
+    "cdt": {
+      "triangles": 12,
+      "time": 2.165000021457672,
+      "error": null
+    },
+    "occt": {
+      "triangles": 12,
+      "time": 24.0349999666214,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/pentagon-with-hole.step",
+    "cdt": {
+      "triangles": 8,
+      "time": 1.6200000047683716,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 24.405000030994415,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/rectangle-with-6-holes.step",
+    "cdt": {
+      "triangles": 32,
+      "time": 5.069999992847443,
+      "error": null
+    },
+    "occt": {
+      "triangles": 26,
+      "time": 27.514999985694885,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/square-with-4-holes.step",
+    "cdt": {
+      "triangles": 22,
+      "time": 2.5949999690055847,
+      "error": null
+    },
+    "occt": {
+      "triangles": 18,
+      "time": 24.650000035762787,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/square-with-arrow-hole.step",
+    "cdt": {
+      "triangles": 13,
+      "time": 1.6949999928474426,
+      "error": null
+    },
+    "occt": {
+      "triangles": 13,
+      "time": 24.30000001192093,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/square-with-diamond-hole.step",
+    "cdt": {
+      "triangles": 8,
+      "time": 2.6449999809265137,
+      "error": null
+    },
+    "occt": {
+      "triangles": 8,
+      "time": 24.87999999523163,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/square-with-right-hole.step",
+    "cdt": {
+      "triangles": 7,
+      "time": 3.115000009536743,
+      "error": null
+    },
+    "occt": {
+      "triangles": 7,
+      "time": 22.150000035762787,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/square-with-square-hole.step",
+    "cdt": {
+      "triangles": 8,
+      "time": 2.0299999713897705,
+      "error": null
+    },
+    "occt": {
+      "triangles": 8,
+      "time": 23.55999994277954,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/square-with-three-holes.step",
+    "cdt": {
+      "triangles": 17,
+      "time": 4.625,
+      "error": null
+    },
+    "occt": {
+      "triangles": 17,
+      "time": 25.07499998807907,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/square-with-triangle-hole.step",
+    "cdt": {
+      "triangles": 7,
+      "time": 2.0299999713897705,
+      "error": null
+    },
+    "occt": {
+      "triangles": 7,
+      "time": 24.025000035762787,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/square-with-two-holes.step",
+    "cdt": {
+      "triangles": 12,
+      "time": 5.235000014305115,
+      "error": null
+    },
+    "occt": {
+      "triangles": 10,
+      "time": 23.49500000476837,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/star-with-center-hole.step",
+    "cdt": {
+      "triangles": 15,
+      "time": 1.9150000214576721,
+      "error": null
+    },
+    "occt": {
+      "triangles": 14,
+      "time": 24.274999976158142,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/thin-rectangle-with-slot.step",
+    "cdt": {
+      "triangles": 8,
+      "time": 4.110000014305115,
+      "error": null
+    },
+    "occt": {
+      "triangles": 8,
+      "time": 23.269999980926514,
+      "error": null
+    }
+  },
+  {
+    "file": "c2-holes/2.5-triangulation/triangle-with-triangle-hole.step",
+    "cdt": {
+      "triangles": 6,
+      "time": 3.7950000166893005,
+      "error": null
+    },
+    "occt": {
+      "triangles": 3,
+      "time": 22.444999992847443,
+      "error": null
+    }
+  },
+  {
+    "file": "c3-curves/quarter-circle.step",
+    "cdt": {
+      "triangles": 36,
+      "time": 2.459999978542328,
+      "error": null
+    },
+    "occt": {
+      "triangles": 31,
+      "time": 23.99500000476837,
+      "error": null
+    }
+  },
+  {
+    "file": "c3-curves/rotor.step",
+    "cdt": {
+      "triangles": 3615459,
+      "time": 27221.95499998331,
+      "error": null
+    },
+    "occt": {
+      "triangles": 118279,
+      "time": 10831.709999978542,
+      "error": null
+    }
+  },
+  {
+    "file": "c3-curves/rounded-cube.step",
+    "cdt": {
+      "triangles": 85,
+      "time": 55.40499997138977,
+      "error": null
+    },
+    "occt": {
+      "triangles": 84,
+      "time": 26.189999997615814,
+      "error": null
+    }
+  },
+  {
+    "file": "c4-multiface/pyramid.step",
+    "cdt": {
+      "triangles": 6,
+      "time": 1.8299999833106995,
+      "error": null
+    },
+    "occt": {
+      "triangles": 6,
+      "time": 19.7950000166893,
+      "error": null
+    }
+  },
+  {
+    "file": "c4-multiface/tetrahedron.step",
+    "cdt": {
+      "triangles": 4,
+      "time": 1.8899999856948853,
+      "error": null
+    },
+    "occt": {
+      "triangles": 4,
+      "time": 20.930000007152557,
+      "error": null
+    }
+  },
+  {
+    "file": "c4-multiface/triangular-prism.step",
+    "cdt": {
+      "triangles": 8,
+      "time": 5.115000009536743,
+      "error": null
+    },
+    "occt": {
+      "triangles": 8,
+      "time": 31.759999990463257,
+      "error": null
+    }
+  },
+  {
+    "file": "c4-multiface/two-triangles.step",
+    "cdt": {
+      "triangles": 2,
+      "time": 1.01500004529953,
+      "error": null
+    },
+    "occt": {
+      "triangles": 2,
+      "time": 20.5799999833107,
+      "error": null
+    }
+  },
+  {
+    "file": "c4-multiface/unit-box.step",
+    "cdt": {
+      "triangles": 12,
+      "time": 9.740000009536743,
+      "error": null
+    },
+    "occt": {
+      "triangles": 7,
+      "time": 25.76500004529953,
+      "error": null
+    }
+  },
+  {
+    "file": "c4-multiface/wedge.step",
+    "cdt": {
+      "triangles": 6,
+      "time": 1.7000000476837158,
+      "error": null
+    },
+    "occt": {
+      "triangles": 8,
+      "time": 30.899999976158142,
+      "error": null
+    }
+  },
+  {
+    "file": "c4-surfaces/cone.step",
+    "cdt": {
+      "triangles": 61,
+      "time": 3.4950000047683716,
+      "error": null
+    },
+    "occt": {
+      "triangles": 1841,
+      "time": 51.105000019073486,
+      "error": null
+    }
+  },
+  {
+    "file": "c4-surfaces/cylinder.step",
+    "cdt": {
+      "triangles": 90,
+      "time": 6.375,
+      "error": null
+    },
+    "occt": {
+      "triangles": 280,
+      "time": 36.44499999284744,
+      "error": null
+    }
+  },
+  {
+    "file": "c4-surfaces/sphere.step",
+    "cdt": {
+      "triangles": 224,
+      "time": 2.3949999809265137,
+      "error": null
+    },
+    "occt": {
+      "triangles": 3004,
+      "time": 41.04000002145767,
+      "error": null
+    }
+  },
+  {
+    "file": "c4-surfaces/torus.step",
+    "cdt": {
+      "triangles": 576,
+      "time": 1.1399999856948853,
+      "error": null
+    },
+    "occt": {
+      "triangles": 5760,
+      "time": 53.83500003814697,
+      "error": null
+    }
+  },
+  {
+    "file": "c5-bspline/bspline-bowl.step",
+    "cdt": {
+      "triangles": 2048,
+      "time": 13.180000007152557,
+      "error": null
+    },
+    "occt": {
+      "triangles": 116,
+      "time": 32.99000000953674,
+      "error": null
+    }
+  },
+  {
+    "file": "c5-bspline/bspline-dome.step",
+    "cdt": {
+      "triangles": 2048,
+      "time": 4.839999973773956,
+      "error": null
+    },
+    "occt": {
+      "triangles": 3032,
+      "time": 33.33500003814697,
+      "error": null
+    }
+  },
+  {
+    "file": "c5-bspline/bspline-saddle.step",
+    "cdt": {
+      "triangles": 2048,
+      "time": 4.3299999833106995,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 35.17500001192093,
+      "error": null
+    }
+  },
+  {
+    "file": "c5-bspline/bspline-wave.step",
+    "cdt": {
+      "triangles": 1024,
+      "time": 4.649999976158142,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 22.009999990463257,
+      "error": "No meshes found"
+    }
+  },
+  {
+    "file": "c5-bspline/simple-bspline-surface.step",
+    "cdt": {
+      "triangles": 2048,
+      "time": 3.9300000071525574,
+      "error": null
+    },
+    "occt": {
+      "triangles": 116,
+      "time": 32.87000000476837,
+      "error": null
+    }
+  },
+  {
+    "file": "c6-trimmed/cylinder-two-holes.step",
+    "cdt": {
+      "triangles": 7106,
+      "time": 28.12999999523163,
+      "error": null
+    },
+    "occt": {
+      "triangles": 348,
+      "time": 23,
+      "error": null
+    }
+  },
+  {
+    "file": "c6-trimmed/cylinder-with-hole.step",
+    "cdt": {
+      "triangles": 7598,
+      "time": 20.164999961853027,
+      "error": null
+    },
+    "occt": {
+      "triangles": 308,
+      "time": 21.47999995946884,
+      "error": null
+    }
+  },
+  {
+    "file": "c6-trimmed/full-cylinder-window.step",
+    "cdt": {
+      "triangles": 7100,
+      "time": 28.105000019073486,
+      "error": null
+    },
+    "occt": {
+      "triangles": 320,
+      "time": 21.2049999833107,
+      "error": null
+    }
+  },
+  {
+    "file": "c6-trimmed/half-cylinder.step",
+    "cdt": {
+      "triangles": 8192,
+      "time": 14.245000004768372,
+      "error": null
+    },
+    "occt": {
+      "triangles": 78,
+      "time": 18.485000014305115,
+      "error": null
+    }
+  },
+  {
+    "file": "c6-trimmed/pipe-with-porthole.step",
+    "cdt": {
+      "triangles": 4481,
+      "time": 15.300000011920929,
+      "error": null
+    },
+    "occt": {
+      "triangles": 70,
+      "time": 23.764999985694885,
+      "error": null
+    }
+  },
+  {
+    "file": "c6-trimmed/quarter-cylinder-hole.step",
+    "cdt": {
+      "triangles": 4178,
+      "time": 15.25,
+      "error": null
+    },
+    "occt": {
+      "triangles": 118,
+      "time": 21.19999998807907,
+      "error": null
+    }
+  },
+  {
+    "file": "c8-solids/colored-solid.step",
+    "cdt": {
+      "triangles": 8,
+      "time": 4.875,
+      "error": null
+    },
+    "occt": {
+      "triangles": 12,
+      "time": 20.985000014305115,
+      "error": null
+    }
+  },
+  {
+    "file": "c8-solids/simple-cube.step",
+    "cdt": {
+      "triangles": 8,
+      "time": 3.125,
+      "error": null
+    },
+    "occt": {
+      "triangles": 12,
+      "time": 20.5450000166893,
+      "error": null
+    }
+  },
+  {
+    "file": "c8-solids/tetrahedron.step",
+    "cdt": {
+      "triangles": 4,
+      "time": 1.1899999976158142,
+      "error": null
+    },
+    "occt": {
+      "triangles": 4,
+      "time": 18.19999998807907,
+      "error": null
+    }
+  },
+  {
+    "file": "complex/air.step",
+    "cdt": {
+      "triangles": 0,
+      "time": 8.229999959468842,
+      "error": "No ADVANCED_FACE found in STEP file."
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 140.51500004529953,
+      "error": "No meshes found"
+    }
+  },
+  {
+    "file": "complex/conical-surface.step",
+    "cdt": {
+      "triangles": 11142,
+      "time": 29.774999976158142,
+      "error": null
+    },
+    "occt": {
+      "triangles": 1318,
+      "time": 27.860000014305115,
+      "error": null
+    }
+  },
+  {
+    "file": "complex/cube.step",
+    "cdt": {
+      "triangles": 11142,
+      "time": 18.694999992847443,
+      "error": null
+    },
+    "occt": {
+      "triangles": 1318,
+      "time": 27.37999999523163,
+      "error": null
+    }
+  },
+  {
+    "file": "complex/nissan.step",
+    "cdt": {
+      "triangles": 0,
+      "time": 2.990000009536743,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 50.7049999833107,
+      "error": "No meshes found"
+    }
+  },
+  {
+    "file": "complex/raw-material.step",
+    "cdt": {
+      "triangles": 29016,
+      "time": 92.33500003814697,
+      "error": null
+    },
+    "occt": {
+      "triangles": 332,
+      "time": 31.669999957084656,
+      "error": null
+    }
+  },
+  {
+    "file": "complex/rocky_house.step",
+    "cdt": {
+      "triangles": 3615459,
+      "time": 27596.235000014305,
+      "error": null
+    },
+    "occt": {
+      "triangles": 118279,
+      "time": 11937.514999985695,
+      "error": null
+    }
+  },
+  {
+    "file": "complex/rocky_house_car.step",
+    "cdt": {
+      "triangles": 1892553,
+      "time": 14869.899999976158,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 1340.460000038147,
+      "error": "No meshes found"
+    }
+  },
+  {
+    "file": "complex/rocky_house_roof.step",
+    "cdt": {
+      "triangles": 47695,
+      "time": 692.5349999666214,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 147.79000002145767,
+      "error": "No meshes found"
+    }
+  },
+  {
+    "file": "complex/rocky_house_sofa.step",
+    "cdt": {
+      "triangles": 46790,
+      "time": 730.5450000166893,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 43.235000014305115,
+      "error": "No meshes found"
+    }
+  },
+  {
+    "file": "complex/rocky_house_table.step",
+    "cdt": {
+      "triangles": 4828,
+      "time": 49.314999997615814,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 25.32499998807907,
+      "error": "No meshes found"
+    }
+  },
+  {
+    "file": "complex/rocky_house_terrain.step",
+    "cdt": {
+      "triangles": 18175,
+      "time": 642.8799999952316,
+      "error": null
+    },
+    "occt": {
+      "triangles": 0,
+      "time": 242.13499999046326,
+      "error": "No meshes found"
+    }
+  },
+  {
+    "file": "complex/rotor-201nal.step",
+    "cdt": {
+      "triangles": 7001831,
+      "time": 81771.41000002623,
+      "error": null
+    },
+    "occt": {
+      "triangles": 141906,
+      "time": 4421.834999978542,
+      "error": null
+    }
+  }
+]

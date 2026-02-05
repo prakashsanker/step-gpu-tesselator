@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>STEP File Failure Diagnostics</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a2e; color: #eee; }
+        .success { color: #4ade80; }
+        .error { color: #f87171; }
+        .warn { color: #fbbf24; }
+        .info { color: #60a5fa; }
+        pre { background: #0d0d1a; padding: 10px; overflow: auto; max-height: 300px; }
+        button { margin: 5px; padding: 10px 20px; }
+        #output { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>STEP File Failure Diagnostics</h1>
+    <p>Testing why complex files fail to tessellate</p>
+
+    <div>
+        <button onclick="testFile('step-examples/complex/rocky_house_table.step')">Test Rocky House Table</button>
+        <button onclick="testFile('step-examples/complex/rocky_house_sofa.step')">Test Rocky House Sofa</button>
+        <button onclick="testFile('step-examples/complex/air.step')">Test Air Assembly</button>
+        <button onclick="testFile('step-examples/c4-surfaces/sphere.step')">Test Sphere (control)</button>
+    </div>
+
+    <div id="output"></div>
+
+    <script type="module">
+        import { initOC, loadStepFile } from '/src/occ-test.ts';
+
+        const output = document.getElementById('output');
+
+        function log(msg, className = '') {
+            const div = document.createElement('div');
+            div.className = className;
+            div.textContent = msg;
+            output.appendChild(div);
+        }
+
+        function logPre(title, obj) {
+            const div = document.createElement('div');
+            div.innerHTML = `<strong>${title}:</strong><pre>${JSON.stringify(obj, null, 2)}</pre>`;
+            output.appendChild(div);
+        }
+
+        window.testFile = async function(path) {
+            output.innerHTML = '';
+            log(`\n=== Testing: ${path} ===`, 'info');
+
+            try {
+                // Fetch the file
+                log('Fetching file...');
+                const response = await fetch('/' + path);
+                if (!response.ok) {
+                    log(`Failed to fetch: ${response.status}`, 'error');
+                    return;
+                }
+                const content = await response.text();
+                log(`File size: ${content.length} bytes`, 'success');
+
+                // Show first few lines
+                const lines = content.split('\n').slice(0, 20);
+                logPre('First 20 lines', lines);
+
+                // Get schema
+                const schemaMatch = content.match(/FILE_SCHEMA\(\('([^']+)'\)\)/);
+                log(`Schema: ${schemaMatch ? schemaMatch[1] : 'Unknown'}`, 'info');
+
+                // Check for key entities
+                const entities = {
+                    ADVANCED_FACE: (content.match(/ADVANCED_FACE/g) || []).length,
+                    CLOSED_SHELL: (content.match(/CLOSED_SHELL/g) || []).length,
+                    OPEN_SHELL: (content.match(/OPEN_SHELL/g) || []).length,
+                    MANIFOLD_SOLID_BREP: (content.match(/MANIFOLD_SOLID_BREP/g) || []).length,
+                    SHAPE_REPRESENTATION: (content.match(/SHAPE_REPRESENTATION/g) || []).length,
+                    FACE_SURFACE: (content.match(/FACE_SURFACE/g) || []).length,
+                    PLANE: (content.match(/PLANE/g) || []).length,
+                    CYLINDRICAL_SURFACE: (content.match(/CYLINDRICAL_SURFACE/g) || []).length,
+                };
+                logPre('Entity counts', entities);
+
+                // Initialize OCC
+                log('Initializing OpenCascade...');
+                const oc = await initOC();
+                log('OpenCascade initialized', 'success');
+
+                // Try to load the file
+                log('Loading STEP file via loadStepFile...');
+                const startTime = performance.now();
+
+                // First, let's try the basic STEPControl_Reader directly
+                log('Trying basic STEPControl_Reader first...');
+                try {
+                    const fileName = 'diag_test.step';
+                    oc.FS.writeFile('/' + fileName, content);
+
+                    const basicReader = new oc.STEPControl_Reader_1();
+                    const readResult = basicReader.ReadFile('/' + fileName);
+                    log(`Basic reader ReadFile: ${readResult?.value ?? readResult}`, readResult === 0 || readResult?.value === 0 ? 'success' : 'error');
+
+                    if (readResult === 0 || readResult?.value === 0) {
+                        // Check NbRootsForTransfer
+                        const nbRoots = basicReader.NbRootsForTransfer();
+                        log(`NbRootsForTransfer: ${nbRoots}`, nbRoots > 0 ? 'success' : 'error');
+
+                        // Transfer
+                        const progressRange = new oc.Message_ProgressRange_1();
+                        basicReader.TransferRoots(progressRange);
+
+                        const basicShape = basicReader.OneShape();
+                        const basicIsNull = basicShape?.IsNull?.() ?? true;
+                        log(`Basic OneShape IsNull: ${basicIsNull}`, !basicIsNull ? 'success' : 'error');
+
+                        if (!basicIsNull) {
+                            // Count faces in basic shape
+                            let basicFaceCount = 0;
+                            const basicFaceExplorer = new oc.TopExp_Explorer_2(
+                                basicShape,
+                                oc.TopAbs_ShapeEnum.TopAbs_FACE,
+                                oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                            );
+                            while (basicFaceExplorer.More()) {
+                                basicFaceCount++;
+                                basicFaceExplorer.Next();
+                            }
+                            log(`Basic reader found ${basicFaceCount} faces!`, basicFaceCount > 0 ? 'success' : 'error');
+                        }
+                    }
+                } catch (basicErr) {
+                    log(`Basic reader error: ${basicErr.message}`, 'error');
+                }
+
+                try {
+                    const result = await loadStepFile(content);
+                    const elapsed = performance.now() - startTime;
+                    log(`loadStepFile completed in ${elapsed.toFixed(1)}ms`, 'success');
+
+                    // Examine the shape
+                    const shape = result.shape;
+
+                    if (!shape) {
+                        log('ERROR: shape is null/undefined!', 'error');
+                        return;
+                    }
+
+                    if (shape.IsNull && shape.IsNull()) {
+                        log('ERROR: shape.IsNull() returns true!', 'error');
+                        return;
+                    }
+
+                    log(`Shape exists and is not null`, 'success');
+
+                    // Get shape type
+                    const shapeType = shape.ShapeType ? shape.ShapeType() : 'unknown';
+                    const shapeTypeValue = typeof shapeType === 'object' ? shapeType.value : shapeType;
+                    const shapeTypeNames = ['COMPOUND', 'COMPSOLID', 'SOLID', 'SHELL', 'FACE', 'WIRE', 'EDGE', 'VERTEX', 'SHAPE'];
+                    log(`Shape type: ${shapeTypeNames[shapeTypeValue] || shapeTypeValue}`, 'info');
+
+                    // Count faces using TopExp_Explorer
+                    let faceCount = 0;
+                    let solidCount = 0;
+                    let shellCount = 0;
+
+                    // Count solids
+                    const solidExplorer = new oc.TopExp_Explorer_2(
+                        shape,
+                        oc.TopAbs_ShapeEnum.TopAbs_SOLID,
+                        oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                    );
+                    while (solidExplorer.More()) {
+                        solidCount++;
+                        solidExplorer.Next();
+                    }
+
+                    // Count shells
+                    const shellExplorer = new oc.TopExp_Explorer_2(
+                        shape,
+                        oc.TopAbs_ShapeEnum.TopAbs_SHELL,
+                        oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                    );
+                    while (shellExplorer.More()) {
+                        shellCount++;
+                        shellExplorer.Next();
+                    }
+
+                    // Count faces
+                    const faceExplorer = new oc.TopExp_Explorer_2(
+                        shape,
+                        oc.TopAbs_ShapeEnum.TopAbs_FACE,
+                        oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                    );
+
+                    const faceTypes = {};
+                    while (faceExplorer.More()) {
+                        faceCount++;
+
+                        // Get surface type for first 10 faces
+                        if (faceCount <= 10) {
+                            try {
+                                const face = oc.TopoDS.Face_1(faceExplorer.Current());
+                                const surface = oc.BRep_Tool.Surface_2(face);
+
+                                if (surface) {
+                                    const adaptor = new oc.GeomAdaptor_Surface_2(surface);
+                                    const surfType = adaptor.GetType();
+                                    const surfTypeValue = typeof surfType === 'object' ? surfType.value : surfType;
+                                    const surfTypeNames = ['Plane', 'Cylinder', 'Cone', 'Sphere', 'Torus', 'BezierSurf', 'BSplineSurf', 'RevolutionSurf', 'ExtrusionSurf', 'OffsetSurf', 'OtherSurf'];
+                                    const typeName = surfTypeNames[surfTypeValue] || `Unknown(${surfTypeValue})`;
+                                    faceTypes[typeName] = (faceTypes[typeName] || 0) + 1;
+                                }
+                            } catch (e) {
+                                log(`Error getting surface type: ${e.message}`, 'warn');
+                            }
+                        }
+
+                        faceExplorer.Next();
+                    }
+
+                    log(`Solids: ${solidCount}`, solidCount > 0 ? 'success' : 'warn');
+                    log(`Shells: ${shellCount}`, shellCount > 0 ? 'success' : 'warn');
+                    log(`Faces: ${faceCount}`, faceCount > 0 ? 'success' : 'error');
+
+                    if (Object.keys(faceTypes).length > 0) {
+                        logPre('First 10 face surface types', faceTypes);
+                    }
+
+                    // Try extracting edges from first face
+                    if (faceCount > 0) {
+                        const firstFaceExplorer = new oc.TopExp_Explorer_2(
+                            shape,
+                            oc.TopAbs_ShapeEnum.TopAbs_FACE,
+                            oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                        );
+                        const firstFace = oc.TopoDS.Face_1(firstFaceExplorer.Current());
+
+                        // Count wires in first face
+                        let wireCount = 0;
+                        const wireExplorer = new oc.TopExp_Explorer_2(
+                            firstFace,
+                            oc.TopAbs_ShapeEnum.TopAbs_WIRE,
+                            oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                        );
+                        while (wireExplorer.More()) {
+                            wireCount++;
+                            wireExplorer.Next();
+                        }
+                        log(`First face has ${wireCount} wires`, wireCount > 0 ? 'success' : 'error');
+
+                        // Count edges in first face
+                        let edgeCount = 0;
+                        const edgeExplorer = new oc.TopExp_Explorer_2(
+                            firstFace,
+                            oc.TopAbs_ShapeEnum.TopAbs_EDGE,
+                            oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                        );
+                        while (edgeExplorer.More()) {
+                            edgeCount++;
+                            edgeExplorer.Next();
+                        }
+                        log(`First face has ${edgeCount} edges`, edgeCount > 0 ? 'success' : 'error');
+                    }
+
+                    // Check what loadStepFile returned
+                    logPre('loadStepFile result keys', Object.keys(result));
+                    if (result.colors) {
+                        log(`Colors extracted: ${result.colors.size || 0}`, 'info');
+                    }
+
+                } catch (loadErr) {
+                    log(`loadStepFile FAILED: ${loadErr.message}`, 'error');
+                    console.error(loadErr);
+
+                    // Try fallback with simple STEPControl_Reader
+                    log('Trying fallback with STEPControl_Reader...', 'warn');
+                    try {
+                        const fileName = 'test.step';
+                        oc.FS.writeFile('/' + fileName, content);
+
+                        const reader = new oc.STEPControl_Reader_1();
+                        const readResult = reader.ReadFile('/' + fileName);
+                        log(`ReadFile result: ${readResult}`, readResult === 0 ? 'success' : 'error');
+
+                        if (readResult === 0) {
+                            const progressRange = new oc.Message_ProgressRange_1();
+                            reader.TransferRoots(progressRange);
+                            const shape = reader.OneShape();
+
+                            if (shape && !shape.IsNull()) {
+                                let fallbackFaceCount = 0;
+                                const fallbackExplorer = new oc.TopExp_Explorer_2(
+                                    shape,
+                                    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+                                    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                                );
+                                while (fallbackExplorer.More()) {
+                                    fallbackFaceCount++;
+                                    fallbackExplorer.Next();
+                                }
+                                log(`Fallback reader found ${fallbackFaceCount} faces`, 'success');
+                            }
+                        }
+                    } catch (fallbackErr) {
+                        log(`Fallback also failed: ${fallbackErr.message}`, 'error');
+                    }
+                }
+
+            } catch (err) {
+                log(`ERROR: ${err.message}`, 'error');
+                console.error(err);
+            }
+        };
+    </script>
+</body>
+</html>
