@@ -1,40 +1,775 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
-  <head>
+<head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Custom WebGPU STEP Viewer</title>
+    <title>Visual Validation - Algorithm Comparison</title>
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      body { overflow: hidden; }
-      #file-input {
-        position: absolute;
-        z-index: 10;
-        top: 10px;
-        left: 10px;
-      }
-      #stats {
-        position: absolute;
-        z-index: 10;
-        top: 10px;
-        right: 10px;
-        background: rgba(0,0,0,0.7);
-        color: #fff;
-        padding: 10px;
-        font-family: monospace;
-        font-size: 12px;
-      }
-      #canvas {
-        width: 100vw;
-        height: 100vh;
-      }
+        * { box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            margin: 0;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #eee;
+        }
+        h1 { margin-top: 0; }
+        .controls {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+        .controls select, .controls button, .controls input {
+            padding: 8px 12px;
+            font-size: 14px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #333;
+            color: #eee;
+        }
+        .controls button {
+            cursor: pointer;
+            background: #4a6;
+        }
+        .controls button:hover { background: #5b7; }
+        .controls button:disabled { background: #555; cursor: not-allowed; }
+
+        .file-picker-label {
+            padding: 8px 12px;
+            font-size: 14px;
+            border-radius: 4px;
+            border: 1px solid #444;
+            background: #336;
+            color: #eee;
+            cursor: pointer;
+        }
+        .file-picker-label:hover { background: #447; }
+        .file-picker-label input[type="file"] { display: none; }
+
+        .separator {
+            color: #555;
+            font-size: 14px;
+        }
+
+        .render-container {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .render-panel {
+            background: #2a2a2a;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .render-header {
+            padding: 10px;
+            background: #333;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .render-header h3 { margin: 0; font-size: 14px; }
+        .render-stats { font-size: 12px; color: #888; }
+        .render-canvas {
+            width: 100%;
+            height: 400px;
+            display: block;
+        }
+
+        #log {
+            background: #222;
+            padding: 15px;
+            border-radius: 8px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        .log-pass { color: #4ade80; }
+        .log-fail { color: #f87171; }
+        .log-info { color: #60a5fa; }
+        .log-warn { color: #fbbf24; }
+
+        #status {
+            padding: 10px;
+            margin-bottom: 10px;
+            border-radius: 4px;
+            background: #333;
+        }
+        .status-ready { background: #234; }
+        .status-loading { background: #432; }
+        .status-error { background: #422; }
+
+        .comparison-result {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            background: #222;
+        }
+        .comparison-result h3 { margin-top: 0; }
+        .verdict-pass { color: #4ade80; font-weight: bold; }
+        .verdict-fail { color: #f87171; font-weight: bold; }
     </style>
-  </head>
-  <body>
-    <input id="file-input" type="file" accept=".stp,.step,.STEP,.STP" />
-    <div id="stats"></div>
-    <canvas id="canvas"></canvas>
-    <script type="module" src="/src/main.ts"></script>
-  </body>
+</head>
+<body>
+    <h1>Visual Validation - Algorithm Comparison</h1>
+
+    <div id="status" class="status-loading">Initializing...</div>
+
+    <div class="controls">
+        <select id="testFile">
+            <option value="">-- Select Test File --</option>
+            <optgroup label="Convex Polygons">
+                <option value="step-examples/c1-triangulation/convex/triangle.step">Triangle</option>
+                <option value="step-examples/c1-triangulation/convex/square.step">Square</option>
+                <option value="step-examples/c1-triangulation/convex/hexagon.step">Hexagon</option>
+                <option value="step-examples/c1-triangulation/convex/octagon.step">Octagon</option>
+            </optgroup>
+            <optgroup label="Concave Polygons">
+                <option value="step-examples/c1-triangulation/concave/l-shape.step">L-Shape</option>
+                <option value="step-examples/c1-triangulation/concave/arrow.step">Arrow</option>
+                <option value="step-examples/c1-triangulation/concave/ccw-pentagon-concave.step">Concave Pentagon</option>
+            </optgroup>
+            <optgroup label="Holes - Simple">
+                <option value="step-examples/c2-holes/2.5-triangulation/square-with-triangle-hole.step">Square + Triangle Hole</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/square-with-square-hole.step">Square + Square Hole</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/square-with-diamond-hole.step">Square + Diamond Hole</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/hexagon-with-triangle-hole.step">Hexagon + Triangle Hole</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/hexagon-with-3-holes.step">Hexagon + 3 Holes</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/pentagon-with-hole.step">Pentagon + Hole</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/octagon-with-square-hole.step">Octagon + Square Hole</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/l-shape-with-hole.step">L-Shape + Hole</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/triangle-with-triangle-hole.step">Triangle + Triangle Hole</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/star-with-center-hole.step">Star + Center Hole</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/thin-rectangle-with-slot.step">Rectangle + Slot</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/concentric-squares.step">Concentric Squares</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/rectangle-with-6-holes.step">Rectangle + 6 Holes</option>
+            </optgroup>
+            <optgroup label="Holes - Multiple">
+                <option value="step-examples/c2-holes/2.5-triangulation/square-with-two-holes.step">Square + 2 Holes</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/square-with-three-holes.step">Square + 3 Holes</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/square-with-4-holes.step">Square + 4 Holes</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/square-with-arrow-hole.step">Square + Arrow Hole</option>
+                <option value="step-examples/c2-holes/2.5-triangulation/square-with-right-hole.step">Square + Right Hole</option>
+            </optgroup>
+            <optgroup label="Holes - Winding/Topology">
+                <option value="step-examples/c2-holes/2.3-winding/square-with-ccw-hole.step">Square + CCW Hole</option>
+                <option value="step-examples/c2-holes/2.4-topology/valid-square-with-hole.step">Valid Square + Hole</option>
+                <option value="step-examples/c2-holes/2.4-topology/holes-intersect.step">Holes Intersect</option>
+            </optgroup>
+            <optgroup label="Trimmed Cylinders (c6)">
+                <option value="step-examples/c6-trimmed/cylinder-with-hole.step">Cylinder + Hole</option>
+                <option value="step-examples/c6-trimmed/cylinder-two-holes.step">Cylinder + 2 Holes</option>
+                <option value="step-examples/c6-trimmed/half-cylinder.step">Half Cylinder</option>
+                <option value="step-examples/c6-trimmed/quarter-cylinder-hole.step">Quarter Cylinder + Hole</option>
+                <option value="step-examples/c6-trimmed/pipe-with-porthole.step">Pipe + Porthole</option>
+                <option value="step-examples/c6-trimmed/full-cylinder-window.step">Full Cylinder Window</option>
+            </optgroup>
+            <optgroup label="Holes - Benchmark">
+                <option value="step-examples/benchmark/simple-square.step">Simple Square</option>
+                <option value="step-examples/benchmark/plate-small-2x2.step">Plate Small (4 holes)</option>
+                <option value="step-examples/benchmark/plate-medium-5x5.step">Plate Medium (25 holes)</option>
+                <option value="step-examples/benchmark/plate-large-10x10.step">Plate Large (100 holes)</option>
+                <option value="step-examples/benchmark/plate-xlarge-20x20.step">Plate XLarge (400 holes)</option>
+                <option value="step-examples/benchmark/plate-xxlarge-30x30.step">Plate XXLarge (900 holes)</option>
+            </optgroup>
+            <optgroup label="Multi-face">
+                <option value="step-examples/c4-multiface/unit-box.step">Unit Box</option>
+                <option value="step-examples/c4-multiface/tetrahedron.step">Tetrahedron</option>
+                <option value="step-examples/c4-multiface/pyramid.step">Pyramid</option>
+                <option value="step-examples/c4-multiface/triangular-prism.step">Triangular Prism</option>
+                <option value="step-examples/c4-multiface/wedge.step">Wedge</option>
+            </optgroup>
+            <optgroup label="Curved Surfaces">
+                <option value="step-examples/c4-surfaces/cylinder.step">Cylinder</option>
+                <option value="step-examples/c4-surfaces/sphere.step">Sphere</option>
+                <option value="step-examples/c4-surfaces/cone.step">Cone</option>
+                <option value="step-examples/c4-surfaces/torus.step">Torus</option>
+            </optgroup>
+            <optgroup label="Complex">
+                <option value="step-examples/complex/rotor-201nal.step">Rotor</option>
+                <option value="step-examples/complex/cube.step">Cube</option>
+                <option value="step-examples/complex/nissan.step">Nissan</option>
+                <option value="step-examples/complex/air.step">Air</option>
+                <option value="step-examples/complex/raw-material.step">Raw Material</option>
+                <option value="step-examples/complex/rocky_house.step">Rocky House</option>
+                <option value="step-examples/complex/conical-surface.step">Conical Surface</option>
+            </optgroup>
+            <optgroup label="Solids (c8)">
+                <option value="step-examples/c8-solids/simple-cube.step">Simple Cube</option>
+                <option value="step-examples/c8-solids/tetrahedron.step">Tetrahedron</option>
+                <option value="step-examples/c8-solids/colored-solid.step">Colored Solid</option>
+            </optgroup>
+            <optgroup label="B-Spline Surfaces">
+                <option value="step-examples/c5-bspline/simple-bspline-surface.step">Simple B-Spline</option>
+                <option value="step-examples/c5-bspline/bspline-bowl.step">B-Spline Bowl</option>
+                <option value="step-examples/c5-bspline/bspline-dome.step">B-Spline Dome</option>
+                <option value="step-examples/c5-bspline/bspline-saddle.step">B-Spline Saddle</option>
+                <option value="step-examples/c5-bspline/bspline-wave.step">B-Spline Wave</option>
+            </optgroup>
+            <optgroup label="Trimmed Surfaces">
+                <option value="step-examples/c6-trimmed/half-cylinder.step">Half Cylinder</option>
+                <option value="step-examples/c6-trimmed/cylinder-with-hole.step">Cylinder with Hole</option>
+                <option value="step-examples/c6-trimmed/cylinder-two-holes.step">Cylinder Two Holes</option>
+                <option value="step-examples/c6-trimmed/quarter-cylinder-hole.step">Quarter Cylinder Hole</option>
+                <option value="step-examples/c6-trimmed/pipe-with-porthole.step">Pipe with Porthole</option>
+                <option value="step-examples/c6-trimmed/full-cylinder-window.step">Full Cylinder Window</option>
+            </optgroup>
+            <optgroup label="Real World - AP203 (Catia V5)">
+                <option value="step-examples/external/steptools/123Block_Color.stp">123Block Color</option>
+                <option value="step-examples/external/steptools/123Block_Dimension.stp">123Block Dimension</option>
+                <option value="step-examples/external/steptools/123Block_Short_Note.stp">123Block Short Note</option>
+                <option value="step-examples/external/steptools/boxy_with_cylindricity.stp">Boxy Cylindricity</option>
+                <option value="step-examples/external/steptools/boxy_with_diamsize.stp">Boxy Diamsize</option>
+                <option value="step-examples/external/steptools/boxy_with_flatness.stp">Boxy Flatness</option>
+                <option value="step-examples/external/steptools/boxy_with_limitsandfits.stp">Boxy Limits & Fits</option>
+                <option value="step-examples/external/steptools/boxy_with_linearsize.stp">Boxy Linear Size</option>
+                <option value="step-examples/external/steptools/boxy_with_perp.stp">Boxy Perpendicularity</option>
+                <option value="step-examples/external/steptools/boxy_with_surfacetex.stp">Boxy Surface Texture</option>
+            </optgroup>
+            <optgroup label="Real World - AP214 (Multi-CAD)">
+                <option value="step-examples/external/steptools-ap214/as1-ac-214.stp">AS1 AutoCAD</option>
+                <option value="step-examples/external/steptools-ap214/as1-ec-214.stp">AS1 Euclid</option>
+                <option value="step-examples/external/steptools-ap214/as1-md-214.stp">AS1 MicroStation</option>
+                <option value="step-examples/external/steptools-ap214/as1-ug-214.stp">AS1 Unigraphics</option>
+                <option value="step-examples/external/steptools-ap214/d2-db-214.stp">D2 Debis</option>
+                <option value="step-examples/external/steptools-ap214/f1-db-214.stp">F1 Debis</option>
+                <option value="step-examples/external/steptools-ap214/io1-ac-214.stp">IO1 AutoCAD</option>
+                <option value="step-examples/external/steptools-ap214/io1-ca-214.stp">IO1 CADDS</option>
+                <option value="step-examples/external/steptools-ap214/io1-ec-214.stp">IO1 Euclid</option>
+                <option value="step-examples/external/steptools-ap214/io1-md-214.stp">IO1 MicroStation</option>
+                <option value="step-examples/external/steptools-ap214/io1-ug-214.stp">IO1 Unigraphics</option>
+            </optgroup>
+            <optgroup label="Real World - AP224 (Manufacturing)">
+                <option value="step-examples/external/steptools-ap224/ap224_995277945.stp">AP224 Part 1</option>
+                <option value="step-examples/external/steptools-ap224/ap224_995288709.stp">AP224 Part 2</option>
+                <option value="step-examples/external/steptools-ap224/ap224_995315479.stp">AP224 Part 3</option>
+                <option value="step-examples/external/steptools-ap224/ap224_995602415.stp">AP224 Part 4</option>
+                <option value="step-examples/external/steptools-ap224/ap224_997423743.stp">AP224 Part 5</option>
+                <option value="step-examples/external/steptools-ap224/ap224_997865309.stp">AP224 Part 6</option>
+            </optgroup>
+        </select>
+        <span class="separator">or</span>
+        <label class="file-picker-label">
+            Browse File...
+            <input type="file" id="filePicker" accept=".stp,.step,.STEP,.STP" />
+        </label>
+        <button id="runBtn" disabled>Run Comparison</button>
+        <button id="captureBtn" disabled>Capture Screenshots</button>
+        <input type="text" id="checkpointName" placeholder="checkpoint-0" style="width: 120px;" />
+    </div>
+
+    <div class="render-container">
+        <div class="render-panel">
+            <div class="render-header">
+                <h3>Our Pipeline</h3>
+                <span class="render-stats" id="stats-occ">-</span>
+            </div>
+            <canvas id="canvas-occ" class="render-canvas"></canvas>
+        </div>
+        <div class="render-panel">
+            <div class="render-header">
+                <h3>occt-import-js (Reference)</h3>
+                <span class="render-stats" id="stats-occt">-</span>
+            </div>
+            <canvas id="canvas-occt" class="render-canvas"></canvas>
+        </div>
+    </div>
+
+    <div id="log"></div>
+
+    <div class="comparison-result" id="comparisonResult" style="display: none;">
+        <h3>Comparison Results</h3>
+        <div id="comparisonDetails"></div>
+    </div>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/examples/jsm/controls/OrbitControls.js": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/controls/OrbitControls.js"
+        }
+    }
+    </script>
+
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+        import { parseStepFile } from '/src/tessellator.ts';
+        import { parseStepWithOCC, parseStepWithOcctImportFull } from '/src/occ-test.ts';
+        import { getGPUDevice } from '/src/lib.ts';
+
+        // State
+        let renderers = {};
+        let scenes = {};
+        let cameras = {};
+        let controls = {};
+        let currentMeshes = {};
+
+
+        // Logging
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const span = document.createElement('span');
+            span.className = 'log-' + type;
+            span.textContent = `[${new Date().toISOString().substr(11, 8)}] ${message}\n`;
+            logDiv.appendChild(span);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(`[${type}] ${message}`);
+        }
+
+        function setStatus(message, type = 'loading') {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = 'status-' + type;
+        }
+
+        // Initialize Three.js renderers for each canvas
+        function initRenderer(canvasId) {
+            const canvas = document.getElementById(canvasId);
+            const renderer = new THREE.WebGLRenderer({
+                canvas,
+                antialias: true,
+                preserveDrawingBuffer: true, // Needed for screenshots
+                logarithmicDepthBuffer: true
+            });
+
+            const width = canvas.clientWidth;
+            const height = canvas.clientHeight;
+            renderer.setSize(width, height);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+            const scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x404040);
+
+            const camera = new THREE.PerspectiveCamera(45, width / height, 0.1, 10000);
+            camera.position.set(5, 5, 5);
+
+            const ctrl = new OrbitControls(camera, renderer.domElement);
+            ctrl.enableDamping = true;
+
+            // Lights
+            const hemiLight = new THREE.HemisphereLight(0xffffff, 0x444444, 0.6);
+            scene.add(hemiLight);
+            const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            dirLight.position.set(10, 15, 10);
+            scene.add(dirLight);
+
+            renderers[canvasId] = renderer;
+            scenes[canvasId] = scene;
+            cameras[canvasId] = camera;
+            controls[canvasId] = ctrl;
+
+            return { renderer, scene, camera, controls: ctrl };
+        }
+
+        // Create Three.js mesh from our pipeline output
+        function createMeshFromOurPipeline(mesh) {
+            const positions = new Float32Array(mesh.positions.length);
+            for (let i = 0; i < mesh.positions.length; i += 3) {
+                positions[i] = mesh.positions[i];
+                positions[i + 1] = mesh.positions[i + 2];
+                positions[i + 2] = -mesh.positions[i + 1];
+            }
+
+            let normals;
+            if (mesh.normals) {
+                normals = new Float32Array(mesh.normals.length);
+                for (let i = 0; i < mesh.normals.length; i += 3) {
+                    normals[i] = mesh.normals[i];
+                    normals[i + 1] = mesh.normals[i + 2];
+                    normals[i + 2] = -mesh.normals[i + 1];
+                }
+            }
+
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+            if (normals) {
+                geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+            } else {
+                geometry.computeVertexNormals();
+            }
+            geometry.setIndex(new THREE.BufferAttribute(mesh.indices, 1));
+
+            // Note: We ignore vertex colors for visual comparison to ensure both renders
+            // use the same color. This allows fair pixel comparison between our pipeline
+            // and occt-import-js reference.
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x6699ff,  // Same as reference for fair pixel comparison
+                metalness: 0.2,
+                roughness: 0.5,
+                side: THREE.DoubleSide,
+            });
+
+            return new THREE.Mesh(geometry, material);
+        }
+
+        // Create Three.js mesh from occt-import-js output
+        function createMeshFromOcctImport(meshData) {
+            const geometry = new THREE.BufferGeometry();
+
+            // occt-import-js provides mesh data in a specific format
+            const positions = new Float32Array(meshData.positions.length);
+            for (let i = 0; i < meshData.positions.length; i += 3) {
+                positions[i] = meshData.positions[i];
+                positions[i + 1] = meshData.positions[i + 2];
+                positions[i + 2] = -meshData.positions[i + 1];
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            if (meshData.normals && meshData.normals.length > 0) {
+                const normals = new Float32Array(meshData.normals.length);
+                for (let i = 0; i < meshData.normals.length; i += 3) {
+                    normals[i] = meshData.normals[i];
+                    normals[i + 1] = meshData.normals[i + 2];
+                    normals[i + 2] = -meshData.normals[i + 1];
+                }
+                geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
+            } else {
+                geometry.computeVertexNormals();
+            }
+
+            if (meshData.indices && meshData.indices.length > 0) {
+                geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(meshData.indices), 1));
+            }
+
+            const material = new THREE.MeshStandardMaterial({
+                color: 0x6699ff,  // Same as our pipeline for pixel comparison
+                metalness: 0.2,
+                roughness: 0.5,
+                side: THREE.DoubleSide,
+            });
+
+            return new THREE.Mesh(geometry, material);
+        }
+
+        // Fit camera to mesh
+        function fitCameraToMesh(canvasId, mesh) {
+            mesh.geometry.computeBoundingBox();
+            const boundingBox = mesh.geometry.boundingBox;
+            const center = new THREE.Vector3();
+            boundingBox.getCenter(center);
+            const size = new THREE.Vector3();
+            boundingBox.getSize(size);
+
+            const maxDim = Math.max(size.x, size.y, size.z);
+            const fov = 45;
+            const cameraDistance = maxDim / (2 * Math.tan((fov * Math.PI) / 360)) * 2;
+
+            const camera = cameras[canvasId];
+            camera.position.set(
+                center.x + cameraDistance * 0.7,
+                center.y + cameraDistance * 0.7,
+                center.z + cameraDistance * 0.7
+            );
+            camera.lookAt(center);
+            camera.near = Math.max(0.1, maxDim * 0.001);
+            camera.far = Math.max(1000, cameraDistance * 5);
+            camera.updateProjectionMatrix();
+
+            controls[canvasId].target.copy(center);
+            controls[canvasId].update();
+        }
+
+        // Add mesh to scene
+        function setMesh(canvasId, threeMesh) {
+            const scene = scenes[canvasId];
+
+            // Remove existing mesh
+            if (currentMeshes[canvasId]) {
+                scene.remove(currentMeshes[canvasId]);
+                currentMeshes[canvasId].geometry.dispose();
+                currentMeshes[canvasId].material.dispose();
+            }
+
+            scene.add(threeMesh);
+            currentMeshes[canvasId] = threeMesh;
+            fitCameraToMesh(canvasId, threeMesh);
+        }
+
+        // Run comparison with step content string
+        async function runComparisonWithContent(stepContent, fileName) {
+            setStatus('Loading STEP file...', 'loading');
+            log(`Loading: ${fileName}`, 'info');
+
+            try {
+                log(`Loaded ${(stepContent.length / 1024).toFixed(1)} KB`, 'info');
+
+                // Run our pipeline
+                setStatus('Running our pipeline...', 'loading');
+                log('Running our pipeline...', 'info');
+                const occStart = performance.now();
+                const statsOcc = document.getElementById('stats-occ');
+                statsOcc.style.color = '#fbbf24';
+                statsOcc.style.fontSize = '16px';
+                const occMesh = await parseStepFile(new TextEncoder().encode(stepContent), 'ear-clipping', (pct) => {
+                    statsOcc.textContent = `${pct}%`;
+                });
+                const occTime = performance.now() - occStart;
+
+                const occThreeMesh = createMeshFromOurPipeline(occMesh);
+                setMesh('canvas-occ', occThreeMesh);
+
+                const occStats = `${occMesh.indices.length / 3} tris, ${occTime.toFixed(0)}ms`;
+                statsOcc.textContent = occStats;
+                statsOcc.style.color = '';
+                statsOcc.style.fontSize = '';
+                log(`Our pipeline: ${occStats}`, 'pass');
+
+                // Run occt-import-js (reference)
+                setStatus('Running occt-import-js...', 'loading');
+                log('Running occt-import-js...', 'info');
+                const occtResult = await parseStepWithOcctImportFull(stepContent);
+
+                if (occtResult.success && occtResult.mesh) {
+                    const occtThreeMesh = createMeshFromOcctImport(occtResult.mesh);
+                    setMesh('canvas-occt', occtThreeMesh);
+
+                    const occtStats = `${occtResult.triangleCount} tris, ${occtResult.totalTime.toFixed(0)}ms`;
+                    document.getElementById('stats-occt').textContent = occtStats;
+                    log(`occt-import-js: ${occtStats}`, 'pass');
+                } else {
+                    log(`occt-import-js failed: ${occtResult.error}`, 'fail');
+                    document.getElementById('stats-occt').textContent = 'Failed';
+                }
+
+                // Show comparison
+                const speedup = occtResult.totalTime / occTime;
+                showComparison({
+                    occ: { triangles: occMesh.indices.length / 3, time: occTime },
+                    occt: { triangles: occtResult.triangleCount, time: occtResult.totalTime },
+                    speedup
+                });
+
+                setStatus('Comparison complete', 'ready');
+                log('Comparison complete!', 'pass');
+
+            } catch (error) {
+                log(`Error: ${error.message}`, 'fail');
+                setStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        // Run comparison from dropdown selection
+        async function runComparison() {
+            const testFile = document.getElementById('testFile').value;
+            if (!testFile) {
+                log('Please select a test file or browse for one', 'warn');
+                return;
+            }
+
+            try {
+                const response = await fetch('/' + testFile);
+                if (!response.ok) throw new Error(`Failed to load ${testFile}`);
+                const stepContent = await response.text();
+                await runComparisonWithContent(stepContent, testFile);
+            } catch (error) {
+                log(`Error: ${error.message}`, 'fail');
+                setStatus(`Error: ${error.message}`, 'error');
+            }
+        }
+
+        function showComparison(data) {
+            const resultDiv = document.getElementById('comparisonResult');
+            const detailsDiv = document.getElementById('comparisonDetails');
+
+            const speedupClass = data.speedup >= 1 ? 'verdict-pass' : 'verdict-fail';
+            const speedupText = data.speedup >= 1 ? 'FASTER' : 'SLOWER';
+
+            detailsDiv.innerHTML = `
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr>
+                        <th style="text-align: left; padding: 8px; border-bottom: 1px solid #444;">Metric</th>
+                        <th style="text-align: right; padding: 8px; border-bottom: 1px solid #444;">Our Pipeline</th>
+                        <th style="text-align: right; padding: 8px; border-bottom: 1px solid #444;">occt-import-js</th>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px;">Triangles</td>
+                        <td style="text-align: right; padding: 8px;">${data.occ.triangles.toLocaleString()}</td>
+                        <td style="text-align: right; padding: 8px;">${data.occt.triangles.toLocaleString()}</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px;">Time</td>
+                        <td style="text-align: right; padding: 8px;">${data.occ.time.toFixed(0)} ms</td>
+                        <td style="text-align: right; padding: 8px;">${data.occt.time.toFixed(0)} ms</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 8px;">Speedup</td>
+                        <td colspan="2" style="text-align: center; padding: 8px;" class="${speedupClass}">
+                            ${data.speedup.toFixed(2)}x ${speedupText}
+                        </td>
+                    </tr>
+                </table>
+            `;
+
+            resultDiv.style.display = 'block';
+        }
+
+        // Capture screenshots
+        async function captureScreenshots() {
+            const checkpoint = document.getElementById('checkpointName').value || 'baseline';
+            const testFile = document.getElementById('testFile').value;
+            if (!testFile) {
+                log('Please run a comparison first', 'warn');
+                return;
+            }
+
+            const testName = testFile.split('/').pop().replace('.step', '').replace('.STEP', '');
+
+            log(`Capturing screenshots for ${testName}...`, 'info');
+
+            // Get canvas data URLs
+            const canvases = ['canvas-occ', 'canvas-occt'];
+            const labels = ['our-pipeline', 'occt-import'];
+
+            for (let i = 0; i < canvases.length; i++) {
+                const canvas = document.getElementById(canvases[i]);
+                const dataUrl = canvas.toDataURL('image/png');
+
+                // Create download link
+                const link = document.createElement('a');
+                link.download = `${checkpoint}_${testName}_${labels[i]}.png`;
+                link.href = dataUrl;
+                link.click();
+
+                log(`Saved: ${link.download}`, 'pass');
+            }
+
+            log('Screenshots captured! Check your downloads folder.', 'pass');
+        }
+
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+
+            for (const canvasId of ['canvas-occ', 'canvas-occt']) {
+                if (renderers[canvasId] && scenes[canvasId] && cameras[canvasId]) {
+                    controls[canvasId].update();
+                    renderers[canvasId].render(scenes[canvasId], cameras[canvasId]);
+                }
+            }
+        }
+
+        // Sync camera controls across all canvases
+        let isSyncing = false;  // Prevent recursive sync
+        function syncControls(sourceId) {
+            if (isSyncing) return;  // Prevent infinite recursion
+            isSyncing = true;
+
+            const sourceControls = controls[sourceId];
+            const sourceCamera = cameras[sourceId];
+
+            for (const canvasId of ['canvas-occ', 'canvas-occt']) {
+                if (canvasId !== sourceId && controls[canvasId] && cameras[canvasId]) {
+                    cameras[canvasId].position.copy(sourceCamera.position);
+                    cameras[canvasId].quaternion.copy(sourceCamera.quaternion);
+                    controls[canvasId].target.copy(sourceControls.target);
+                    controls[canvasId].update();
+                }
+            }
+
+            isSyncing = false;
+        }
+
+        // Handle file picker
+        function handleFilePick(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Clear the dropdown selection since we're using a local file
+            document.getElementById('testFile').value = '';
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                const content = e.target.result;
+                log(`File selected: ${file.name} (${(content.length / 1024).toFixed(1)} KB)`, 'info');
+                runComparisonWithContent(content, file.name).catch(err => {
+                    log(`Error: ${err.message}`, 'fail');
+                    setStatus(`Error: ${err.message}`, 'error');
+                });
+            };
+            reader.readAsText(file);
+        }
+
+        // Initialize
+        async function init() {
+            setStatus('Initializing...', 'loading');
+
+            try {
+                // Check WebGPU
+                log('Checking WebGPU...', 'info');
+                const device = await getGPUDevice();
+                log('WebGPU available', 'pass');
+
+                // Initialize renderers
+                log('Initializing Three.js renderers...', 'info');
+                for (const canvasId of ['canvas-occ', 'canvas-occt']) {
+                    initRenderer(canvasId);
+                }
+                log('Renderers initialized', 'pass');
+
+                // Setup control sync
+                for (const canvasId of ['canvas-occ', 'canvas-occt']) {
+                    controls[canvasId].addEventListener('change', () => syncControls(canvasId));
+                }
+
+                // Start animation loop
+                animate();
+
+                // Enable buttons
+                document.getElementById('runBtn').disabled = false;
+                document.getElementById('captureBtn').disabled = false;
+
+                // Event handlers
+                document.getElementById('runBtn').addEventListener('click', runComparison);
+                document.getElementById('captureBtn').addEventListener('click', captureScreenshots);
+                document.getElementById('filePicker').addEventListener('change', handleFilePick);
+
+                // Clear file picker when dropdown changes
+                document.getElementById('testFile').addEventListener('change', () => {
+                    document.getElementById('filePicker').value = '';
+                });
+
+                setStatus('Ready - Select a test file and click Run Comparison', 'ready');
+                log('Initialization complete', 'pass');
+
+                // Signal ready for automation
+                window.visualValidationReady = true;
+
+            } catch (error) {
+                setStatus(`Initialization failed: ${error.message}`, 'error');
+                log(`Error: ${error.message}`, 'fail');
+            }
+        }
+
+        // Expose functions for Puppeteer automation
+        window.visualValidation = {
+            async runTest(testFilePath) {
+                document.getElementById('testFile').value = testFilePath;
+                await runComparison();
+                // Wait for render to complete
+                await new Promise(r => setTimeout(r, 500));
+            },
+
+            getCanvasDataUrl(canvasId) {
+                const canvas = document.getElementById(canvasId);
+                return canvas.toDataURL('image/png');
+            },
+
+            getStats() {
+                return {
+                    occ: document.getElementById('stats-occ').textContent,
+                    occt: document.getElementById('stats-occt').textContent,
+                };
+            }
+        };
+
+        init();
+    </script>
+</body>
 </html>
