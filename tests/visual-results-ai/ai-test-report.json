@@ -1,1001 +1,19 @@
 {
-  "timestamp": "2026-02-01T07:56:18.104Z",
+  "timestamp": "2026-02-05T04:40:01.835Z",
   "config": {},
   "summary": {
-    "passed": 82,
-    "failed": 34,
-    "errors": 3,
-    "total": 119
+    "passed": 24,
+    "failed": 5,
+    "errors": 0,
+    "total": 29
   },
   "results": [
     {
-      "file": "step-examples/benchmark/plate-large-10x10.step",
-      "status": "pass",
-      "reason": "Both renders show identical flat rectangular plates with the same 10x10 grid pattern of holes in the same positions, orientation, and proportions.",
-      "ours": {
-        "triangles": 172
-      },
-      "reference": {
-        "triangles": 172
-      }
-    },
-    {
-      "file": "step-examples/benchmark/plate-medium-5x5.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue square plates with the same 5x5 grid of holes in matching positions, orientation, and proportions.",
-      "ours": {
-        "triangles": 127
-      },
-      "reference": {
-        "triangles": 127
-      }
-    },
-    {
-      "file": "step-examples/benchmark/plate-small-2x2.step",
-      "status": "pass",
-      "reason": "Both images show identical blue square plates with the same 2x2 arrangement of holes, same orientation, and same overall geometry.",
-      "ours": {
-        "triangles": 22
-      },
-      "reference": {
-        "triangles": 22
-      }
-    },
-    {
-      "file": "step-examples/benchmark/plate-xlarge-20x20.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue rectangular plates with the same array of circular holes along one edge, matching geometry, proportions, and orientation.",
-      "ours": {
-        "triangles": 172
-      },
-      "reference": {
-        "triangles": 172
-      }
-    },
-    {
-      "file": "step-examples/benchmark/plate-xxlarge-30x30.step",
-      "status": "fail",
-      "reason": "The two renders show completely different 3D shapes - Image 1 shows a triangular/pyramidal shape while Image 2 shows a flat rectangular plate.",
-      "ours": {
-        "triangles": 81
-      },
-      "reference": {
-        "triangles": 132
-      }
-    },
-    {
-      "file": "step-examples/benchmark/simple-square.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue square/diamond-shaped flat geometry with the same orientation, proportions, and no missing or extra features.",
-      "ours": {
-        "triangles": 2
-      },
-      "reference": {
-        "triangles": 2
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/concave/almost_collinear_pentagon.step",
-      "status": "fail",
-      "reason": "The shape appears to be a quadrilateral in both renders, but the filename indicates it should be a pentagon (5-sided shape), suggesting missing geometry.",
-      "ours": {
-        "triangles": 2
-      },
-      "reference": {
-        "triangles": 2
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/concave/arrow.step",
-      "status": "pass",
-      "reason": "Both images show the same blue arrow shape with identical geometry, proportions, and orientation - only minor lighting/shading differences are present which don't affect the actual 3D geometry.",
-      "ours": {
-        "triangles": 5
-      },
-      "reference": {
-        "triangles": 5
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/concave/ccw-pentagon-concave.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue concave pentagon shapes with the same orientation, proportions, and geometric features.",
-      "ours": {
-        "triangles": 3
-      },
-      "reference": {
-        "triangles": 3
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/concave/concave_pentagon_single_reflex.step",
-      "status": "pass",
-      "reason": "Both renders show identical concave pentagon shapes with the same proportions, angles, and reflex vertex geometry.",
-      "ours": {
-        "triangles": 3
-      },
-      "reference": {
-        "triangles": 3
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/concave/cw-pentagon-concave.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue concave pentagon shapes with the same proportions, angles, orientation, and concave indentation on the right side.",
-      "ours": {
-        "triangles": 3
-      },
-      "reference": {
-        "triangles": 3
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/concave/l-shape.step",
-      "status": "pass",
-      "reason": "Both renders show identical L-shaped flat geometry with the same proportions, angles, and orientation.",
-      "ours": {
-        "triangles": 4
-      },
-      "reference": {
-        "triangles": 4
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/convex/ccw-square.step",
-      "status": "pass",
-      "reason": "Both images show identical blue L-shaped flat geometry with the same proportions, angles, and orientation.",
-      "ours": {
-        "triangles": 4
-      },
-      "reference": {
-        "triangles": 4
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/convex/convex-heptagon.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue heptagonal shapes with the same geometry, orientation, and proportions.",
-      "ours": {
-        "triangles": 4
-      },
-      "reference": {
-        "triangles": 4
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/convex/convex_pentagon_simple.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue pentagon-shaped flat objects with the same angular geometry, proportions, and orientation.",
-      "ours": {
-        "triangles": 4
-      },
-      "reference": {
-        "triangles": 4
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/convex/cw-square.step",
-      "status": "pass",
-      "reason": "Both images show identical blue L-shaped or arrow-like flat geometric objects with the same proportions, angles, and orientation.",
-      "ours": {
-        "triangles": 4
-      },
-      "reference": {
-        "triangles": 4
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/convex/hexagon.step",
-      "status": "pass",
-      "reason": "Both images show identical blue hexagonal shapes with the same geometry, proportions, orientation, and no missing or extra features.",
-      "ours": {
-        "triangles": 4
-      },
-      "reference": {
-        "triangles": 4
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/convex/octagon.step",
-      "status": "fail",
-      "reason": "The reference image shows a 3D octagonal prism with visible thickness and depth, while the pipeline render appears to show only a flat 2D octagonal shape without any visible 3D structure or thickness.",
-      "ours": {
-        "triangles": 6
-      },
-      "reference": {
-        "triangles": 5
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/convex/square.step",
-      "status": "fail",
-      "reason": "Both images show only a uniform dark gray background with no visible 3D geometry, indicating the pipeline failed to render the CAD model.",
-      "ours": {
-        "triangles": 0
-      },
-      "reference": {
-        "triangles": 0
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/convex/tilted-rectangle.step",
-      "status": "fail",
-      "reason": "Both images show only empty gray backgrounds with no visible 3D geometry, indicating the pipeline failed to render the tilted rectangle model.",
-      "ours": {
-        "triangles": 0
-      },
-      "reference": {
-        "triangles": 0
-      }
-    },
-    {
-      "file": "step-examples/c1-triangulation/convex/triangle.step",
-      "status": "pass",
-      "reason": "Both images show identical blue triangular shapes with the same orientation, proportions, and positioning against the same gray background.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.2-projection/tilted-hexagon.step",
-      "status": "fail",
-      "reason": "The pipeline render shows a triangle while the reference render shows what appears to be a hexagonal shape, indicating missing geometry and wrong shape.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.2-projection/tilted-square-45deg.step",
-      "status": "pass",
-      "reason": "Both images show identical blue triangular shapes with the same orientation, proportions, and positioning against gray backgrounds.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.2-projection/tilted-triangle-no-plane.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue triangular shapes with the same orientation, proportions, and positioning against gray backgrounds.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.2-projection/vertical-wall-xz.step",
-      "status": "pass",
-      "reason": "Both images show identical blue triangular shapes with the same orientation, proportions, and positioning.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.3-winding/both-wrong.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue triangular shapes with the same geometry, orientation, and proportions.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.3-winding/correct-winding.step",
-      "status": "pass",
-      "reason": "Both images show identical blue triangular shapes with the same orientation, proportions, and positioning against the same gray background.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.3-winding/square-cw.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue triangular shapes with the same geometry, orientation, and positioning.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.3-winding/square-with-ccw-hole.step",
-      "status": "fail",
-      "reason": "The CAD model filename indicates it should be a \"square-with-ccw-hole\" but both renders show only a triangular shape with no visible square geometry or hole feature.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.4-topology/hole-outside-outer.step",
-      "status": "pass",
-      "reason": "Both images show identical blue triangular shapes with the same orientation, proportions, and positioning.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.4-topology/holes-intersect.step",
-      "status": "fail",
-      "reason": "The CAD model filename indicates \"holes-intersect\" but both renders show solid triangular shapes without any visible holes or intersecting geometry features.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.4-topology/self-intersecting-outer.step",
-      "status": "pass",
-      "reason": "Both images show identical blue triangular shapes with the same size, orientation, and positioning.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.4-topology/valid-square-with-hole.step",
-      "status": "fail",
-      "reason": "The CAD model is named \"valid-square-with-hole\" but both renders show a solid triangle without any square geometry or hole, indicating missing geometry.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/concentric-squares.step",
-      "status": "fail",
-      "reason": "The CAD model is named \"concentric-squares\" but both renders show a triangular shape instead of the expected concentric square geometry with holes.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/hexagon-with-3-holes.step",
-      "status": "fail",
-      "reason": "The rendered shape is a simple triangle, but the CAD model filename indicates it should be a \"hexagon-with-3-holes\" which is completely different geometry.",
-      "ours": {
-        "triangles": 1
-      },
-      "reference": {
-        "triangles": 1
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/hexagon-with-triangle-hole.step",
-      "status": "fail",
-      "reason": "The two renders show completely different 3D shapes - Image 1 shows a flat hexagonal plate with a triangular hole, while Image 2 shows what appears to be an angular 3D object with protruding faces.",
-      "ours": {
-        "triangles": 9
-      },
-      "reference": {
-        "triangles": 7
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/l-shape-with-hole.step",
-      "status": "fail",
-      "reason": "The two renders show completely different 3D shapes - Image 1 shows a flat hexagonal plate with a triangular hole, while Image 2 shows an angular L-shaped bracket or wing-like structure.",
-      "ours": {
-        "triangles": 9
-      },
-      "reference": {
-        "triangles": 7
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/octagon-with-square-hole.step",
-      "status": "fail",
-      "reason": "The shapes have completely different geometries - Image 1 shows a flat octagonal shape with a triangular hole, while Image 2 shows a 3D angular object with protruding faces.",
-      "ours": {
-        "triangles": 9
-      },
-      "reference": {
-        "triangles": 7
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/pentagon-with-hole.step",
-      "status": "fail",
-      "reason": "The shapes have completely different geometry - Image 1 shows a flat pentagon with a triangular hole, while Image 2 shows a complex 3D angular shape with protruding faces.",
-      "ours": {
-        "triangles": 9
-      },
-      "reference": {
-        "triangles": 7
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/rectangle-with-6-holes.step",
-      "status": "fail",
-      "reason": "The two renders show completely different 3D shapes - Image 1 shows a flat hexagonal plate with a single triangular hole, while Image 2 shows what appears to be a folded or angled surface with different geometry entirely.",
-      "ours": {
-        "triangles": 9
-      },
-      "reference": {
-        "triangles": 7
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/square-with-4-holes.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue square plates with four triangular holes positioned at the corners, with the same orientation, proportions, and geometry.",
-      "ours": {
-        "triangles": 22
-      },
-      "reference": {
-        "triangles": 22
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/square-with-arrow-hole.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue square plates with the same four triangular holes positioned at each corner and matching orientation.",
-      "ours": {
-        "triangles": 22
-      },
-      "reference": {
-        "triangles": 22
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/square-with-diamond-hole.step",
-      "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same square shape, diamond-shaped hole in the center, orientation, and proportions.",
-      "ours": {
-        "triangles": 22
-      },
-      "reference": {
-        "triangles": 22
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/square-with-right-hole.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue square plates with four triangular holes positioned at the corners, with matching geometry, proportions, and orientation.",
-      "ours": {
-        "triangles": 22
-      },
-      "reference": {
-        "triangles": 22
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/square-with-square-hole.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue square plates with square holes in the center, with the same orientation, proportions, and geometry.",
-      "ours": {
-        "triangles": 8
-      },
-      "reference": {
-        "triangles": 8
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/square-with-three-holes.step",
-      "status": "pass",
-      "reason": "Both renders show identical rectangular plates with three triangular holes in the same positions, orientations, and proportions.",
-      "ours": {
-        "triangles": 17
-      },
-      "reference": {
-        "triangles": 17
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/square-with-triangle-hole.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue square plates with triangular holes in the same position, orientation, and proportions.",
-      "ours": {
-        "triangles": 7
-      },
-      "reference": {
-        "triangles": 7
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/square-with-two-holes.step",
-      "status": "fail",
-      "reason": "The model should have two holes according to the filename \"square-with-two-holes.step\", but both renders show a solid blue rectangular surface without any visible holes.",
-      "ours": {
-        "triangles": 10
-      },
-      "reference": {
-        "triangles": 10
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/star-with-center-hole.step",
-      "status": "fail",
-      "reason": "The pipeline render shows a simple rectangular shape while the reference render shows a star-shaped object with a center hole, indicating missing geometry and wrong shape.",
-      "ours": {
-        "triangles": 10
-      },
-      "reference": {
-        "triangles": 10
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/thin-rectangle-with-slot.step",
-      "status": "fail",
-      "reason": "The model should have a slot feature based on the filename \"thin-rectangle-with-slot.step\" but both renders show only a solid rectangular shape without any visible slot or hole.",
-      "ours": {
-        "triangles": 10
-      },
-      "reference": {
-        "triangles": 10
-      }
-    },
-    {
-      "file": "step-examples/c2-holes/2.5-triangulation/triangle-with-triangle-hole.step",
-      "status": "fail",
-      "reason": "The pipeline render shows a solid rectangular surface while the reference render shows what appears to be a triangular shape with a triangular hole, which is missing geometry that should be present according to the filename.",
-      "ours": {
-        "triangles": 10
-      },
-      "reference": {
-        "triangles": 10
-      }
-    },
-    {
-      "file": "step-examples/c3-curves/quarter-circle.step",
-      "status": "fail",
-      "reason": "The filename indicates this should be a \"quarter-circle\" but both images show flat rectangular surfaces instead of curved geometry.",
-      "ours": {
-        "triangles": 10
-      },
-      "reference": {
-        "triangles": 10
-      }
-    },
-    {
-      "file": "step-examples/c3-curves/rotor.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue rectangular shapes with the same dimensions, orientation, and positioning in 3D space.",
-      "ours": {
-        "triangles": 10
-      },
-      "reference": {
-        "triangles": 10
-      }
-    },
-    {
-      "file": "step-examples/c3-curves/rounded-cube.step",
-      "status": "fail",
-      "reason": "The model is supposed to be a \"rounded-cube\" but both renders show a flat rectangular shape without any visible rounded edges or 3D cube geometry.",
-      "ours": {
-        "triangles": 10
-      },
-      "reference": {
-        "triangles": 10
-      }
-    },
-    {
-      "file": "step-examples/c4-multiface/pyramid.step",
-      "status": "pass",
-      "reason": "Both images show identical blue pyramid shapes with the same orientation, proportions, and geometry.",
-      "ours": {
-        "triangles": 6
-      },
-      "reference": {
-        "triangles": 6
-      }
-    },
-    {
-      "file": "step-examples/c4-multiface/tetrahedron.step",
-      "status": "pass",
-      "reason": "Both images show identical blue tetrahedrons with the same geometric shape, proportions, orientation, and shading.",
-      "ours": {
-        "triangles": 4
-      },
-      "reference": {
-        "triangles": 4
-      }
-    },
-    {
-      "file": "step-examples/c4-multiface/triangular-prism.step",
-      "status": "pass",
-      "reason": "Both renders show identical triangular prisms with the same geometry, proportions, orientation, and surface features.",
-      "ours": {
-        "triangles": 8
-      },
-      "reference": {
-        "triangles": 8
-      }
-    },
-    {
-      "file": "step-examples/c4-multiface/two-triangles.step",
-      "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same triangular faces, angles, proportions, and orientation.",
-      "ours": {
-        "triangles": 8
-      },
-      "reference": {
-        "triangles": 8
-      }
-    },
-    {
-      "file": "step-examples/c4-multiface/unit-box.step",
-      "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same cube structure, triangular cutouts, orientation, and proportions.",
-      "ours": {
-        "triangles": 12
-      },
-      "reference": {
-        "triangles": 7
-      }
-    },
-    {
-      "file": "step-examples/c4-multiface/wedge.step",
-      "status": "pass",
-      "reason": "Both renders show identical wedge-shaped geometry with the same proportions, angles, and orientation.",
-      "ours": {
-        "triangles": 8
-      },
-      "reference": {
-        "triangles": 8
-      }
-    },
-    {
-      "file": "step-examples/c4-surfaces/cone.step",
-      "status": "pass",
-      "reason": "Both renders show identical cone geometry with the same proportions, orientation, and surface features.",
-      "ours": {
-        "triangles": 2366
-      },
-      "reference": {
-        "triangles": 1841
-      }
-    },
-    {
-      "file": "step-examples/c4-surfaces/cylinder.step",
-      "status": "pass",
-      "reason": "Both images show identical blue cylinders with the same proportions, orientation, and geometry with no visible differences.",
-      "ours": {
-        "triangles": 636
-      },
-      "reference": {
-        "triangles": 280
-      }
-    },
-    {
-      "file": "step-examples/c4-surfaces/sphere.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue spherical objects with the same shape, size, orientation, and surface features.",
-      "ours": {
-        "triangles": 6212
-      },
-      "reference": {
-        "triangles": 3004
-      }
-    },
-    {
-      "file": "step-examples/c4-surfaces/torus.step",
-      "status": "pass",
-      "reason": "Both images show identical blue torus shapes with the same proportions, curvature, orientation, and no missing or extra geometry.",
-      "ours": {
-        "triangles": 4096
-      },
-      "reference": {
-        "triangles": 5760
-      }
-    },
-    {
-      "file": "step-examples/c5-bspline/bspline-bowl.step",
-      "status": "fail",
-      "reason": "The two renders show completely different orientations and shapes - Image 1 shows a smooth curved bowl-like surface from the front, while Image 2 shows what appears to be a faceted or segmented surface viewed from an angled perspective.",
-      "ours": {
-        "triangles": 512
-      },
-      "reference": {
-        "triangles": 116
-      }
-    },
-    {
-      "file": "step-examples/c5-bspline/bspline-dome.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue dome-shaped geometry with the same smooth curved surface, orientation, and proportions.",
-      "ours": {
-        "triangles": 512
-      },
-      "reference": {
-        "triangles": 3032
-      }
-    },
-    {
-      "file": "step-examples/c5-bspline/bspline-saddle.step",
-      "status": "fail",
-      "reason": "Image 1 shows a visible 3D saddle surface with blue coloring and geometric features, while Image 2 appears to be completely blank or missing the geometry entirely.",
-      "ours": {
-        "triangles": 512
-      },
-      "reference": {
-        "triangles": 0
-      }
-    },
-    {
-      "file": "step-examples/c5-bspline/bspline-wave.step",
-      "status": "fail",
-      "reason": "Image 1 shows a visible 3D shape with blue and dark blue surfaces while Image 2 appears completely dark/empty, indicating missing geometry in the reference render.",
-      "ours": {
-        "triangles": 512
-      },
-      "reference": {
-        "triangles": 0
-      }
-    },
-    {
-      "file": "step-examples/c5-bspline/simple-bspline-surface.step",
-      "status": "fail",
-      "reason": "The shapes are completely different - Image 1 shows a curved fan or shell-like surface while Image 2 shows a diamond-shaped surface with different curvature and geometry.",
-      "ours": {
-        "triangles": 512
-      },
-      "reference": {
-        "triangles": 116
-      }
-    },
-    {
-      "file": "step-examples/c6-trimmed/cylinder-two-holes.step",
-      "status": "fail",
-      "reason": "The pipeline render shows a solid cylinder while the reference render shows a cylinder with visible holes or cutouts in the side surface.",
-      "ours": {
-        "triangles": 636
-      },
-      "reference": {
-        "triangles": 348
-      }
-    },
-    {
-      "file": "step-examples/c6-trimmed/cylinder-with-hole.step",
-      "status": "fail",
-      "reason": "The model is supposed to be a \"cylinder-with-hole\" but both renders show solid cylinders without any visible holes, indicating missing geometry.",
-      "ours": {
-        "triangles": 636
-      },
-      "reference": {
-        "triangles": 308
-      }
-    },
-    {
-      "file": "step-examples/c6-trimmed/full-cylinder-window.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue cylinders with the same proportions, orientation, and geometry - no visible differences detected.",
-      "ours": {
-        "triangles": 636
-      },
-      "reference": {
-        "triangles": 320
-      }
-    },
-    {
-      "file": "step-examples/c6-trimmed/half-cylinder.step",
-      "status": "fail",
-      "reason": "The pipeline render is missing the top and bottom flat circular surfaces that are clearly visible in the reference render, showing only the curved cylindrical surface.",
-      "ours": {
-        "triangles": 1091
-      },
-      "reference": {
-        "triangles": 78
-      }
-    },
-    {
-      "file": "step-examples/c6-trimmed/pipe-with-porthole.step",
-      "status": "fail",
-      "reason": "The pipeline render shows only a simple cylinder while the reference render shows a more complex pipe with a porthole feature that includes additional geometric elements extending from the main cylindrical body.",
-      "ours": {
-        "triangles": 1024
-      },
-      "reference": {
-        "triangles": 70
-      }
-    },
-    {
-      "file": "step-examples/c6-trimmed/quarter-cylinder-hole.step",
-      "status": "fail",
-      "reason": "The pipeline render shows a complete solid cylinder while the reference render shows a quarter-cylinder with a hole (cut-out section), indicating missing geometry in the pipeline output.",
-      "ours": {
-        "triangles": 1024
-      },
-      "reference": {
-        "triangles": 118
-      }
-    },
-    {
-      "file": "step-examples/c8-solids/colored-solid.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue cubes with the same geometry, proportions, orientation, and shading.",
-      "ours": {
-        "triangles": 12
-      },
-      "reference": {
-        "triangles": 12
-      }
-    },
-    {
-      "file": "step-examples/c8-solids/simple-cube.step",
-      "status": "pass",
-      "reason": "Both images show identical blue cubes with the same proportions, orientation, and geometry with no visible differences in shape or features.",
-      "ours": {
-        "triangles": 12
-      },
-      "reference": {
-        "triangles": 12
-      }
-    },
-    {
-      "file": "step-examples/c8-solids/tetrahedron.step",
-      "status": "pass",
-      "reason": "Both renders show identical tetrahedron geometry with the same triangular faces, proportions, orientation, and shading.",
-      "ours": {
-        "triangles": 4
-      },
-      "reference": {
-        "triangles": 4
-      }
-    },
-    {
-      "file": "step-examples/complex/air.step",
-      "status": "pass",
-      "reason": "Both renders show identical triangular shapes with the same geometry, proportions, orientation, and shading features including the darker triangular cutout at the bottom.",
-      "ours": {
-        "triangles": 4
-      },
-      "reference": {
-        "triangles": 4
-      }
-    },
-    {
-      "file": "step-examples/complex/conical-surface.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue disc-shaped objects with central holes, matching geometry, proportions, and orientation.",
-      "ours": {
-        "triangles": 9984
-      },
-      "reference": {
-        "triangles": 1318
-      }
-    },
-    {
-      "file": "step-examples/complex/cube.step",
-      "status": "pass",
-      "reason": "Both renders show identical blue toroidal (donut-shaped) objects with the same proportions, geometry, shading, and orientation.",
-      "ours": {
-        "triangles": 9984
-      },
-      "reference": {
-        "triangles": 1318
-      }
-    },
-    {
-      "file": "step-examples/complex/nissan.step",
-      "status": "error",
-      "error": "Reference failed",
-      "ours": {
-        "triangles": 0
-      },
-      "reference": {
-        "triangles": null
-      }
-    },
-    {
-      "file": "step-examples/complex/raw-material.step",
-      "status": "pass",
-      "reason": "Both renders show the same 3D geometry with identical shape, features, and proportions, just viewed from slightly different angles.",
-      "ours": {
-        "triangles": 13838
-      },
-      "reference": {
-        "triangles": 332
-      }
-    },
-    {
-      "file": "step-examples/complex/rocky_house.step",
-      "status": "error",
-      "error": "Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed.",
-      "ours": null,
-      "reference": null
-    },
-    {
-      "file": "step-examples/complex/rocky_house_car.step",
-      "status": "pass",
-      "reason": "Both renders show the same 3D geometry with identical shape, proportions, and features - only the viewing angle is slightly different.",
-      "ours": {
-        "triangles": 13838
-      },
-      "reference": {
-        "triangles": 332
-      }
-    },
-    {
-      "file": "step-examples/complex/rocky_house_roof.step",
-      "status": "pass",
-      "reason": "Both renders show the same 3D geometry with identical shape, proportions, features, and orientation - only minor lighting/shading differences are present which don't affect the underlying geometry.",
-      "ours": {
-        "triangles": 13838
-      },
-      "reference": {
-        "triangles": 332
-      }
-    },
-    {
-      "file": "step-examples/complex/rocky_house_sofa.step",
-      "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same cylindrical post, rectangular base block, and curved top handle feature in matching orientations and proportions.",
-      "ours": {
-        "triangles": 13838
-      },
-      "reference": {
-        "triangles": 332
-      }
-    },
-    {
-      "file": "step-examples/complex/rocky_house_table.step",
-      "status": "pass",
-      "reason": "Both renders show the same 3D geometry with identical proportions, features, and overall shape, with only minor lighting or rendering style differences that don't affect the underlying geometry.",
-      "ours": {
-        "triangles": 13838
-      },
-      "reference": {
-        "triangles": 332
-      }
-    },
-    {
-      "file": "step-examples/complex/rocky_house_terrain.step",
-      "status": "pass",
-      "reason": "Both renders show the same 3D shape with identical geometry, proportions, and features - only the viewing angle is slightly different.",
-      "ours": {
-        "triangles": 13838
-      },
-      "reference": {
-        "triangles": 332
-      }
-    },
-    {
-      "file": "step-examples/complex/rotor-201nal.step",
-      "status": "error",
-      "error": "Runtime.callFunctionOn timed out. Increase the 'protocolTimeout' setting in launch/connect calls for a higher timeout if needed.",
-      "ours": null,
-      "reference": null
-    },
-    {
       "file": "step-examples/external/steptools-ap214/as1-ac-214.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same mechanical part featuring a base platform, vertical walls, internal compartments, and mounting features in the same positions and proportions.",
+      "reason": "Both renders show identical 3D geometry with the same complex stepped base structure, vertical walls, cylindrical features, and overall proportions and orientation.",
       "ours": {
-        "triangles": 71537
+        "triangles": 380285
       },
       "reference": {
         "triangles": 3848
@@ -1004,9 +22,9 @@
     {
       "file": "step-examples/external/steptools-ap214/as1-ec-214.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same mechanical part featuring matching base plates, vertical supports, angled elements, and all geometric features in the same positions and orientations.",
+      "reason": "Both renders show identical 3D geometry with the same complex mechanical part featuring matching surfaces, holes, angular features, and proportions.",
       "ours": {
-        "triangles": 257992
+        "triangles": 984509
       },
       "reference": {
         "triangles": 4688
@@ -1014,10 +32,10 @@
     },
     {
       "file": "step-examples/external/steptools-ap214/as1-md-214.stp",
-      "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same mechanical part features, proportions, orientation, and no missing or extra elements.",
+      "status": "fail",
+      "reason": "The reference render shows additional linear features/edges on the central surface that are missing in the pipeline render.",
       "ours": {
-        "triangles": 27615
+        "triangles": 118045
       },
       "reference": {
         "triangles": 3848
@@ -1025,10 +43,10 @@
     },
     {
       "file": "step-examples/external/steptools-ap214/as1-tc-214.stp",
-      "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same base platform, vertical walls, internal features, and overall proportions in the same orientation.",
+      "status": "fail",
+      "reason": "The reference render shows additional geometric detail including what appears to be a diagonal line or edge feature across the central surface that is missing in the pipeline render.",
       "ours": {
-        "triangles": 27615
+        "triangles": 118045
       },
       "reference": {
         "triangles": 3848
@@ -1036,10 +54,10 @@
     },
     {
       "file": "step-examples/external/steptools-ap214/as1-ug-214.stp",
-      "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same mechanical part featuring matching surfaces, holes, angular features, and overall proportions.",
+      "status": "fail",
+      "reason": "The reference render shows additional diagonal line details/edges on the central surface that are missing in the pipeline render.",
       "ours": {
-        "triangles": 27719
+        "triangles": 118034
       },
       "reference": {
         "triangles": 3848
@@ -1048,9 +66,9 @@
     {
       "file": "step-examples/external/steptools-ap214/d2-db-214.stp",
       "status": "pass",
-      "reason": "Both renders show identical blue cubic objects with the same notched/stepped features on multiple faces, matching orientation, proportions, and geometry.",
+      "reason": "Both renders show identical blue cube-like objects with the same notched features on the top surface and matching overall geometry, proportions, and orientation.",
       "ours": {
-        "triangles": 24
+        "triangles": 13658
       },
       "reference": {
         "triangles": 24
@@ -1059,9 +77,9 @@
     {
       "file": "step-examples/external/steptools-ap214/f1-db-214.stp",
       "status": "pass",
-      "reason": "Both renders show identical blue rectangular blocks with two circular holes on the top surface, matching in geometry, proportions, and orientation.",
+      "reason": "Both renders show identical blue rectangular blocks with two circular holes on the top surface, with matching geometry, proportions, and features.",
       "ours": {
-        "triangles": 5487
+        "triangles": 174009
       },
       "reference": {
         "triangles": 442
@@ -1070,9 +88,9 @@
     {
       "file": "step-examples/external/steptools-ap214/io1-ac-214.stp",
       "status": "pass",
-      "reason": "Both renders show the same blue flange-like component with identical geometry, including the central circular opening, mounting holes, and stepped cylindrical profile.",
+      "reason": "Both renders show identical blue flange-like objects with the same circular geometry, bolt holes, central opening, and overall proportions.",
       "ours": {
-        "triangles": 22575
+        "triangles": 75908
       },
       "reference": {
         "triangles": 2116
@@ -1081,9 +99,9 @@
     {
       "file": "step-examples/external/steptools-ap214/io1-ca-214.stp",
       "status": "pass",
-      "reason": "Both renders show the same blue flanged pipe fitting with identical geometry, bolt holes, stepped cylindrical structure, and overall proportions - only the viewing angle differs slightly.",
+      "reason": "Both renders show identical 3D geometry with the same flanged cylindrical part, bolt holes, stepped features, and overall proportions.",
       "ours": {
-        "triangles": 201656
+        "triangles": 303816
       },
       "reference": {
         "triangles": 2184
@@ -1091,10 +109,10 @@
     },
     {
       "file": "step-examples/external/steptools-ap214/io1-ec-214.stp",
-      "status": "fail",
-      "reason": "The Reference render shows multiple bolt holes around the flange that are completely missing in the Our Pipeline render.",
+      "status": "pass",
+      "reason": "Both renders show identical 3D geometry with the same cylindrical flanged part, central bore, mounting holes, and overall proportions.",
       "ours": {
-        "triangles": 8992
+        "triangles": 7576
       },
       "reference": {
         "triangles": 2094
@@ -1103,9 +121,9 @@
     {
       "file": "step-examples/external/steptools-ap214/io1-md-214.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same flanged cylindrical part featuring matching holes, surfaces, proportions, and orientation.",
+      "reason": "Both renders show identical 3D geometry with the same circular flange shape, central hole, mounting holes, and overall proportions and orientation.",
       "ours": {
-        "triangles": 14043
+        "triangles": 7576
       },
       "reference": {
         "triangles": 2104
@@ -1114,9 +132,9 @@
     {
       "file": "step-examples/external/steptools-ap214/io1-tc-214.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same flange shape, bolt holes, central opening, and overall proportions.",
+      "reason": "Both renders show identical 3D geometry with the same circular flange shape, central hole, bolt holes, and overall proportions and orientation.",
       "ours": {
-        "triangles": 14043
+        "triangles": 7576
       },
       "reference": {
         "triangles": 2104
@@ -1125,9 +143,9 @@
     {
       "file": "step-examples/external/steptools-ap214/io1-ug-214.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same circular flanged component, holes, cylindrical features, and overall proportions.",
+      "reason": "Both renders show identical 3D geometry with the same cylindrical flange component, bolt holes, central bore, and overall proportions at matching orientations.",
       "ours": {
-        "triangles": 9178
+        "triangles": 7642
       },
       "reference": {
         "triangles": 2100
@@ -1135,10 +153,10 @@
     },
     {
       "file": "step-examples/external/steptools-ap224/ap224_995277945.stp",
-      "status": "pass",
-      "reason": "Both images show the same 3D mechanical part with identical geometry including the central hole, cylindrical body, hexagonal base, and all visible features match in shape and proportions.",
+      "status": "fail",
+      "reason": "The bottom flange section shows different geometry - Image 1 has a smooth circular flange while Image 2 has a hexagonal/faceted flange shape.",
       "ours": {
-        "triangles": 64419
+        "triangles": 138166
       },
       "reference": {
         "triangles": 4000
@@ -1147,9 +165,9 @@
     {
       "file": "step-examples/external/steptools-ap224/ap224_995288709.stp",
       "status": "fail",
-      "reason": "The pipeline render shows missing geometry in the middle section where the reference render has a complex cylindrical feature with internal details that are completely absent in the pipeline version.",
+      "reason": "The pipeline render shows additional geometric features (small rectangular tabs or protrusions) around the middle section that are not present in the reference render.",
       "ours": {
-        "triangles": 44885
+        "triangles": 205806
       },
       "reference": {
         "triangles": 3800
@@ -1157,10 +175,10 @@
     },
     {
       "file": "step-examples/external/steptools-ap224/ap224_995315479.stp",
-      "status": "fail",
-      "reason": "Image 1 shows additional internal geometric features and cross-bracing elements that are not present in the simpler rectangular frame structure shown in Image 2.",
+      "status": "pass",
+      "reason": "Both renders show identical blue rectangular frames with the same proportions, hole patterns, thickness, and orientation.",
       "ours": {
-        "triangles": 27052
+        "triangles": 180984
       },
       "reference": {
         "triangles": 1352
@@ -1169,9 +187,9 @@
     {
       "file": "step-examples/external/steptools-ap224/ap224_995602415.stp",
       "status": "pass",
-      "reason": "Both renders show identical cylindrical objects with central holes, matching geometry, proportions, and surface features with only minor viewing angle differences.",
+      "reason": "Both images show identical cylindrical objects with central holes, matching geometry, proportions, and orientation.",
       "ours": {
-        "triangles": 28001
+        "triangles": 88992
       },
       "reference": {
         "triangles": 2382
@@ -1180,9 +198,9 @@
     {
       "file": "step-examples/external/steptools-ap224/ap224_997423743.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same hexagonal block shape, cylindrical base, through-hole, and overall proportions.",
+      "reason": "Both renders show identical 3D geometry with the same triangular top section, cylindrical hole, curved bottom portion, and overall proportions and orientation.",
       "ours": {
-        "triangles": 128774
+        "triangles": 320007
       },
       "reference": {
         "triangles": 11474
@@ -1191,9 +209,9 @@
     {
       "file": "step-examples/external/steptools-ap224/ap224_997865309.stp",
       "status": "pass",
-      "reason": "Both renders show identical geometry with the same cylindrical tube, flange base, proportions, and orientation.",
+      "reason": "Both renders show identical 3D geometry with the same cylindrical shaft, flanged base, central bore, proportions, and orientation.",
       "ours": {
-        "triangles": 63462
+        "triangles": 157404
       },
       "reference": {
         "triangles": 7976
@@ -1202,9 +220,9 @@
     {
       "file": "step-examples/external/steptools/123Block_Color.stp",
       "status": "pass",
-      "reason": "Both images show identical blue rectangular blocks with the same proportions, orientation, and geometry.",
+      "reason": "Both renders show identical blue rectangular blocks with the same proportions, orientation, and geometry.",
       "ours": {
-        "triangles": 12
+        "triangles": 12196
       },
       "reference": {
         "triangles": 12
@@ -1213,9 +231,9 @@
     {
       "file": "step-examples/external/steptools/123Block_Dimension.stp",
       "status": "pass",
-      "reason": "Both images show identical blue rectangular blocks with the same geometry, proportions, orientation, and positioning.",
+      "reason": "Both renders show identical blue rectangular blocks with the same proportions, orientation, and geometry with no visible differences.",
       "ours": {
-        "triangles": 12
+        "triangles": 12196
       },
       "reference": {
         "triangles": 12
@@ -1224,9 +242,9 @@
     {
       "file": "step-examples/external/steptools/123Block_Short_Note.stp",
       "status": "pass",
-      "reason": "Both renders show identical blue rectangular blocks with the same proportions, orientation, and geometry with no visible differences.",
+      "reason": "Both renders show identical rectangular block geometry with the same proportions, edges, surfaces, and orientation.",
       "ours": {
-        "triangles": 12
+        "triangles": 12196
       },
       "reference": {
         "triangles": 12
@@ -1235,9 +253,9 @@
     {
       "file": "step-examples/external/steptools/boxy_with_cylindricity.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same cube shape, cylindrical holes, rectangular openings, and overall proportions and orientation.",
+      "reason": "Both renders show identical 3D geometry with the same cubic shape, rectangular cavity on top, square cutout on the front face, and circular hole on the right side, with matching proportions and orientation.",
       "ours": {
-        "triangles": 68395
+        "triangles": 164689
       },
       "reference": {
         "triangles": 4368
@@ -1246,9 +264,9 @@
     {
       "file": "step-examples/external/steptools/boxy_with_diamsize.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same cube structure, internal cavity, circular holes, rectangular opening, and corner features in matching orientations.",
+      "reason": "Both renders show identical 3D geometry with the same cubic shape, square opening on top, circular holes on visible faces, rectangular cutout on the front face, and matching proportions and orientation.",
       "ours": {
-        "triangles": 68395
+        "triangles": 164689
       },
       "reference": {
         "triangles": 4368
@@ -1257,9 +275,9 @@
     {
       "file": "step-examples/external/steptools/boxy_with_flatness.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same cubic housing, rectangular cutouts, cylindrical features, and overall proportions in matching orientations.",
+      "reason": "Both renders show identical 3D geometry with the same cube shape, square opening on top, rectangular cutout on the front face, and circular hole on the right side, with no visible differences in proportions, features, or orientation.",
       "ours": {
-        "triangles": 68395
+        "triangles": 164689
       },
       "reference": {
         "triangles": 4368
@@ -1268,9 +286,9 @@
     {
       "file": "step-examples/external/steptools/boxy_with_limitsandfits.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same cubic structure, rectangular opening at top, square cutout on front face, circular features on sides, and matching proportions and orientation.",
+      "reason": "Both renders show identical 3D geometry with the same cube shape, square opening on top, rectangular cutout on the front face, circular holes on the sides, and matching proportions and orientation.",
       "ours": {
-        "triangles": 68395
+        "triangles": 164689
       },
       "reference": {
         "triangles": 4368
@@ -1279,9 +297,9 @@
     {
       "file": "step-examples/external/steptools/boxy_with_linearsize.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same cubic shape, hollow interior, rectangular cutouts on the sides, rounded corners, and mounting holes in matching positions.",
+      "reason": "Both renders show identical 3D geometry with the same cubic shape, rectangular openings on visible faces, internal cavity, and overall proportions.",
       "ours": {
-        "triangles": 68395
+        "triangles": 164689
       },
       "reference": {
         "triangles": 4368
@@ -1290,9 +308,9 @@
     {
       "file": "step-examples/external/steptools/boxy_with_perp.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same cubic structure, rectangular openings, circular holes, internal cavity, and overall proportions.",
+      "reason": "Both renders show identical 3D geometry with the same cubic shape, square openings on multiple faces, internal cavity structure, and overall proportions.",
       "ours": {
-        "triangles": 68395
+        "triangles": 164689
       },
       "reference": {
         "triangles": 4368
@@ -1301,9 +319,9 @@
     {
       "file": "step-examples/external/steptools/boxy_with_surfacetex.stp",
       "status": "pass",
-      "reason": "Both renders show identical 3D geometry with the same cubic box structure, hollow interior, circular cutouts on the sides, and rectangular opening at the bottom.",
+      "reason": "Both renders show identical 3D geometry with the same cubic shape, hollow interior, square opening on top, circular hole on the front face, and rectangular opening on the side, with no visible differences in geometry, proportions, or features.",
       "ours": {
-        "triangles": 68395
+        "triangles": 164689
       },
       "reference": {
         "triangles": 4368
