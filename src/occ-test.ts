@@ -4706,21 +4706,152 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           console.log(`[tessellateCurvedFace] Cylinder has ${loops.uvHoles.length} holes`);
 
           if (crossesSeam) {
-            // The boundary crosses the ±π seam. CDT constraint recovery will fail on edges
-            // that span the seam. Use a rectangular boundary in [0, 2π] range instead.
-            // Using [0, 2π] avoids the seam detection in surface-tessellation.ts which
-            // looks for points near both ±π and would collapse [-π, π] to a line.
-            console.log(`[tessellateCurvedFace] Full cylinder crosses seam - using rectangular UV boundary`);
+            // DETAILED LOGGING: Analyze the actual boundary before replacing
+            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Analyzing boundary before rectangle replacement`);
+            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary has ${uvOuter.length} points`);
 
-            const rectBoundary: Vec2[] = [
-              [0, vMin],
-              [2 * PI, vMin],
-              [2 * PI, vMax],
-              [0, vMax]
-            ];
+            // Log first 10 and last 10 points
+            const first10 = uvOuter.slice(0, 10).map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
+            const last10 = uvOuter.slice(-10).map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
+            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: First 10 points: ${first10}`);
+            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Last 10 points: ${last10}`);
 
-            loops.uvOuter = rectBoundary;
-            console.log(`[tessellateCurvedFace] Using rectangular boundary: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+            // Find the actual V range at different U positions
+            const pointsNearU0 = uvOuter.filter(p => Math.abs(p[0]) < 0.5);
+            const pointsNearUPosPI = uvOuter.filter(p => p[0] > PI - 0.5);
+            const pointsNearUNegPI = uvOuter.filter(p => p[0] < -PI + 0.5);
+
+            if (pointsNearU0.length > 0) {
+              const vAtU0 = pointsNearU0.map(p => p[1]);
+              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈0: [${Math.min(...vAtU0).toFixed(2)}, ${Math.max(...vAtU0).toFixed(2)}]`);
+            }
+            if (pointsNearUPosPI.length > 0) {
+              const vAtPosPI = pointsNearUPosPI.map(p => p[1]);
+              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈+π: [${Math.min(...vAtPosPI).toFixed(2)}, ${Math.max(...vAtPosPI).toFixed(2)}]`);
+            }
+            if (pointsNearUNegPI.length > 0) {
+              const vAtNegPI = pointsNearUNegPI.map(p => p[1]);
+              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈-π: [${Math.min(...vAtNegPI).toFixed(2)}, ${Math.max(...vAtNegPI).toFixed(2)}]`);
+            }
+
+            // Check if boundary has any points at low V values
+            const pointsBelowV5 = uvOuter.filter(p => p[1] < 5);
+            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Points with V < 5: ${pointsBelowV5.length}`);
+            if (pointsBelowV5.length > 0 && pointsBelowV5.length < 20) {
+              const lowVPoints = pointsBelowV5.map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
+              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Low V points: ${lowVPoints}`);
+            }
+
+            // Convert some UV points to 3D to see where they actually are
+            // Use the surface to evaluate 3D positions at boundary corners
+            let zVals: number[] = [];  // Declare outside so it's accessible later
+            if (face.occSurface) {
+              try {
+                // Get the actual Geom_Surface from the handle
+                const surfHandle = face.occSurface;
+                const surf = typeof surfHandle.get === 'function' ? surfHandle.get() : surfHandle;
+
+                // Sample a few key UV points and show their 3D coordinates
+                const testPoints: Array<{ label: string; u: number; v: number }> = [
+                  { label: 'vMin at U=0', u: 0, v: vMin },
+                  { label: 'vMax at U=0', u: 0, v: vMax },
+                  { label: 'vMin at U=π', u: PI, v: vMin },
+                  { label: 'vMax at U=π', u: PI, v: vMax },
+                ];
+
+                for (const pt of testPoints) {
+                  // Use Value method which returns a gp_Pnt
+                  const pnt = surf.Value(pt.u, pt.v);
+                  console.log(`[SEAM DEBUG] Face ${face.faceIndex}: 3D at ${pt.label}: (${pnt.X().toFixed(2)}, ${pnt.Y().toFixed(2)}, ${pnt.Z().toFixed(2)})`);
+                  pnt.delete();
+                }
+
+                // Also check some points at the actual boundary's low V locations
+                if (pointsBelowV5.length > 0) {
+                  const lowestVPoint = pointsBelowV5.reduce((min, p) => p[1] < min[1] ? p : min, pointsBelowV5[0]);
+                  const pnt = surf.Value(lowestVPoint[0], lowestVPoint[1]);
+                  console.log(`[SEAM DEBUG] Face ${face.faceIndex}: 3D at lowest V boundary point (U=${lowestVPoint[0].toFixed(2)}, V=${lowestVPoint[1].toFixed(2)}): (${pnt.X().toFixed(2)}, ${pnt.Y().toFixed(2)}, ${pnt.Z().toFixed(2)})`);
+                  pnt.delete();
+                }
+
+                // Sample 3D points across the ACTUAL boundary to see the range of X, Y, Z values
+                const xVals: number[] = [];
+                const yVals: number[] = [];
+                const sampleStep = Math.max(1, Math.floor(uvOuter.length / 30)); // Sample ~30 points
+                for (let i = 0; i < uvOuter.length; i += sampleStep) {
+                  const [u, v] = uvOuter[i];
+                  const pnt = surf.Value(u, v);
+                  xVals.push(pnt.X());
+                  yVals.push(pnt.Y());
+                  zVals.push(pnt.Z());
+                  pnt.delete();
+                }
+                console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary 3D ranges: X=[${Math.min(...xVals).toFixed(2)}, ${Math.max(...xVals).toFixed(2)}], Y=[${Math.min(...yVals).toFixed(2)}, ${Math.max(...yVals).toFixed(2)}], Z=[${Math.min(...zVals).toFixed(2)}, ${Math.max(...zVals).toFixed(2)}]`);
+              } catch (e) {
+                console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Could not evaluate 3D points: ${e}`);
+              }
+            }
+
+            // Log what the rectangle will be
+            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Rectangle will be: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: This fills ${(vMax - vMin).toFixed(2)} units of V`);
+
+            // Decide whether to use rectangle or preserve actual boundary
+            // Check if the boundary's 3D extent matches what a rectangle would produce
+            // by comparing the Z range of the boundary to the V span
+            let useRectangle = true;
+            if (face.occSurface && zVals && zVals.length > 0) {
+              const zRange = Math.max(...zVals) - Math.min(...zVals);
+              const vRange = vMax - vMin;
+              // If Z range is much smaller than V range, the boundary is trimmed
+              // and we should preserve it rather than using a rectangle
+              const zToVRatio = zRange / vRange;
+              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Z range=${zRange.toFixed(2)}, V range=${vRange.toFixed(2)}, ratio=${zToVRatio.toFixed(3)}`);
+
+              // If Z range is less than 50% of V range, boundary is significantly trimmed
+              if (zToVRatio < 0.5) {
+                useRectangle = false;
+                console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary is trimmed (ratio < 0.5) - will preserve actual boundary`);
+              }
+            }
+
+            if (useRectangle) {
+              // The boundary crosses the ±π seam. CDT constraint recovery will fail on edges
+              // that span the seam. Use a rectangular boundary in [0, 2π] range instead.
+              console.log(`[tessellateCurvedFace] Full cylinder crosses seam - using rectangular UV boundary`);
+
+              const rectBoundary: Vec2[] = [
+                [0, vMin],
+                [2 * PI, vMin],
+                [2 * PI, vMax],
+                [0, vMax]
+              ];
+
+              loops.uvOuter = rectBoundary;
+              console.log(`[tessellateCurvedFace] Using rectangular boundary: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+            } else {
+              // Boundary is trimmed - preserve actual shape but shift U to [0, 2π]
+              console.log(`[tessellateCurvedFace] Trimmed cylinder - shifting U to [0, 2π], preserving actual boundary`);
+
+              // Shift U coordinates from [-π, π] to [0, 2π] for continuous boundary
+              const shiftedOuter = uvOuter.map(([u, v]): Vec2 => {
+                if (u < 0) {
+                  return [u + 2 * PI, v];
+                }
+                return [u, v];
+              });
+
+              // Log boundary before and after shift
+              const beforeUs = uvOuter.slice(0, 5).map(p => p[0].toFixed(2)).join(', ');
+              const afterUs = shiftedOuter.slice(0, 5).map(p => p[0].toFixed(2)).join(', ');
+              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: U shift: before=[${beforeUs}...], after=[${afterUs}...]`);
+
+              loops.uvOuter = shiftedOuter;
+
+              const shiftedUMin = Math.min(...shiftedOuter.map(p => p[0]));
+              const shiftedUMax = Math.max(...shiftedOuter.map(p => p[0]));
+              console.log(`[tessellateCurvedFace] Shifted boundary: U=[${shiftedUMin.toFixed(3)}, ${shiftedUMax.toFixed(3)}], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+            }
 
             // Shift holes to [0, 2π] range to match the outer boundary
             if (loops.uvHoles.length > 0) {
@@ -4776,7 +4907,31 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
 
       if (surface) {
         const gridDensity = chooseTrimGridDensity(loops.uvOuter, loops.uvHoles);
-        const mesh = await tessellateTrimmedSurface(surface, loops.uvOuter, gridDensity, loops.uvHoles);
+
+        // For cylinders, compute 3D bounding box from boundary edges to filter
+        // grid points whose 3D positions fall outside the intended region.
+        // This is essential for horizontal cylinders where UV spans full circle
+        // but we only want a portion of the surface (e.g., upper half of a hole).
+        let bbox3d: { xMin: number; xMax: number; yMin: number; yMax: number; zMin: number; zMax: number } | undefined;
+        if (face.surfaceType === 'Cylinder') {
+          const outer3d = occEdgesToPolygon(face.outerLoop);
+          if (outer3d.length > 0) {
+            const xs = outer3d.map(p => p[0]);
+            const ys = outer3d.map(p => p[1]);
+            const zs = outer3d.map(p => p[2]);
+            bbox3d = {
+              xMin: Math.min(...xs), xMax: Math.max(...xs),
+              yMin: Math.min(...ys), yMax: Math.max(...ys),
+              zMin: Math.min(...zs), zMax: Math.max(...zs)
+            };
+            console.log(`[tessellateCurvedFace] Face ${face.faceIndex}: Cylinder 3D bbox:`);
+            console.log(`  X: [${bbox3d.xMin.toFixed(2)}, ${bbox3d.xMax.toFixed(2)}]`);
+            console.log(`  Y: [${bbox3d.yMin.toFixed(2)}, ${bbox3d.yMax.toFixed(2)}]`);
+            console.log(`  Z: [${bbox3d.zMin.toFixed(2)}, ${bbox3d.zMax.toFixed(2)}]`);
+          }
+        }
+
+        const mesh = await tessellateTrimmedSurface(surface, loops.uvOuter, gridDensity, loops.uvHoles, bbox3d);
         tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
         tessellationProfile.tessellateCurvedFace.calls++;
         return tessellatedMeshToVerticesAndTriangles(mesh);
@@ -4930,7 +5085,7 @@ async function tessellateOCCShape(
       // Face 15: V=[4.15, 62.37], reversed=true  (full cylinder)
       // Face 16: V=?,            reversed=true  (hole wall)
       // Face 17: V=?,            reversed=true  (hole wall)
-      const SKIP_FACE_10 = true;   // Skip for now - rectangular boundary creates extra geometry
+      const SKIP_FACE_10 = false;  // Fixed: 3D bbox filtering now in tessellateTrimmedSurface
       const SKIP_FACE_16 = false;  // Hole wall cylinder
       const SKIP_FACE_17 = false;  // Hole wall cylinder
 
@@ -4965,6 +5120,8 @@ async function tessellateOCCShape(
       if (face.surfaceType === 'Plane') {
         result = await tessellatePlanarFaceFromOCC(face, triangulationMethod);
       } else if (['Cylinder', 'Sphere', 'Cone', 'Torus', 'BSplineSurface'].includes(face.surfaceType)) {
+        // 3D bbox filtering for cylinders is now done inside tessellateTrimmedSurface
+        // during grid generation, which produces better results than post-filtering
         result = await tessellateCurvedFaceFromOCC(face);
       } else {
         // Skip unsupported surface types
