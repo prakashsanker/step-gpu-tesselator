@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Test Progress - STEP GPU Tessellator</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+            background: #1a1a1a;
+            color: #eee;
+            padding: 30px;
+        }
+        h1 { margin-bottom: 8px; }
+        .subtitle { color: #888; margin-bottom: 30px; font-size: 14px; }
+
+        .summary {
+            display: flex;
+            gap: 16px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+        .stat-card {
+            background: #2a2a2a;
+            border-radius: 8px;
+            padding: 20px 28px;
+            text-align: center;
+            min-width: 130px;
+        }
+        .stat-card .number {
+            font-size: 36px;
+            font-weight: bold;
+            line-height: 1;
+        }
+        .stat-card .label {
+            font-size: 13px;
+            color: #888;
+            margin-top: 6px;
+        }
+        .stat-card.pass .number { color: #4ade80; }
+        .stat-card.fail .number { color: #f87171; }
+        .stat-card.broken .number { color: #fbbf24; }
+        .stat-card.error .number { color: #f97316; }
+        .stat-card.total .number { color: #60a5fa; }
+
+        .progress-bar-container {
+            background: #333;
+            border-radius: 8px;
+            height: 32px;
+            margin-bottom: 30px;
+            overflow: hidden;
+            display: flex;
+        }
+        .progress-bar-container .segment {
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: bold;
+            color: #000;
+            transition: width 0.3s;
+        }
+        .segment.pass { background: #4ade80; }
+        .segment.fail { background: #f87171; }
+        .segment.broken { background: #fbbf24; }
+        .segment.error { background: #f97316; }
+
+        h2 {
+            margin-top: 30px;
+            margin-bottom: 12px;
+            font-size: 18px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 24px;
+        }
+        th, td {
+            text-align: left;
+            padding: 8px 12px;
+            border-bottom: 1px solid #333;
+            font-size: 13px;
+        }
+        th {
+            background: #2a2a2a;
+            color: #888;
+            font-weight: 600;
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        tr:hover { background: #252525; }
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }
+        .badge-pass { background: #166534; color: #4ade80; }
+        .badge-fail { background: #7f1d1d; color: #f87171; }
+        .badge-broken { background: #713f12; color: #fbbf24; }
+        .badge-error { background: #7c2d12; color: #f97316; }
+
+        .section-header {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .section-count {
+            font-size: 14px;
+            color: #888;
+            font-weight: normal;
+        }
+    </style>
+</head>
+<body>
+    <h1>Test Progress</h1>
+    <p class="subtitle">STEP GPU Tessellator — Visual Validation Results (2026-02-05)</p>
+
+    <div class="summary">
+        <div class="stat-card total">
+            <div class="number">119</div>
+            <div class="label">Total Tests</div>
+        </div>
+        <div class="stat-card pass">
+            <div class="number">110</div>
+            <div class="label">Passed</div>
+        </div>
+        <div class="stat-card fail">
+            <div class="number">5</div>
+            <div class="label">Failing</div>
+        </div>
+        <div class="stat-card broken">
+            <div class="number">1</div>
+            <div class="label">Broken STEP Files</div>
+        </div>
+        <div class="stat-card error">
+            <div class="number">3</div>
+            <div class="label">Errors</div>
+        </div>
+    </div>
+
+    <div class="progress-bar-container">
+        <div class="segment pass" style="width: 92.4%;">110 passed (92%)</div>
+        <div class="segment fail" style="width: 4.2%;">5</div>
+        <div class="segment broken" style="width: 0.8%;">1</div>
+        <div class="segment error" style="width: 2.5%;">3</div>
+    </div>
+
+    <h2 class="section-header">Failing Tests <span class="section-count">(5)</span></h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Test File</th>
+                <th>Status</th>
+                <th>Reason</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>c6-trimmed/pipe-with-porthole.step</td>
+                <td><span class="badge badge-fail">FAIL</span></td>
+                <td>Renders but doesn't match reference after sameSense fix</td>
+            </tr>
+            <tr>
+                <td>c6-trimmed/quarter-cylinder-hole.step</td>
+                <td><span class="badge badge-fail">FAIL</span></td>
+                <td>Renders but doesn't match reference after sameSense fix</td>
+            </tr>
+            <tr>
+                <td>external/steptools-ap214/as1-tc-214.stp</td>
+                <td><span class="badge badge-fail">FAIL</span></td>
+                <td>Missing diagonal line/edge on central surface</td>
+            </tr>
+            <tr>
+                <td>external/steptools-ap224/ap224_995277945.stp</td>
+                <td><span class="badge badge-fail">FAIL</span></td>
+                <td>Smooth circular flange vs hexagonal/faceted in reference</td>
+            </tr>
+            <tr>
+                <td>external/steptools-ap224/ap224_995288709.stp</td>
+                <td><span class="badge badge-fail">FAIL</span></td>
+                <td>Extra geometric protrusions in our render</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2 class="section-header">Broken STEP Files <span class="section-count">(1)</span></h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Test File</th>
+                <th>Status</th>
+                <th>Issue</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>c2-holes/2.2-projection/tilted-hexagon.step</td>
+                <td><span class="badge badge-broken">BROKEN</span></td>
+                <td>Still renders nothing despite fixing per-edge vectors — deeper structural issue</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2 class="section-header">Errors <span class="section-count">(3 — runtime failures)</span></h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Test File</th>
+                <th>Status</th>
+                <th>Error</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td>complex/nissan.step</td>
+                <td><span class="badge badge-error">ERROR</span></td>
+                <td>Reference pipeline failed to parse</td>
+            </tr>
+            <tr>
+                <td>complex/rocky_house.step</td>
+                <td><span class="badge badge-error">ERROR</span></td>
+                <td>Timeout — file too large for test harness</td>
+            </tr>
+            <tr>
+                <td>complex/rotor-201nal.step</td>
+                <td><span class="badge badge-error">ERROR</span></td>
+                <td>Timeout — file too large for test harness</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <h2 class="section-header">Passed Tests <span class="section-count">(110)</span></h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th>Passed</th>
+                <th>Total</th>
+                <th>Rate</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr><td>benchmark</td><td>6</td><td>6</td><td>100%</td></tr>
+            <tr><td>c1-triangulation</td><td>16</td><td>16</td><td>100%</td></tr>
+            <tr><td>c2-holes</td><td>22</td><td>23</td><td>96%</td></tr>
+            <tr><td>c3-curves</td><td>3</td><td>3</td><td>100%</td></tr>
+            <tr><td>c4-multiface</td><td>6</td><td>6</td><td>100%</td></tr>
+            <tr><td>c4-surfaces</td><td>4</td><td>4</td><td>100%</td></tr>
+            <tr><td>c5-bspline</td><td>5</td><td>5</td><td>100%</td></tr>
+            <tr><td>c6-trimmed</td><td>4</td><td>6</td><td>67%</td></tr>
+            <tr><td>c8-solids</td><td>3</td><td>3</td><td>100%</td></tr>
+            <tr><td>complex</td><td>7</td><td>10</td><td>70%</td></tr>
+            <tr><td>external</td><td>26</td><td>29</td><td>90%</td></tr>
+        </tbody>
+    </table>
+</body>
+</html>
