@@ -13,7 +13,7 @@
  * - Triangle aspect ratio control (C7.4)
  */
 
-import { constrainedDelaunayTriangulation } from "./cdt-gpu";
+import { constrainedDelaunayTriangulation, cdtWithHoles } from "./cdt-gpu";
 import { evaluateSurface, surfaceNormal } from "./surfaces";
 import { createRectangularUVBoundary } from "./uv-extraction";
 import {
@@ -365,12 +365,17 @@ export async function tessellateSurface(
  *
  * Uses grid-based tessellation clipped to the boundary for better quality
  * on curved surfaces (avoids long-spanning triangles from ear clipping).
+ *
+ * @param bbox3d Optional 3D bounding box to filter grid points. For horizontal
+ *               cylinders, the UV polygon may span full U range but we only want
+ *               points whose 3D positions fall within the boundary's 3D extent.
  */
 export async function tessellateTrimmedSurface(
     surface: Surface,
     uvBoundary: Vec2[],
     gridDensity: number = 16,
-    uvHoles: Vec2[][] = []
+    uvHoles: Vec2[][] = [],
+    bbox3d?: { xMin: number; xMax: number; yMin: number; yMax: number; zMin: number; zMax: number }
 ): Promise<TessellatedMesh> {
     if (uvBoundary.length < 3) {
         throw new Error("UV boundary must have at least 3 points");
@@ -471,6 +476,48 @@ export async function tessellateTrimmedSurface(
         }
     }
 
+    // ===== Use CDT with holes for proper hole support =====
+    // CDT (Constrained Delaunay Triangulation) with cavity-based constraint recovery
+    // ensures hole boundary edges are preserved in the triangulation
+    if (continuousHoles.length > 0) {
+        console.log(`[tessellateTrimmedSurface] Using CDT with ${continuousHoles.length} holes`);
+
+        // If boundary is sparse (e.g., just 4 rectangle corners), densify it
+        // to get better triangulation quality on curved surfaces
+        let denseBoundary: Vec2[];
+        if (continuousBoundary.length <= 8) {
+            denseBoundary = [];
+            for (let i = 0; i < continuousBoundary.length; i++) {
+                const p1 = continuousBoundary[i];
+                const p2 = continuousBoundary[(i + 1) % continuousBoundary.length];
+                // Add points along this edge
+                const edgePoints = Math.max(8, gridDensity);
+                for (let t = 0; t < edgePoints; t++) {
+                    const u = p1[0] + (p2[0] - p1[0]) * (t / edgePoints);
+                    const v = p1[1] + (p2[1] - p1[1]) * (t / edgePoints);
+                    denseBoundary.push([u, v]);
+                }
+            }
+            console.log(`[tessellateTrimmedSurface] Densified boundary from ${continuousBoundary.length} to ${denseBoundary.length} points`);
+        } else {
+            denseBoundary = continuousBoundary;
+        }
+
+        // Use CDT with holes - proper Constrained Delaunay Triangulation
+        // that recovers constraint edges using cavity-based approach
+        const triangles = await cdtWithHoles(denseBoundary, continuousHoles);
+        console.log(`[tessellateTrimmedSurface] CDT with holes generated ${triangles.length} triangles`);
+
+        // Build combined vertex array (boundary + all holes)
+        const allVertices: Vec2[] = [...denseBoundary];
+        for (const hole of continuousHoles) {
+            allVertices.push(...hole);
+        }
+
+        return evaluateUVMesh(surface, allVertices, triangles);
+    }
+    // ===== End CDT with holes =====
+
     // Find UV bounding box from the continuous boundary
     let uMin = Infinity, uMax = -Infinity;
     let vMin = Infinity, vMax = -Infinity;
@@ -526,6 +573,20 @@ export async function tessellateTrimmedSurface(
     // Tolerance for including points near the boundary
     const boundaryTolerance = Math.max(du, dv) * 0.5;
 
+    // 3D bbox tolerance - keep tight to avoid protrusions
+    // For horizontal cylinders, even 0.5 tolerance can create visible artifacts
+    const bbox3dTol = 0.05;
+
+    // Helper to check if a 3D point is within the bbox
+    const isIn3DBbox = (pos: Vec3): boolean => {
+        if (!bbox3d) return true;
+        return pos[0] >= bbox3d.xMin - bbox3dTol && pos[0] <= bbox3d.xMax + bbox3dTol &&
+               pos[1] >= bbox3d.yMin - bbox3dTol && pos[1] <= bbox3d.yMax + bbox3dTol &&
+               pos[2] >= bbox3d.zMin - bbox3dTol && pos[2] <= bbox3d.zMax + bbox3dTol;
+    };
+
+    let bbox3dFilteredCount = 0;
+
     for (let j = 0; j <= gridDensity; j++) {
         vertexGrid[j] = [];
         for (let i = 0; i <= gridDensity; i++) {
@@ -539,6 +600,19 @@ export async function tessellateTrimmedSurface(
 
             // Include points that are inside OR very close to the boundary
             if ((insideBoundary || nearBoundary) && !insideHole) {
+                // If 3D bbox is provided, also check if the 3D position is within bounds
+                // This is crucial for horizontal cylinders where UV polygon spans full U
+                // but we only want the portion of the surface within the 3D boundary
+                if (bbox3d) {
+                    const pos3d = evaluateSurface(surface, u, v);
+                    if (!isIn3DBbox(pos3d)) {
+                        vertexGrid[j][i] = null;
+                        bbox3dFilteredCount++;
+                        outsideCount++;
+                        continue;
+                    }
+                }
+
                 vertexGrid[j][i] = uvVertices.length;
                 // Store the unwrapped UV for surface evaluation
                 // (cos/sin are 2π periodic, so values in [π, 2π] work correctly)
@@ -547,6 +621,21 @@ export async function tessellateTrimmedSurface(
             } else {
                 vertexGrid[j][i] = null;
                 outsideCount++;
+            }
+        }
+    }
+
+    if (bbox3d) {
+        console.log(`[tessellateTrimmedSurface] 3D bbox provided: X=[${bbox3d.xMin.toFixed(2)}, ${bbox3d.xMax.toFixed(2)}], Y=[${bbox3d.yMin.toFixed(2)}, ${bbox3d.yMax.toFixed(2)}], Z=[${bbox3d.zMin.toFixed(2)}, ${bbox3d.zMax.toFixed(2)}]`);
+        console.log(`[tessellateTrimmedSurface] 3D bbox filtered ${bbox3dFilteredCount} points outside bounds`);
+
+        // Sample a few evaluated positions to debug
+        if (uvVertices.length > 0) {
+            console.log(`[tessellateTrimmedSurface] Sample 3D positions from evaluated surface:`);
+            for (let k = 0; k < Math.min(5, uvVertices.length); k++) {
+                const [u, v] = uvVertices[k];
+                const pos = evaluateSurface(surface, u, v);
+                console.log(`  UV(${u.toFixed(2)}, ${v.toFixed(2)}) -> 3D(${pos[0].toFixed(2)}, ${pos[1].toFixed(2)}, ${pos[2].toFixed(2)})`);
             }
         }
     }
@@ -560,6 +649,91 @@ export async function tessellateTrimmedSurface(
     const testInside = isPointInPolygon([testU, testV], continuousBoundary);
     const testInHole = continuousHoles.some(hole => isPointInPolygon([testU, testV], hole));
     console.log(`[tessellateTrimmedSurface] Test point (${testU.toFixed(3)}, ${testV.toFixed(3)}): insideBoundary=${testInside}, insideHole=${testInHole}`);
+
+    // Debug: trace through point-in-polygon for the center point
+    if (!testInside && continuousHoles.length === 0) {
+        console.log(`[DEBUG] Tracing point-in-polygon for center point:`);
+        let crossings = 0;
+        for (let i = 0, j = continuousBoundary.length - 1; i < continuousBoundary.length; j = i++) {
+            const [xi, yi] = continuousBoundary[i];
+            const [xj, yj] = continuousBoundary[j];
+            const yCrossesRay = ((yi > testV) !== (yj > testV));
+            if (yCrossesRay) {
+                const xIntersect = (xj - xi) * (testV - yi) / (yj - yi) + xi;
+                if (testU < xIntersect) {
+                    crossings++;
+                    if (crossings <= 10) {
+                        console.log(`  Crossing ${crossings}: edge [${j}]->[${i}] from (${xj.toFixed(2)},${yj.toFixed(2)}) to (${xi.toFixed(2)},${yi.toFixed(2)}), intersect at x=${xIntersect.toFixed(2)}`);
+                    }
+                }
+            }
+        }
+        console.log(`[DEBUG] Total crossings: ${crossings} -> inside=${crossings % 2 === 1}`);
+
+        // Show boundary polygon structure
+        console.log(`[DEBUG] Boundary polygon (${continuousBoundary.length} points):`);
+        console.log(`  First 5: ${continuousBoundary.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
+        const quarter = Math.floor(continuousBoundary.length / 4);
+        console.log(`  At ${quarter}: (${continuousBoundary[quarter][0].toFixed(2)},${continuousBoundary[quarter][1].toFixed(2)})`);
+        const half = Math.floor(continuousBoundary.length / 2);
+        console.log(`  At ${half}: (${continuousBoundary[half][0].toFixed(2)},${continuousBoundary[half][1].toFixed(2)})`);
+        const threeQuarter = Math.floor(continuousBoundary.length * 3 / 4);
+        console.log(`  At ${threeQuarter}: (${continuousBoundary[threeQuarter][0].toFixed(2)},${continuousBoundary[threeQuarter][1].toFixed(2)})`);
+        console.log(`  Last 5: ${continuousBoundary.slice(-5).map((p, i) => `[${continuousBoundary.length-5+i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
+    }
+
+    // Additional diagnostic: test a point that SHOULD be inside the hole
+    if (continuousHoles.length > 0) {
+        const hole = continuousHoles[0];
+        const holeUs = hole.map(p => p[0]);
+        const holeVs = hole.map(p => p[1]);
+        const holeCenterU = (Math.min(...holeUs) + Math.max(...holeUs)) / 2;
+        const holeCenterV = (Math.min(...holeVs) + Math.max(...holeVs)) / 2;
+        const holeCenterInHole = isPointInPolygon([holeCenterU, holeCenterV], hole);
+        console.log(`[tessellateTrimmedSurface] Hole center (${holeCenterU.toFixed(3)}, ${holeCenterV.toFixed(3)}): insideHole=${holeCenterInHole}`);
+
+        // Debug: manually trace through point-in-polygon for the hole center
+        let debugCrossings = 0;
+        const testX = holeCenterU;
+        const testY = holeCenterV;
+        for (let i = 0, j = hole.length - 1; i < hole.length; j = i++) {
+            const [xi, yi] = hole[i];
+            const [xj, yj] = hole[j];
+            const yCrossesRay = ((yi > testY) !== (yj > testY));
+            if (yCrossesRay) {
+                const xIntersect = (xj - xi) * (testY - yi) / (yj - yi) + xi;
+                if (testX < xIntersect) {
+                    debugCrossings++;
+                    if (debugCrossings <= 5) {
+                        console.log(`[DEBUG] Crossing ${debugCrossings}: edge [${j}]->[${i}] from (${xj.toFixed(2)},${yj.toFixed(2)}) to (${xi.toFixed(2)},${yi.toFixed(2)}), intersect at x=${xIntersect.toFixed(2)}`);
+                    }
+                }
+            }
+        }
+        console.log(`[DEBUG] Total crossings: ${debugCrossings} -> inside=${debugCrossings % 2 === 1}`);
+
+        // Check if all hole points are in expected range
+        const outOfRangeU = hole.filter(p => p[0] < -4 || p[0] > 7);
+        const outOfRangeV = hole.filter(p => p[1] < -1 || p[1] > 3);
+        if (outOfRangeU.length > 0 || outOfRangeV.length > 0) {
+            console.log(`[DEBUG] WARNING: ${outOfRangeU.length} points have U outside [-4,7], ${outOfRangeV.length} have V outside [-1,3]`);
+        }
+
+        // Show the polygon vertices at key positions
+        console.log(`[DEBUG] Hole polygon shape (${hole.length} points):`);
+        console.log(`  [0]: (${hole[0][0].toFixed(3)}, ${hole[0][1].toFixed(3)})`);
+        console.log(`  [1]: (${hole[1][0].toFixed(3)}, ${hole[1][1].toFixed(3)})`);
+        const mid = Math.floor(hole.length / 2);
+        console.log(`  [${mid}]: (${hole[mid][0].toFixed(3)}, ${hole[mid][1].toFixed(3)})`);
+        console.log(`  [${hole.length-2}]: (${hole[hole.length-2][0].toFixed(3)}, ${hole[hole.length-2][1].toFixed(3)})`);
+        console.log(`  [${hole.length-1}]: (${hole[hole.length-1][0].toFixed(3)}, ${hole[hole.length-1][1].toFixed(3)})`);
+
+        // Check if first point at V=0.6, last points approaching first
+        const firstV = hole[0][1];
+        const lastV = hole[hole.length-1][1];
+        console.log(`[DEBUG] First point V=${firstV.toFixed(3)}, last point V=${lastV.toFixed(3)}`);
+        console.log(`[DEBUG] Test point V=${testY.toFixed(3)} - should be between ${Math.min(firstV, lastV).toFixed(3)} and ${Math.max(firstV, lastV).toFixed(3)} for the vertical edges`);
+    }
 
     // Create triangles from the grid
     const triangles: [number, number, number][] = [];

@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>STEP Color Extraction Diagnostic</title>
+  <style>
+    body { font-family: monospace; background: #1a1a1a; color: #eee; padding: 20px; }
+    h1, h2 { color: #4af; }
+    .section { background: #2a2a2a; padding: 15px; margin: 10px 0; border-radius: 8px; }
+    .success { color: #4f4; }
+    .warning { color: #fa4; }
+    .error { color: #f44; }
+    pre { background: #111; padding: 10px; overflow-x: auto; }
+    .color-swatch { display: inline-block; width: 20px; height: 20px; border: 1px solid #fff; margin-right: 8px; vertical-align: middle; }
+    button { background: #4af; color: #000; border: none; padding: 10px 20px; cursor: pointer; margin: 5px; }
+    button:hover { background: #6cf; }
+    #results { margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <h1>STEP Color Extraction Diagnostic</h1>
+
+  <div class="section">
+    <h2>Test Files</h2>
+    <button onclick="testFile('colored-solid')">Test colored-solid.step</button>
+    <button onclick="testFile('rocky_house')">Test rocky_house.step</button>
+    <input type="file" id="fileInput" accept=".step,.stp" onchange="testCustomFile(event)">
+  </div>
+
+  <div id="results"></div>
+
+  <script type="module">
+    import occtimportjs from '/node_modules/occt-import-js/dist/occt-import-js.js';
+    import { buildComprehensiveFaceColorMap, getAdvancedFaceIds } from '/src/step-color-parser.ts';
+
+    window.testFile = async function(name) {
+      const resultsEl = document.getElementById('results');
+      resultsEl.innerHTML = '<p>Loading...</p>';
+
+      let path;
+      if (name === 'colored-solid') {
+        path = '/step-examples/c8-solids/colored-solid.step';
+      } else if (name === 'rocky_house') {
+        path = '/step-examples/complex/rocky_house.step';
+      }
+
+      const response = await fetch(path);
+      const content = await response.text();
+      await runDiagnostic(content, name);
+    };
+
+    window.testCustomFile = async function(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      const content = await file.text();
+      await runDiagnostic(content, file.name);
+    };
+
+    async function runDiagnostic(stepContent, fileName) {
+      const resultsEl = document.getElementById('results');
+      let html = '<h2>Results for: ' + fileName + '</h2>';
+
+      // === 1. Our Custom STEP Color Parser ===
+      html += '<div class="section"><h2>1. Our Custom STEP Color Parser</h2>';
+      const t1 = performance.now();
+
+      try {
+        const faceColorMap = buildComprehensiveFaceColorMap(stepContent);
+        const faceIds = getAdvancedFaceIds(stepContent);
+
+        const parseTime = (performance.now() - t1).toFixed(0);
+        html += '<p class="success">Parsed in ' + parseTime + 'ms</p>';
+        html += '<p>ADVANCED_FACE entities: ' + faceIds.length + '</p>';
+        html += '<p>Faces with colors: ' + faceColorMap.size + '</p>';
+
+        // Show unique colors
+        const uniqueColors = new Map();
+        for (const [faceId, color] of faceColorMap) {
+          const key = color.r.toFixed(3) + ',' + color.g.toFixed(3) + ',' + color.b.toFixed(3);
+          if (!uniqueColors.has(key)) {
+            uniqueColors.set(key, { color, count: 0 });
+          }
+          uniqueColors.get(key).count++;
+        }
+
+        html += '<p>Unique colors: ' + uniqueColors.size + '</p>';
+        html += '<div style="margin: 10px 0;">';
+        for (const [key, data] of uniqueColors) {
+          const r = Math.round(data.color.r * 255);
+          const g = Math.round(data.color.g * 255);
+          const b = Math.round(data.color.b * 255);
+          html += '<div><span class="color-swatch" style="background: rgb(' + r + ',' + g + ',' + b + ')"></span>';
+          html += 'rgb(' + r + ', ' + g + ', ' + b + ') - ' + data.count + ' faces</div>';
+        }
+        html += '</div>';
+
+        // Show face-to-color mapping for small files
+        if (faceIds.length <= 20) {
+          html += '<h3>Face Color Mapping:</h3><pre>';
+          for (const faceId of faceIds) {
+            const color = faceColorMap.get(faceId);
+            if (color) {
+              const r = Math.round(color.r * 255);
+              const g = Math.round(color.g * 255);
+              const b = Math.round(color.b * 255);
+              html += 'Face #' + faceId + ': rgb(' + r + ', ' + g + ', ' + b + ')\n';
+            } else {
+              html += 'Face #' + faceId + ': NO COLOR\n';
+            }
+          }
+          html += '</pre>';
+        }
+      } catch (e) {
+        html += '<p class="error">Error: ' + e.message + '</p>';
+        console.error(e);
+      }
+      html += '</div>';
+
+      // === 2. occt-import-js ===
+      html += '<div class="section"><h2>2. occt-import-js</h2>';
+      const t2 = performance.now();
+
+      try {
+        const occt = await occtimportjs();
+        const initTime = (performance.now() - t2).toFixed(0);
+        html += '<p>WASM init: ' + initTime + 'ms</p>';
+
+        const t3 = performance.now();
+        const fileBuffer = new TextEncoder().encode(stepContent);
+        const result = occt.ReadStepFile(fileBuffer, null);
+        const parseTime = (performance.now() - t3).toFixed(0);
+
+        if (!result || !result.success) {
+          html += '<p class="error">Failed to parse</p>';
+        } else {
+          html += '<p class="success">Parsed in ' + parseTime + 'ms</p>';
+          html += '<p>Meshes: ' + result.meshes.length + '</p>';
+
+          let totalBrepFaces = 0;
+          let meshesWithColor = 0;
+          let facesWithColor = 0;
+          const meshColors = new Map();
+
+          for (const mesh of result.meshes) {
+            if (mesh.color) {
+              meshesWithColor++;
+              const key = mesh.color.map(c => c.toFixed(3)).join(',');
+              meshColors.set(key, (meshColors.get(key) || 0) + 1);
+            }
+            if (mesh.brep_faces) {
+              totalBrepFaces += mesh.brep_faces.length;
+              for (const face of mesh.brep_faces) {
+                if (face.color) {
+                  facesWithColor++;
+                }
+              }
+            }
+          }
+
+          html += '<p>Total brep_faces: ' + totalBrepFaces + '</p>';
+          html += '<p>Meshes with mesh.color: ' + meshesWithColor + '/' + result.meshes.length + '</p>';
+          html += '<p>Faces with brep_faces[].color: ' + facesWithColor + '/' + totalBrepFaces + '</p>';
+
+          if (meshColors.size > 0) {
+            html += '<h3>Mesh-level colors:</h3><div>';
+            for (const [key, count] of meshColors) {
+              const parts = key.split(',').map(c => Math.round(parseFloat(c) * 255));
+              html += '<div><span class="color-swatch" style="background: rgb(' + parts[0] + ',' + parts[1] + ',' + parts[2] + ')"></span>';
+              html += 'rgb(' + parts[0] + ', ' + parts[1] + ', ' + parts[2] + ') - ' + count + ' meshes</div>';
+            }
+            html += '</div>';
+          }
+
+          if (facesWithColor === 0) {
+            html += '<p class="warning">occt-import-js does NOT extract per-face colors (brep_faces[].color is always null)</p>';
+          }
+
+          // Show first few meshes detail for small files
+          if (result.meshes.length <= 5) {
+            html += '<h3>Mesh Details:</h3><pre>';
+            for (let i = 0; i < result.meshes.length; i++) {
+              const m = result.meshes[i];
+              html += 'Mesh ' + i + ': name="' + (m.name || '(none)') + '", ';
+              html += 'verts=' + (m.attributes?.position?.array?.length / 3) + ', ';
+              html += 'color=' + (m.color ? '[' + m.color.map(c => c.toFixed(3)).join(',') + ']' : 'null') + ', ';
+              html += 'brep_faces=' + (m.brep_faces?.length || 0) + '\n';
+              if (m.brep_faces && m.brep_faces.length <= 10) {
+                for (let j = 0; j < m.brep_faces.length; j++) {
+                  const f = m.brep_faces[j];
+                  html += '  face[' + j + ']: first=' + f.first + ', last=' + f.last + ', color=' + (f.color ? JSON.stringify(f.color) : 'null') + '\n';
+                }
+              }
+            }
+            html += '</pre>';
+          }
+        }
+      } catch (e) {
+        html += '<p class="error">Error: ' + e.message + '</p>';
+        console.error(e);
+      }
+      html += '</div>';
+
+      // === 3. Summary ===
+      html += '<div class="section"><h2>3. Summary</h2>';
+      html += '<table border="1" cellpadding="8" style="border-collapse: collapse;">';
+      html += '<tr><th>Parser</th><th>Extracts Per-Face Colors?</th><th>Notes</th></tr>';
+      html += '<tr><td>Our Custom Parser</td><td class="success">YES</td><td>Parses STYLED_ITEM chain from STEP text</td></tr>';
+      html += '<tr><td>occt-import-js</td><td class="error">NO</td><td>Only mesh-level colors, brep_faces[].color always null</td></tr>';
+      html += '</table>';
+      html += '</div>';
+
+      resultsEl.innerHTML = html;
+    }
+  </script>
+</body>
+</html>

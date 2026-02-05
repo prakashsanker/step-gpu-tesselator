@@ -1,0 +1,70 @@
+diff --git a/occt-import-js/src/importer-xcaf.cpp b/occt-import-js/src/importer-xcaf.cpp
+index 1234567..abcdef0 100644
+--- a/occt-import-js/src/importer-xcaf.cpp
++++ b/occt-import-js/src/importer-xcaf.cpp
+@@ -94,23 +94,42 @@ class XcafFace : public OcctFace
+ {
+ public:
+     XcafFace (const TopoDS_Face& face, const Handle (XCAFDoc_ShapeTool)& shapeTool, const Handle (XCAFDoc_ColorTool)& colorTool) :
+         OcctFace (face),
+         shapeTool (shapeTool),
+-        colorTool (colorTool)
++        colorTool (colorTool),
++        parentShape (nullptr)
+     {
+
+     }
+
++    XcafFace (const TopoDS_Face& face, const Handle (XCAFDoc_ShapeTool)& shapeTool, const Handle (XCAFDoc_ColorTool)& colorTool, const TopoDS_Shape* parent) :
++        OcctFace (face),
++        shapeTool (shapeTool),
++        colorTool (colorTool),
++        parentShape (parent)
++    {
++
++    }
++
+     virtual bool GetColor (Color& color) const override
+     {
+-        return GetShapeColor ((const TopoDS_Shape&) face, shapeTool, colorTool, color);
++        // First try to get the face's own color
++        if (GetShapeColor ((const TopoDS_Shape&) face, shapeTool, colorTool, color)) {
++            return true;
++        }
++        // Fall back to parent shape's color if face doesn't have its own
++        if (parentShape != nullptr) {
++            return GetShapeColor (*parentShape, shapeTool, colorTool, color);
++        }
++        return false;
+     }
+
+ private:
+     const Handle (XCAFDoc_ShapeTool)& shapeTool;
+     const Handle (XCAFDoc_ColorTool)& colorTool;
++    const TopoDS_Shape* parentShape;
+ };
+
+ class XcafShapeMesh : public Mesh
+ {
+@@ -137,10 +156,10 @@ public:
+     virtual void EnumerateFaces (const std::function<void (const Face& face)>& onFace) const override
+     {
+         for (TopExp_Explorer ex (shape, TopAbs_FACE); ex.More (); ex.Next ()) {
+             const TopoDS_Face& face = TopoDS::Face (ex.Current ());
+-            XcafFace outputFace (face, shapeTool, colorTool);
++            XcafFace outputFace (face, shapeTool, colorTool, &shape);
+             onFace (outputFace);
+         }
+     }
+
+@@ -180,10 +199,10 @@ public:
+     virtual void EnumerateFaces (const std::function<void (const Face& face)>& onFace) const override
+     {
+         for (TopExp_Explorer ex (shape, TopAbs_FACE, TopAbs_SHELL); ex.More (); ex.Next ()) {
+             const TopoDS_Face& face = TopoDS::Face (ex.Current ());
+-            XcafFace outputFace (face, shapeTool, colorTool);
++            XcafFace outputFace (face, shapeTool, colorTool, &shape);
+             onFace (outputFace);
+         }
+     }
+

@@ -11,6 +11,7 @@
     "test:watch": "node --experimental-vm-modules tests/run-tests.js --watch"
   },
   "devDependencies": {
+    "@types/earcut": "^3.0.0",
     "@types/three": "^0.181.0",
     "puppeteer": "^24.0.0",
     "typescript": "~5.9.3",
@@ -19,8 +20,9 @@
     "vite-plugin-wasm": "^3.5.0"
   },
   "dependencies": {
+    "earcut": "^3.0.2",
     "occt-import-js": "^0.0.23",
-    "opencascade.js": "^1.1.1",
+    "opencascade.js": "2.0.0-beta.fdece36",
     "three": "^0.181.2"
   }
 }

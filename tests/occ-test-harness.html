@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OCC Tessellator Tests</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #eee; }
+        .pass { color: #4ade80; }
+        .fail { color: #f87171; }
+        .pending { color: #fbbf24; }
+        #log { white-space: pre-wrap; }
+    </style>
+</head>
+<body>
+    <h1>OCC Tessellator Test Harness</h1>
+    <p>Pipeline: OpenCascade.js (STEP parsing) + GPU Tessellation</p>
+    <div id="gpu-status">Checking WebGPU support...</div>
+    <div id="occ-status">Initializing OpenCascade.js...</div>
+    <div id="log"></div>
+
+    <script type="module">
+        import { parseStepFile } from '/src/tessellator.ts';
+        import { earClipping } from '/src/ear-clipping.ts';
+        import { isCounterClockWiseGPU } from '/src/signed-area.ts';
+        import { getGPUDevice } from '/src/lib.ts';
+        import {
+            tessellationProfile,
+            resetTessellationProfile,
+            getTessellationProfileReport,
+            parseStepWithOcctImportSimple
+        } from '/src/occ-test.ts';
+
+        // Expose functions to window for Puppeteer access
+        window.testHarness = {
+            earClipping,
+            isCounterClockWiseGPU,
+            getGPUDevice,
+            tessellationProfile,
+            resetTessellationProfile,
+            getTessellationProfileReport,
+
+            // Helper to check if WebGPU is available
+            async checkWebGPU() {
+                try {
+                    const device = await getGPUDevice();
+                    return { available: true, info: device.limits };
+                } catch (e) {
+                    return { available: false, error: e.message };
+                }
+            },
+
+            // Run ear clipping on a polygon and return triangles
+            async runEarClipping(points) {
+                try {
+                    const triangles = await earClipping(points);
+                    return { success: true, triangles };
+                } catch (e) {
+                    return { success: false, error: e.message, stack: e.stack };
+                }
+            },
+
+            // Parse STEP file using our OCC-based tessellator
+            async parseStep(stepContent) {
+                try {
+                    resetTessellationProfile();
+                    const startTime = performance.now();
+
+                    // Convert string to Uint8Array if needed
+                    let content = stepContent;
+                    if (typeof stepContent === 'string') {
+                        content = new TextEncoder().encode(stepContent);
+                    }
+
+                    const mesh = await parseStepFile(content);
+                    const totalTime = performance.now() - startTime;
+
+                    return {
+                        success: true,
+                        mesh: {
+                            positions: Array.from(mesh.positions),
+                            indices: Array.from(mesh.indices),
+                            normals: mesh.normals ? Array.from(mesh.normals) : null,
+                            vertexColors: mesh.vertexColors ? Array.from(mesh.vertexColors) : null,
+                            vertexCount: mesh.positions.length / 3,
+                            triangleCount: mesh.indices.length / 3
+                        },
+                        timing: {
+                            total: totalTime,
+                            profile: getTessellationProfileReport()
+                        }
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message, stack: e.stack };
+                }
+            },
+
+            // Parse STEP file using occt-import-js (for comparison)
+            async parseStepOcctImport(stepContent) {
+                try {
+                    // Use the wrapper function from occ-test.ts which handles the import correctly
+                    const result = await parseStepWithOcctImportSimple(stepContent);
+                    return {
+                        success: result.success,
+                        meshCount: result.meshCount,
+                        vertexCount: result.vertexCount,
+                        triangleCount: result.triangleCount,
+                        boundingBox: result.boundingBox,
+                        timing: {
+                            total: result.totalTime
+                        }
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message, stack: e.stack };
+                }
+            },
+
+            // Check winding order
+            async checkWinding(points) {
+                try {
+                    const isCCW = await isCounterClockWiseGPU(points);
+                    return { success: true, isCCW };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            // Validate triangulation result
+            validateTriangulation(points, triangles) {
+                const errors = [];
+                const numVertices = points.length;
+                const expectedTriangles = numVertices - 2;
+
+                // Check triangle count
+                if (triangles.length !== expectedTriangles) {
+                    errors.push(`Expected ${expectedTriangles} triangles, got ${triangles.length}`);
+                }
+
+                // Check all indices are valid
+                for (let i = 0; i < triangles.length; i++) {
+                    const tri = triangles[i];
+                    for (let j = 0; j < 3; j++) {
+                        if (tri[j] < 0 || tri[j] >= numVertices) {
+                            errors.push(`Triangle ${i} has invalid index ${tri[j]} (max: ${numVertices - 1})`);
+                        }
+                    }
+                    // Check for degenerate triangles (same vertex twice)
+                    if (tri[0] === tri[1] || tri[1] === tri[2] || tri[0] === tri[2]) {
+                        errors.push(`Triangle ${i} is degenerate: [${tri}]`);
+                    }
+                }
+
+                // Check total area matches polygon area (approximately)
+                const polygonArea = Math.abs(computeSignedArea(points));
+                let triangleAreaSum = 0;
+                for (const tri of triangles) {
+                    const a = points[tri[0]];
+                    const b = points[tri[1]];
+                    const c = points[tri[2]];
+                    triangleAreaSum += Math.abs(triangleArea(a, b, c));
+                }
+
+                const areaDiff = Math.abs(polygonArea - triangleAreaSum);
+                if (areaDiff > 1e-6) {
+                    errors.push(`Area mismatch: polygon=${polygonArea.toFixed(6)}, triangles=${triangleAreaSum.toFixed(6)}, diff=${areaDiff.toFixed(6)}`);
+                }
+
+                return {
+                    valid: errors.length === 0,
+                    errors,
+                    polygonArea,
+                    triangleAreaSum
+                };
+            },
+
+            // Compare meshes from OCC and occt-import-js
+            compareMeshes(occResult, occtResult, tolerance = 0.1) {
+                const issues = [];
+
+                // Check both succeeded
+                if (!occResult.success) {
+                    return { valid: false, issues: ['OCC tessellator failed: ' + occResult.error] };
+                }
+                if (!occtResult.success) {
+                    return { valid: false, issues: ['occt-import-js failed: ' + occtResult.error] };
+                }
+
+                // Compare triangle counts - ONE-SIDED CHECK
+                // Only fail if OCC produces significantly FEWER triangles (under-tessellation is a bug)
+                // Producing MORE triangles (finer mesh) is allowed and actually preferred
+                const occTriangles = occResult.mesh.triangleCount;
+                const occtTriangles = occtResult.triangleCount;
+                const triangleDiff = Math.abs(occTriangles - occtTriangles) / Math.max(occTriangles, occtTriangles);
+
+                // Only fail if OCC under-tessellates by more than tolerance
+                if (occTriangles < occtTriangles * (1 - tolerance)) {
+                    issues.push(`Under-tessellation: OCC=${occTriangles}, occt-import-js=${occtTriangles} (${(triangleDiff * 100).toFixed(1)}% fewer)`);
+                }
+
+                // Compare bounding boxes (should be very close)
+                const occPositions = occResult.mesh.positions;
+                let occMinX = Infinity, occMinY = Infinity, occMinZ = Infinity;
+                let occMaxX = -Infinity, occMaxY = -Infinity, occMaxZ = -Infinity;
+                for (let i = 0; i < occPositions.length; i += 3) {
+                    occMinX = Math.min(occMinX, occPositions[i]);
+                    occMaxX = Math.max(occMaxX, occPositions[i]);
+                    occMinY = Math.min(occMinY, occPositions[i + 1]);
+                    occMaxY = Math.max(occMaxY, occPositions[i + 1]);
+                    occMinZ = Math.min(occMinZ, occPositions[i + 2]);
+                    occMaxZ = Math.max(occMaxZ, occPositions[i + 2]);
+                }
+
+                const occtBB = occtResult.boundingBox;
+                const bbTolerance = 0.01; // 1% of diagonal
+                const occDiag = Math.sqrt(
+                    Math.pow(occMaxX - occMinX, 2) +
+                    Math.pow(occMaxY - occMinY, 2) +
+                    Math.pow(occMaxZ - occMinZ, 2)
+                );
+                const threshold = occDiag * bbTolerance;
+
+                if (Math.abs(occMinX - occtBB.min[0]) > threshold ||
+                    Math.abs(occMinY - occtBB.min[1]) > threshold ||
+                    Math.abs(occMinZ - occtBB.min[2]) > threshold ||
+                    Math.abs(occMaxX - occtBB.max[0]) > threshold ||
+                    Math.abs(occMaxY - occtBB.max[1]) > threshold ||
+                    Math.abs(occMaxZ - occtBB.max[2]) > threshold) {
+                    issues.push(`Bounding box mismatch: OCC=[${occMinX.toFixed(2)},${occMinY.toFixed(2)},${occMinZ.toFixed(2)}]-[${occMaxX.toFixed(2)},${occMaxY.toFixed(2)},${occMaxZ.toFixed(2)}], occt-import-js=[${occtBB.min.map(v => v.toFixed(2)).join(',')}]-[${occtBB.max.map(v => v.toFixed(2)).join(',')}]`);
+                }
+
+                return {
+                    valid: issues.length === 0,
+                    issues,
+                    triangleDiff: triangleDiff,
+                    occTriangles,
+                    occtTriangles
+                };
+            }
+        };
+
+        // Helper: compute signed area of polygon (for CCW check)
+        function computeSignedArea(points) {
+            let sum = 0;
+            for (let i = 0; i < points.length; i++) {
+                const curr = points[i];
+                const next = points[(i + 1) % points.length];
+                sum += curr[0] * next[1] - next[0] * curr[1];
+            }
+            return sum / 2;
+        }
+
+        // Helper: compute area of triangle
+        function triangleArea(a, b, c) {
+            return ((b[0] - a[0]) * (c[1] - a[1]) - (c[0] - a[0]) * (b[1] - a[1])) / 2;
+        }
+
+        // Log function for visual feedback
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const span = document.createElement('span');
+            span.className = type;
+            span.textContent = message + '\n';
+            logDiv.appendChild(span);
+        }
+
+        // Initialize
+        async function init() {
+            const gpuStatusDiv = document.getElementById('gpu-status');
+            const occStatusDiv = document.getElementById('occ-status');
+
+            // Check WebGPU
+            const gpuResult = await window.testHarness.checkWebGPU();
+            if (gpuResult.available) {
+                gpuStatusDiv.innerHTML = '<span class="pass">WebGPU available</span>';
+                log('WebGPU initialized successfully', 'pass');
+            } else {
+                gpuStatusDiv.innerHTML = '<span class="fail">WebGPU not available: ' + gpuResult.error + '</span>';
+                log('WebGPU not available: ' + gpuResult.error, 'fail');
+            }
+
+            // occt-import-js is initialized lazily via parseStepWithOcctImportSimple
+            occStatusDiv.innerHTML = '<span class="pass">occt-import-js available (lazy init)</span>';
+            log('occt-import-js available via wrapper', 'pass');
+
+            // Signal that harness is ready
+            window.testHarnessReady = true;
+            log('Test harness ready', 'pass');
+        }
+
+        init();
+    </script>
+</body>
+</html>

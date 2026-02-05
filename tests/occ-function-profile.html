@@ -1,0 +1,504 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>OCC Function Profiler</title>
+    <style>
+        body { font-family: monospace; background: #1a1a2e; color: #eee; padding: 20px; }
+        #status { padding: 10px; background: #16213e; border-radius: 4px; margin-bottom: 20px; }
+        .ready { color: #4ade80; }
+        .loading { color: #fbbf24; }
+    </style>
+</head>
+<body>
+    <h1>OCC Per-Function Profiler</h1>
+    <div id="status" class="loading">Initializing...</div>
+
+    <script type="module">
+        import { getGPUDevice } from '../src/lib.ts';
+        import {
+          parseStepWithOCC,
+          resetTessellationProfile,
+          getTessellationProfileReport,
+          tessellationProfile,
+        } from '../src/occ-test.ts';
+        import {
+          computeFaceBasisFromLoop,
+          projectFaceLoopsTo2D,
+          normalizeWinding,
+          applyWindingTo3D,
+          bridgeAllHoles,
+        } from '../src/step-parser.ts';
+        import { earClipping } from '../src/ear-clipping.ts';
+        import earcut from 'earcut';
+        import occtimportjs from 'occt-import-js';
+
+        const statusEl = document.getElementById('status');
+
+        // OpenCascade instance
+        let oc = null;
+        // occt-import-js instance
+        let occtImport = null;
+
+        async function initOC() {
+            if (oc) return oc;
+
+            const opencascadeModule = await import('opencascade.js/dist/opencascade.wasm.js');
+            const opencascade = opencascadeModule.default;
+            const wasmUrl = new URL('opencascade.js/dist/opencascade.wasm.wasm', import.meta.url).href;
+
+            oc = await opencascade({
+                locateFile: (path) => path.endsWith('.wasm') ? wasmUrl : path
+            });
+
+            return oc;
+        }
+
+        async function initOCCTImport() {
+            if (occtImport) return occtImport;
+            occtImport = await occtimportjs({
+                locateFile: (file) => {
+                    if (file.endsWith('.wasm')) {
+                        return '/occt-import-js.wasm';
+                    }
+                    return file;
+                }
+            });
+            return occtImport;
+        }
+
+        async function initialize() {
+            try {
+                statusEl.textContent = 'Initializing WebGPU...';
+                await getGPUDevice();
+
+                statusEl.textContent = 'Loading OpenCascade.js...';
+                await initOC();
+
+                statusEl.textContent = 'Loading occt-import-js...';
+                await initOCCTImport();
+
+                statusEl.textContent = 'Ready';
+                statusEl.className = 'ready';
+                window.profilerReady = true;
+
+            } catch (e) {
+                statusEl.textContent = `Error: ${e.message}`;
+                console.error(e);
+            }
+        }
+
+        // Profile using our full OCC pipeline with GPU ear-clipping
+        window.profileOCCWithGPUTessellation = async function(stepText) {
+            try {
+                // Reset profiling counters
+                resetTessellationProfile();
+
+                const totalStart = performance.now();
+
+                // Run the full pipeline with built-in profiling
+                const mesh = await parseStepWithOCC(stepText);
+
+                const totalTime = performance.now() - totalStart;
+
+                if (!mesh || !mesh.positions) {
+                    return { success: false, error: 'No mesh returned' };
+                }
+
+                // Get profiling report
+                const report = getTessellationProfileReport();
+
+                // Return profiling data
+                return {
+                    success: true,
+                    totalTime,
+                    vertexCount: mesh.positions.length / 3,
+                    triangleCount: mesh.indices.length / 3,
+                    profile: { ...tessellationProfile },
+                    report,
+                };
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        };
+
+        // Profile using occt-import-js (baseline comparison)
+        window.profileOCCTImport = async function(stepText) {
+            try {
+                // Convert string to Uint8Array
+                const encoder = new TextEncoder();
+                const bytes = encoder.encode(stepText);
+
+                const totalStart = performance.now();
+                const result = occtImport.ReadStepFile(bytes, null);
+                const totalTime = performance.now() - totalStart;
+
+                if (!result.success || !result.meshes || result.meshes.length === 0) {
+                    return { success: false, error: 'occt-import-js returned no meshes' };
+                }
+
+                let totalVertices = 0;
+                let totalTriangles = 0;
+
+                for (const mesh of result.meshes) {
+                    if (mesh.attributes && mesh.attributes.position) {
+                        totalVertices += mesh.attributes.position.array.length / 3;
+                    }
+                    if (mesh.index) {
+                        totalTriangles += mesh.index.array.length / 3;
+                    }
+                }
+
+                return {
+                    success: true,
+                    totalTime,
+                    vertexCount: totalVertices,
+                    triangleCount: totalTriangles,
+                    meshCount: result.meshes.length,
+                };
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        };
+
+        // Utility: time a function
+        function timeSync(fn) {
+            const start = performance.now();
+            const result = fn();
+            return { result, time: performance.now() - start };
+        }
+
+        async function timeAsync(fn) {
+            const start = performance.now();
+            const result = await fn();
+            return { result, time: performance.now() - start };
+        }
+
+        // Parse STEP with OCC and collect per-function timing
+        window.profileOCCDetailed = async function(stepText) {
+            const timing = {
+                occInit: 0,
+                stepParsing: 0,
+                faceExtraction: 0,
+                edgeExtraction: 0,
+                surfaceParams: 0,
+                tessellation: {
+                    total: 0,
+                    computeBasis: 0,
+                    project2D: 0,
+                    normalizeWinding: 0,
+                    bridgeHoles: 0,
+                    earClipping: 0,
+                    earcut: 0,
+                },
+                meshAssembly: 0,
+                faceCount: 0,
+                triangleCount: 0,
+                vertexCount: 0,
+            };
+
+            const totalStart = performance.now();
+
+            try {
+                // 1. OCC Init (should be cached after first run)
+                const initResult = await timeAsync(() => initOC());
+                timing.occInit = initResult.time;
+
+                // 2. STEP Parsing
+                const parseStart = performance.now();
+                oc.FS.createDataFile('/', 'test.step', stepText, true, true, true);
+
+                const reader = oc.STEPControl_Reader_1 ? new oc.STEPControl_Reader_1() : new oc.STEPControl_Reader();
+                reader.ReadFile('test.step');
+
+                try {
+                    reader.TransferRoots();
+                } catch {
+                    if (oc.Message_ProgressRange_1) {
+                        reader.TransferRoots(new oc.Message_ProgressRange_1());
+                    }
+                }
+
+                const shape = reader.OneShape();
+                oc.FS.unlink('test.step');
+                timing.stepParsing = performance.now() - parseStart;
+
+                // 3. Face extraction
+                const extractStart = performance.now();
+                const faces = [];
+
+                const explorer = new oc.TopExp_Explorer_2(
+                    shape,
+                    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+                    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                );
+
+                let faceIndex = 0;
+                while (explorer.More()) {
+                    const currentShape = explorer.Current();
+                    const face = oc.TopoDS.Face_1(currentShape);
+
+                    // Get surface type
+                    let surfaceType = 'Unknown';
+                    const surfaceStart = performance.now();
+                    const surface = oc.BRep_Tool.Surface_2(face);
+                    if (surface && oc.GeomAdaptor_Surface_2) {
+                        const adaptor = new oc.GeomAdaptor_Surface_2(surface);
+                        const typeVal = adaptor.GetType();
+                        const typeNum = typeof typeVal === 'object' ? typeVal.value : typeVal;
+                        const typeMap = { 0: 'Plane', 1: 'Cylinder', 2: 'Cone', 3: 'Sphere', 4: 'Torus', 6: 'BSplineSurface' };
+                        surfaceType = typeMap[typeNum] || 'Other';
+                    }
+                    timing.surfaceParams += performance.now() - surfaceStart;
+
+                    // Get UV bounds
+                    let uMin = 0, uMax = 1, vMin = 0, vMax = 1;
+                    if (oc.BRepAdaptor_Surface_2) {
+                        const faceAdaptor = new oc.BRepAdaptor_Surface_2(face, true);
+                        uMin = faceAdaptor.FirstUParameter();
+                        uMax = faceAdaptor.LastUParameter();
+                        vMin = faceAdaptor.FirstVParameter();
+                        vMax = faceAdaptor.LastVParameter();
+                    }
+
+                    // Extract edges
+                    const edgeStart = performance.now();
+                    const outerLoop = [];
+
+                    const wireExplorer = new oc.TopExp_Explorer_2(
+                        face,
+                        oc.TopAbs_ShapeEnum.TopAbs_WIRE,
+                        oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                    );
+
+                    if (wireExplorer.More()) {
+                        const wireShape = wireExplorer.Current();
+                        const wire = oc.TopoDS.Wire_1(wireShape);
+
+                        let edgeExplorer = oc.BRepTools_WireExplorer_2
+                            ? new oc.BRepTools_WireExplorer_2(wire)
+                            : null;
+
+                        if (edgeExplorer) {
+                            while (edgeExplorer.More()) {
+                                const edgeShape = edgeExplorer.Current();
+                                const edge = oc.TopoDS.Edge_1(edgeShape);
+
+                                if (oc.BRepAdaptor_Curve_2) {
+                                    const curveAdaptor = new oc.BRepAdaptor_Curve_2(edge);
+                                    const first = curveAdaptor.FirstParameter();
+                                    const last = curveAdaptor.LastParameter();
+                                    const startPnt = curveAdaptor.Value(first);
+
+                                    outerLoop.push({
+                                        x: startPnt.X(),
+                                        y: startPnt.Y(),
+                                        z: startPnt.Z()
+                                    });
+                                }
+
+                                edgeExplorer.Next();
+                            }
+                        }
+                    }
+
+                    timing.edgeExtraction += performance.now() - edgeStart;
+
+                    faces.push({
+                        faceIndex,
+                        surfaceType,
+                        uvBounds: { uMin, uMax, vMin, vMax },
+                        outerLoop,
+                    });
+
+                    explorer.Next();
+                    faceIndex++;
+                }
+
+                timing.faceExtraction = performance.now() - extractStart;
+                timing.faceCount = faces.length;
+
+                // 4. Tessellation with detailed timing
+                const tessStart = performance.now();
+                let totalVertices = 0;
+                let totalTriangles = 0;
+
+                for (const face of faces) {
+                    if (face.surfaceType !== 'Plane' || face.outerLoop.length < 3) {
+                        continue;
+                    }
+
+                    const outer = face.outerLoop.map(p => [p.x, p.y, p.z]);
+
+                    // Compute basis
+                    const basisStart = performance.now();
+                    const basis = computeFaceBasisFromLoop(outer);
+                    timing.tessellation.computeBasis += performance.now() - basisStart;
+
+                    // Project to 2D
+                    const projectStart = performance.now();
+                    const projected = projectFaceLoopsTo2D({ outer, holes: [] }, basis);
+                    timing.tessellation.project2D += performance.now() - projectStart;
+
+                    // Normalize winding
+                    const windingStart = performance.now();
+                    const normalized = normalizeWinding(projected);
+                    timing.tessellation.normalizeWinding += performance.now() - windingStart;
+
+                    // Bridge holes (empty in this case)
+                    const bridgeStart = performance.now();
+                    const merged = bridgeAllHoles(normalized.outer2d, normalized.holes2d);
+                    timing.tessellation.bridgeHoles += performance.now() - bridgeStart;
+
+                    // Triangulate with earcut
+                    const earcutStart = performance.now();
+                    const flatCoords = [];
+                    for (const p of merged) {
+                        flatCoords.push(p[0], p[1]);
+                    }
+                    const indices = earcut(flatCoords);
+                    timing.tessellation.earcut += performance.now() - earcutStart;
+
+                    totalVertices += merged.length;
+                    totalTriangles += indices.length / 3;
+                }
+
+                timing.tessellation.total = performance.now() - tessStart;
+                timing.vertexCount = totalVertices;
+                timing.triangleCount = totalTriangles;
+
+                // Calculate total
+                const totalTime = performance.now() - totalStart;
+
+                return {
+                    success: true,
+                    totalTime,
+                    timing,
+                };
+
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        };
+
+        // Compare earcut vs GPU ear-clipping for different polygon sizes
+        window.benchmarkTriangulators = async function(stepText) {
+            const results = [];
+
+            try {
+                await initOC();
+
+                // Parse STEP and extract faces
+                oc.FS.createDataFile('/', 'test.step', stepText, true, true, true);
+                const reader = oc.STEPControl_Reader_1 ? new oc.STEPControl_Reader_1() : new oc.STEPControl_Reader();
+                reader.ReadFile('test.step');
+                try { reader.TransferRoots(); } catch { reader.TransferRoots(new oc.Message_ProgressRange_1()); }
+                const shape = reader.OneShape();
+                oc.FS.unlink('test.step');
+
+                // Extract planar faces
+                const explorer = new oc.TopExp_Explorer_2(
+                    shape,
+                    oc.TopAbs_ShapeEnum.TopAbs_FACE,
+                    oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                );
+
+                let faceIndex = 0;
+                while (explorer.More()) {
+                    const currentShape = explorer.Current();
+                    const face = oc.TopoDS.Face_1(currentShape);
+
+                    // Check if planar
+                    const surface = oc.BRep_Tool.Surface_2(face);
+                    let isPlanar = false;
+                    if (surface && oc.GeomAdaptor_Surface_2) {
+                        const adaptor = new oc.GeomAdaptor_Surface_2(surface);
+                        const typeVal = adaptor.GetType();
+                        const typeNum = typeof typeVal === 'object' ? typeVal.value : typeVal;
+                        isPlanar = typeNum === 0;
+                    }
+
+                    if (isPlanar) {
+                        // Extract vertices
+                        const vertices = [];
+                        const wireExplorer = new oc.TopExp_Explorer_2(
+                            face,
+                            oc.TopAbs_ShapeEnum.TopAbs_WIRE,
+                            oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+                        );
+
+                        if (wireExplorer.More()) {
+                            const wireShape = wireExplorer.Current();
+                            const wire = oc.TopoDS.Wire_1(wireShape);
+                            const edgeExplorer = oc.BRepTools_WireExplorer_2
+                                ? new oc.BRepTools_WireExplorer_2(wire)
+                                : null;
+
+                            if (edgeExplorer) {
+                                while (edgeExplorer.More()) {
+                                    const edge = oc.TopoDS.Edge_1(edgeExplorer.Current());
+                                    if (oc.BRepAdaptor_Curve_2) {
+                                        const curveAdaptor = new oc.BRepAdaptor_Curve_2(edge);
+                                        const pnt = curveAdaptor.Value(curveAdaptor.FirstParameter());
+                                        vertices.push([pnt.X(), pnt.Y(), pnt.Z()]);
+                                    }
+                                    edgeExplorer.Next();
+                                }
+                            }
+                        }
+
+                        if (vertices.length >= 3) {
+                            // Prepare 2D coordinates
+                            const basis = computeFaceBasisFromLoop(vertices);
+                            const projected = projectFaceLoopsTo2D({ outer: vertices, holes: [] }, basis);
+                            const normalized = normalizeWinding(projected);
+                            const merged = bridgeAllHoles(normalized.outer2d, normalized.holes2d);
+
+                            const flatCoords = [];
+                            for (const p of merged) {
+                                flatCoords.push(p[0], p[1]);
+                            }
+
+                            const points3d = merged.map(p => [p[0], p[1], 0]);
+
+                            // Benchmark earcut
+                            const earcutStart = performance.now();
+                            const earcutIndices = earcut(flatCoords);
+                            const earcutTime = performance.now() - earcutStart;
+
+                            // Benchmark GPU ear-clipping
+                            const gpuStart = performance.now();
+                            const gpuTriangles = await earClipping(points3d);
+                            const gpuTime = performance.now() - gpuStart;
+
+                            results.push({
+                                faceIndex,
+                                vertexCount: merged.length,
+                                earcut: {
+                                    time: earcutTime,
+                                    triangles: earcutIndices.length / 3,
+                                },
+                                gpu: {
+                                    time: gpuTime,
+                                    triangles: gpuTriangles.length,
+                                },
+                                speedup: gpuTime / earcutTime,
+                            });
+                        }
+                    }
+
+                    explorer.Next();
+                    faceIndex++;
+                }
+
+                return { success: true, results };
+
+            } catch (e) {
+                return { success: false, error: e.message };
+            }
+        };
+
+        initialize();
+    </script>
+</body>
+</html>

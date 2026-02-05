@@ -193,23 +193,28 @@ export interface ConicalSurface {
 /**
  * Evaluate conical surface at (u, v)
  * u = angle around axis
- * v = distance along axis from apex
+ * v = distance along the cone generator (slant line), NOT height
  *
- * Local radius at height v: r(v) = radius + v * tan(semiAngle)
- * P = location + r(v) * cos(u) * X + r(v) * sin(u) * Y + v * Z
+ * OpenCascade parameterization:
+ * - localRadius = radius + v * sin(semiAngle)
+ * - z = v * cos(semiAngle)
+ * P = location + localRadius * cos(u) * X + localRadius * sin(u) * Y + z * Z
  */
 export function evaluateCone(surface: ConicalSurface, u: number, v: number): Vec3 {
     const { location, axis, refDirection } = surface.placement;
     const yDir = computeYDirection(surface.placement);
 
-    const localRadius = surface.radius + v * Math.tan(surface.semiAngle);
+    const cosAngle = Math.cos(surface.semiAngle);
+    const sinAngle = Math.sin(surface.semiAngle);
+    const localRadius = surface.radius + v * sinAngle;
+    const z = v * cosAngle;
     const cosU = Math.cos(u);
     const sinU = Math.sin(u);
 
     return [
-        location[0] + localRadius * cosU * refDirection[0] + localRadius * sinU * yDir[0] + v * axis[0],
-        location[1] + localRadius * cosU * refDirection[1] + localRadius * sinU * yDir[1] + v * axis[1],
-        location[2] + localRadius * cosU * refDirection[2] + localRadius * sinU * yDir[2] + v * axis[2]
+        location[0] + localRadius * cosU * refDirection[0] + localRadius * sinU * yDir[0] + z * axis[0],
+        location[1] + localRadius * cosU * refDirection[1] + localRadius * sinU * yDir[1] + z * axis[1],
+        location[2] + localRadius * cosU * refDirection[2] + localRadius * sinU * yDir[2] + z * axis[2]
     ];
 }
 

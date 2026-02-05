@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Diagnose Simple STEP Files</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #eee; }
+        .pass { color: #4ade80; }
+        .fail { color: #f87171; }
+        .info { color: #60a5fa; }
+        .warn { color: #fbbf24; }
+        #log { white-space: pre-wrap; max-height: 70vh; overflow-y: auto; border: 1px solid #333; padding: 10px; font-size: 12px; }
+        button { margin: 5px; padding: 10px; }
+        .controls { margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Diagnose Simple STEP Files</h1>
+    <p>Uses the actual tessellator.ts to parse files and shows detailed face info</p>
+    <div class="controls">
+        <button onclick="diagnose('step-examples/c1-triangulation/convex/triangle.step')">triangle.step (FAILING)</button>
+        <button onclick="diagnose('step-examples/c1-triangulation/convex/ccw-square.step')">ccw-square.step (WORKING)</button>
+        <button onclick="diagnose('step-examples/c1-triangulation/convex/hexagon.step')">hexagon.step (FAILING)</button>
+        <button onclick="diagnose('step-examples/c4-multiface/unit-box.step')">unit-box.step (WORKING)</button>
+    </div>
+    <div id="log"></div>
+
+    <script type="module">
+        // Intercept console.log to capture debug output
+        const originalLog = console.log;
+        const originalWarn = console.warn;
+        const originalError = console.error;
+
+        function addToLog(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const span = document.createElement('span');
+            span.className = type;
+            const text = typeof message === 'object' ? JSON.stringify(message, null, 2) : String(message);
+            span.textContent = text + '\n';
+            logDiv.appendChild(span);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        console.log = function(...args) {
+            originalLog.apply(console, args);
+            const message = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+            // Only show OCC debug messages and our own messages
+            if (message.includes('[OCC]') || message.includes('[Tessellate]') || message.includes('[parseStepWithOCC]') ||
+                message.includes('[extractFacesWithEdges]') || message.includes('[tessellatePlanarFace]') ||
+                message.includes('[Checkpoint]') || message.includes('XCAF')) {
+                addToLog(message, 'info');
+            }
+        };
+
+        console.warn = function(...args) {
+            originalWarn.apply(console, args);
+            const message = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+            addToLog('WARN: ' + message, 'warn');
+        };
+
+        console.error = function(...args) {
+            originalError.apply(console, args);
+            const message = args.map(a => typeof a === 'object' ? JSON.stringify(a) : String(a)).join(' ');
+            addToLog('ERROR: ' + message, 'fail');
+        };
+
+        // Import the tessellator which we know works
+        import { parseStepFile } from '/src/tessellator.ts';
+        import {
+            tessellationProfile,
+            resetTessellationProfile,
+            getTessellationProfileReport
+        } from '/src/occ-test.ts';
+
+        function log(message, type = 'info') {
+            addToLog(message, type);
+            originalLog(message);
+        }
+
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+        }
+
+        window.diagnose = async function(path) {
+            clearLog();
+            log(`${'='.repeat(60)}`, 'info');
+            log(`Diagnosing: ${path}`, 'info');
+            log('='.repeat(60), 'info');
+
+            try {
+                // Fetch the file
+                const response = await fetch('/' + path);
+                const content = await response.text();
+                log(`File size: ${content.length} bytes`, 'info');
+
+                // Parse the STEP file content to see structure
+                log('\n--- STEP File Structure ---', 'info');
+                const lines = content.split('\n');
+                let advancedFaceCount = 0;
+                let edgeLoopCount = 0;
+                let orientedEdgeCount = 0;
+                let planeCount = 0;
+
+                for (const line of lines) {
+                    if (line.includes('ADVANCED_FACE')) advancedFaceCount++;
+                    if (line.includes('EDGE_LOOP')) edgeLoopCount++;
+                    if (line.includes('ORIENTED_EDGE')) orientedEdgeCount++;
+                    if (line.includes('PLANE')) planeCount++;
+                }
+                log(`ADVANCED_FACE: ${advancedFaceCount}`, 'info');
+                log(`EDGE_LOOP: ${edgeLoopCount}`, 'info');
+                log(`ORIENTED_EDGE: ${orientedEdgeCount}`, 'info');
+                log(`PLANE: ${planeCount}`, 'info');
+
+                // Reset profile for fresh timing
+                resetTessellationProfile();
+
+                // Parse with our tessellator
+                log('\n--- Parsing with OCC Tessellator ---', 'info');
+                const startTime = performance.now();
+
+                const contentBytes = new TextEncoder().encode(content);
+                const mesh = await parseStepFile(contentBytes);
+
+                const elapsed = performance.now() - startTime;
+                log(`Parsing completed in ${elapsed.toFixed(0)}ms`, 'pass');
+
+                // Check results
+                const vertexCount = mesh.positions.length / 3;
+                const triangleCount = mesh.indices.length / 3;
+
+                log('\n--- Results ---', 'info');
+                log(`Vertices: ${vertexCount}`, vertexCount > 0 ? 'pass' : 'fail');
+                log(`Triangles: ${triangleCount}`, triangleCount > 0 ? 'pass' : 'fail');
+
+                if (mesh.normals) {
+                    log(`Normals: ${mesh.normals.length / 3}`, 'info');
+                }
+                if (mesh.vertexColors) {
+                    log(`Vertex colors: ${mesh.vertexColors.length / 4}`, 'info');
+                }
+
+                // Print profiling info
+                log('\n--- Profile ---', 'info');
+                log(getTessellationProfileReport(), 'info');
+
+                // Print first few vertices if we have them
+                if (vertexCount > 0) {
+                    log('\n--- First 10 Vertices ---', 'info');
+                    for (let i = 0; i < Math.min(10, vertexCount); i++) {
+                        const x = mesh.positions[i * 3];
+                        const y = mesh.positions[i * 3 + 1];
+                        const z = mesh.positions[i * 3 + 2];
+                        log(`  [${i}] (${x.toFixed(4)}, ${y.toFixed(4)}, ${z.toFixed(4)})`, 'info');
+                    }
+                }
+
+                // Print triangles
+                if (triangleCount > 0) {
+                    log('\n--- First 10 Triangles ---', 'info');
+                    for (let i = 0; i < Math.min(10, triangleCount); i++) {
+                        const a = mesh.indices[i * 3];
+                        const b = mesh.indices[i * 3 + 1];
+                        const c = mesh.indices[i * 3 + 2];
+                        log(`  [${i}] (${a}, ${b}, ${c})`, 'info');
+                    }
+                }
+
+            } catch (e) {
+                log(`ERROR: ${e.message}`, 'fail');
+                log(e.stack, 'fail');
+            }
+        };
+
+        log('Ready - click a button to diagnose a file', 'pass');
+    </script>
+</body>
+</html>

@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Diagnose STEP Parsing</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #eee; }
+        .pass { color: #4ade80; }
+        .fail { color: #f87171; }
+        .info { color: #60a5fa; }
+        .warn { color: #fbbf24; }
+        #log { white-space: pre-wrap; }
+        button { margin: 5px; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Diagnose STEP Parsing Issues</h1>
+    <div id="controls">
+        <button onclick="diagnoseFile('step-examples/c1-triangulation/convex/triangle.step')">Test triangle.step (FAILING)</button>
+        <button onclick="diagnoseFile('step-examples/c1-triangulation/convex/ccw-square.step')">Test ccw-square.step (WORKING)</button>
+        <button onclick="diagnoseFile('step-examples/c1-triangulation/convex/hexagon.step')">Test hexagon.step (FAILING)</button>
+        <button onclick="diagnoseFile('step-examples/c4-multiface/unit-box.step')">Test unit-box.step (WORKING)</button>
+    </div>
+    <div id="log"></div>
+
+    <script type="module">
+        // Import WASM URL
+        import wasmUrl from 'opencascade.js/dist/opencascade.wasm?url';
+
+        let oc = null;
+
+        async function initOC() {
+            if (oc) return oc;
+            log('Initializing OpenCascade.js...', 'info');
+            const startTime = performance.now();
+
+            // Use the same pattern as occ-test.ts
+            const { default: opencascade } = await import('opencascade.js/dist/opencascade.js');
+
+            oc = await opencascade({
+                locateFile: (file) => {
+                    return '/node_modules/opencascade.js/dist/' + file;
+                }
+            });
+
+            log(`OpenCascade.js core initialized in ${(performance.now() - startTime).toFixed(0)}ms`, 'info');
+
+            // Load dynamic libraries needed for STEP reading (same as occ-test.ts)
+            const xcafLibs = [
+                // Core geometry/topology
+                'module.TKMath.wasm',
+                'module.TKG2d.wasm',
+                'module.TKG3d.wasm',
+                'module.TKGeomBase.wasm',
+                'module.TKGeomAlgo.wasm',
+                'module.TKBRep.wasm',
+                'module.TKTopAlgo.wasm',
+                'module.TKShHealing.wasm',
+                // Document framework
+                'module.TKCDF.wasm',
+                'module.TKLCAF.wasm',
+                'module.TKCAF.wasm',
+                // XCAF
+                'module.TKVCAF.wasm',
+                'module.TKXCAF.wasm',
+                // STEP I/O
+                'module.TKXSBase.wasm',
+                'module.TKSTEPBase.wasm',
+                'module.TKSTEP209.wasm',
+                'module.TKSTEPAttr.wasm',
+                'module.TKSTEP.wasm',
+                'module.TKXDESTEP.wasm',
+                // Meshing
+                'module.TKMesh.wasm',
+            ];
+
+            log('Loading dynamic libraries for STEP support...', 'info');
+            for (const lib of xcafLibs) {
+                try {
+                    const libPath = '/node_modules/opencascade.js/dist/' + lib;
+                    await oc.loadDynamicLibrary(libPath, {loadAsync: true, global: true, nodelete: true, allowUndefined: true});
+                } catch (err) {
+                    log(`Warning: Failed to load ${lib}: ${err.message}`, 'warn');
+                }
+            }
+
+            log(`OpenCascade.js fully initialized in ${(performance.now() - startTime).toFixed(0)}ms`, 'pass');
+            return oc;
+        }
+
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const span = document.createElement('span');
+            span.className = type;
+            span.textContent = message + '\n';
+            logDiv.appendChild(span);
+            console.log(message);
+        }
+
+        window.diagnoseFile = async function(path) {
+            log(`\n${'='.repeat(60)}`, 'info');
+            log(`Diagnosing: ${path}`, 'info');
+            log('='.repeat(60), 'info');
+
+            try {
+                // Fetch the file
+                const response = await fetch('/' + path);
+                const content = await response.text();
+                log(`File size: ${content.length} bytes`, 'info');
+
+                // Initialize OCC
+                await initOC();
+
+                // Write file to virtual filesystem
+                const fileName = 'test_' + Date.now() + '.step';
+                const encoder = new TextEncoder();
+                const fileData = encoder.encode(content);
+                oc.FS.writeFile('/' + fileName, fileData);
+                log(`Written to virtual FS: /${fileName}`, 'info');
+
+                // Create reader (check for different API versions)
+                let reader;
+                if (oc.STEPControl_Reader_1) {
+                    reader = new oc.STEPControl_Reader_1();
+                } else if (oc.STEPControl_Reader) {
+                    reader = new oc.STEPControl_Reader();
+                } else {
+                    throw new Error('STEPControl_Reader not found');
+                }
+
+                // Read from virtual FS
+                const readResult = reader.ReadFile('/' + fileName);
+                log(`ReadFile result: ${JSON.stringify(readResult)}`, 'info');
+
+                // Check if read succeeded
+                const isDone = readResult === 0 ||
+                               (typeof readResult === 'object' && (readResult.value === 0 || readResult.value === 1));
+                if (!isDone) {
+                    log(`ReadFile FAILED`, 'fail');
+                    oc.FS.unlink('/' + fileName);
+                    return;
+                }
+                log(`ReadFile succeeded`, 'pass');
+
+                // Transfer roots
+                try {
+                    if (reader.TransferRoots) {
+                        try {
+                            reader.TransferRoots();
+                        } catch (e) {
+                            if (oc.Message_ProgressRange_1) {
+                                reader.TransferRoots(new oc.Message_ProgressRange_1());
+                            }
+                        }
+                    } else if (reader.TransferRoot) {
+                        reader.TransferRoot();
+                    }
+                    log(`TransferRoots succeeded`, 'pass');
+                } catch (e) {
+                    log(`TransferRoots error: ${e.message}`, 'fail');
+                }
+
+                // Get shape
+                const shape = reader.OneShape();
+
+                // Clean up virtual FS
+                try { oc.FS.unlink('/' + fileName); } catch (e) {}
+                const shapeType = shape.ShapeType();
+                const shapeTypeNames = ['COMPOUND', 'COMPSOLID', 'SOLID', 'SHELL', 'FACE', 'WIRE', 'EDGE', 'VERTEX', 'SHAPE'];
+                log(`Shape type: ${shapeTypeNames[shapeType.value]} (${shapeType.value})`, 'info');
+
+                // Count faces
+                const faceExplorer = new oc.TopExp_Explorer_2(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+                let faceCount = 0;
+                while (faceExplorer.More()) {
+                    faceCount++;
+                    const face = oc.TopoDS.Face_1(faceExplorer.Current());
+                    log(`  Face ${faceCount}: ShapeType=${face.ShapeType().value}`, 'info');
+
+                    // Check if face is null
+                    if (face.IsNull()) {
+                        log(`    Face is NULL!`, 'fail');
+                    } else {
+                        // Get surface type
+                        const surface = oc.BRep_Tool.Surface_2(face);
+                        if (!surface.IsNull()) {
+                            const surfaceType = surface.get().DynamicType().get().Name();
+                            log(`    Surface type: ${surfaceType}`, 'info');
+                        }
+
+                        // Count wires
+                        const wireExplorer = new oc.TopExp_Explorer_2(face, oc.TopAbs_ShapeEnum.TopAbs_WIRE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+                        let wireCount = 0;
+                        while (wireExplorer.More()) {
+                            wireCount++;
+                            const wire = oc.TopoDS.Wire_1(wireExplorer.Current());
+
+                            // Count edges in wire
+                            const edgeExplorer = new oc.TopExp_Explorer_2(wire, oc.TopAbs_ShapeEnum.TopAbs_EDGE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+                            let edgeCount = 0;
+                            while (edgeExplorer.More()) {
+                                edgeCount++;
+                                edgeExplorer.Next();
+                            }
+                            log(`    Wire ${wireCount}: ${edgeCount} edges`, 'info');
+                            wireExplorer.Next();
+                        }
+                    }
+
+                    faceExplorer.Next();
+                }
+
+                log(`Total faces found: ${faceCount}`, faceCount > 0 ? 'pass' : 'fail');
+
+                // Try BRepMesh_IncrementalMesh
+                log('\nAttempting BRepMesh_IncrementalMesh...', 'info');
+                const linDeflection = 0.1;
+                const angDeflection = 0.5;
+                const mesh = new oc.BRepMesh_IncrementalMesh_2(shape, linDeflection, false, angDeflection, false);
+                mesh.Perform_1(new oc.Message_ProgressRange_1());
+
+                if (mesh.IsDone()) {
+                    log('BRepMesh completed', 'pass');
+                } else {
+                    log('BRepMesh FAILED', 'fail');
+                }
+
+                // Now iterate faces again and check triangulation
+                const faceExplorer2 = new oc.TopExp_Explorer_2(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE, oc.TopAbs_ShapeEnum.TopAbs_SHAPE);
+                let faceIdx = 0;
+                let totalTriangles = 0;
+                let totalNodes = 0;
+
+                while (faceExplorer2.More()) {
+                    faceIdx++;
+                    const face = oc.TopoDS.Face_1(faceExplorer2.Current());
+                    const location = new oc.TopLoc_Location_1();
+                    const triangulation = oc.BRep_Tool.Triangulation(face, location, 0);
+
+                    if (triangulation.IsNull()) {
+                        log(`  Face ${faceIdx}: NO TRIANGULATION`, 'fail');
+                    } else {
+                        const nbNodes = triangulation.get().NbNodes();
+                        const nbTriangles = triangulation.get().NbTriangles();
+                        totalNodes += nbNodes;
+                        totalTriangles += nbTriangles;
+                        log(`  Face ${faceIdx}: ${nbNodes} nodes, ${nbTriangles} triangles`, 'pass');
+                    }
+
+                    faceExplorer2.Next();
+                }
+
+                log(`\nTotal: ${totalNodes} nodes, ${totalTriangles} triangles`, totalTriangles > 0 ? 'pass' : 'fail');
+
+            } catch (e) {
+                log(`ERROR: ${e.message}`, 'fail');
+                console.error(e);
+            }
+        };
+
+        // Initialize on load
+        initOC().catch(e => log('Init error: ' + e.message, 'fail'));
+    </script>
+</body>
+</html>

@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OCC Tessellator Benchmarks</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #eee; }
+        .pass { color: #4ade80; }
+        .fail { color: #f87171; }
+        .info { color: #60a5fa; }
+        .warn { color: #fbbf24; }
+        #log { white-space: pre-wrap; max-height: 600px; overflow-y: auto; }
+        table { border-collapse: collapse; margin: 20px 0; }
+        th, td { border: 1px solid #444; padding: 8px 12px; text-align: right; }
+        th { background: #333; }
+        .faster { color: #4ade80; }
+        .slower { color: #f87171; }
+    </style>
+</head>
+<body>
+    <h1>OCC Tessellator Benchmark Suite</h1>
+    <p>Comparing: OpenCascade.js + GPU Tessellation vs occt-import-js</p>
+    <div id="status">Initializing...</div>
+    <div id="log"></div>
+    <div id="results"></div>
+
+    <script type="module">
+        import { parseStepFile } from '/src/tessellator.ts';
+        import {
+            tessellationProfile,
+            resetTessellationProfile,
+            getTessellationProfileReport,
+            parseStepWithOcctImportSimple
+        } from '/src/occ-test.ts';
+        import { getGPUDevice } from '/src/lib.ts';
+
+        // Expose benchmark functions to window for Puppeteer access
+        window.benchmark = {
+            // Parse with our OCC + GPU pipeline
+            async runOCC(stepContent) {
+                try {
+                    resetTessellationProfile();
+                    const startTime = performance.now();
+
+                    let content = stepContent;
+                    if (typeof stepContent === 'string') {
+                        content = new TextEncoder().encode(stepContent);
+                    }
+
+                    const mesh = await parseStepFile(content);
+                    const totalTime = performance.now() - startTime;
+
+                    // Extract phase timings from profile
+                    const profile = tessellationProfile;
+
+                    return {
+                        success: true,
+                        totalTime,
+                        vertexCount: mesh.positions.length / 3,
+                        triangleCount: mesh.indices.length / 3,
+                        hasNormals: !!mesh.normals,
+                        hasColors: !!mesh.vertexColors,
+                        phases: {
+                            // Top-level phases (the main overhead)
+                            loadStepFile: profile.loadStepFile.total,
+                            // loadStepFile sub-phases
+                            loadStepFile_initOC: profile.loadStepFile_initOC.total,
+                            loadStepFile_createDoc: profile.loadStepFile_createDoc.total,
+                            loadStepFile_readFile: profile.loadStepFile_readFile.total,
+                            loadStepFile_transfer: profile.loadStepFile_transfer.total,
+                            loadStepFile_getTools: profile.loadStepFile_getTools.total,
+                            loadStepFile_colorParsing: profile.loadStepFile_colorParsing.total,
+                            extractFacesWithEdges: profile.extractFacesWithEdges.total,
+                            // Tessellation phases
+                            tessellateOCCShape: profile.tessellateOCCShape.total,
+                            tessellatePlanarFace: profile.tessellatePlanarFace.total,
+                            tessellateCurvedFace: profile.tessellateCurvedFace.total,
+                            earClipping: profile.earClipping.total,
+                            computeNormals: profile.computeNormals.total,
+                            meshAssembly: profile.meshAssembly.total,
+                        },
+                        profileReport: getTessellationProfileReport()
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message + '\n' + e.stack };
+                }
+            },
+
+            // Parse with occt-import-js
+            async runOcctImport(stepContent) {
+                try {
+                    const result = await parseStepWithOcctImportSimple(stepContent);
+                    return {
+                        success: result.success,
+                        totalTime: result.totalTime,
+                        vertexCount: result.vertexCount,
+                        triangleCount: result.triangleCount,
+                        meshCount: result.meshCount,
+                    };
+                } catch (e) {
+                    return { success: false, error: e.message };
+                }
+            },
+
+            // Check WebGPU
+            async checkWebGPU() {
+                try {
+                    const device = await getGPUDevice();
+                    return { available: true };
+                } catch (e) {
+                    return { available: false, error: e.message };
+                }
+            },
+
+            // occt-import-js is initialized lazily via parseStepWithOcctImportSimple
+            async init() {
+                return { ready: true };
+            }
+        };
+
+        // Log function
+        function log(message, type = 'info') {
+            const logDiv = document.getElementById('log');
+            const span = document.createElement('span');
+            span.className = type;
+            span.textContent = message + '\n';
+            logDiv.appendChild(span);
+            console.log(message);
+        }
+
+        // Initialize
+        async function init() {
+            const statusDiv = document.getElementById('status');
+
+            try {
+                // Check WebGPU
+                const gpuResult = await window.benchmark.checkWebGPU();
+                if (!gpuResult.available) {
+                    statusDiv.innerHTML = '<span class="fail">WebGPU not available: ' + gpuResult.error + '</span>';
+                    return;
+                }
+                log('WebGPU available', 'pass');
+
+                // Initialize occt-import-js
+                await window.benchmark.init();
+                log('occt-import-js initialized', 'pass');
+
+                statusDiv.innerHTML = '<span class="pass">Ready for benchmarks</span>';
+                window.benchmarkReady = true;
+                log('Benchmark harness ready', 'pass');
+            } catch (e) {
+                statusDiv.innerHTML = '<span class="fail">Initialization failed: ' + e.message + '</span>';
+                log('Error: ' + e.message, 'fail');
+            }
+        }
+
+        init();
+    </script>
+</body>
+</html>

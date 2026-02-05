@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Debug Cylinder Hole UV Coordinates</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #1a1a1a; color: #eee; }
+        #log { white-space: pre-wrap; font-size: 12px; }
+        .info { color: #60a5fa; }
+        .warn { color: #fbbf24; }
+        .error { color: #f87171; }
+        .success { color: #4ade80; }
+        canvas { border: 1px solid #444; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <h1>Debug Cylinder Hole UV Coordinates</h1>
+    <p>Testing UV extraction and bridging for cylinder-with-hole.step</p>
+    <canvas id="uvCanvas" width="800" height="400"></canvas>
+    <div id="log"></div>
+
+    <script type="module">
+        import { parseStepFile } from '/src/tessellator.ts';
+
+        function log(msg, type = 'info') {
+            const div = document.getElementById('log');
+            const span = document.createElement('span');
+            span.className = type;
+            span.textContent = msg + '\n';
+            div.appendChild(span);
+            console.log(msg);
+        }
+
+        function drawUVSpace(outer, holes, canvas) {
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width;
+            const height = canvas.height;
+            const padding = 40;
+
+            // Clear
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, width, height);
+
+            if (!outer || outer.length === 0) {
+                ctx.fillStyle = '#f87171';
+                ctx.fillText('No outer boundary', 10, 20);
+                return;
+            }
+
+            // Find bounds
+            let uMin = Infinity, uMax = -Infinity;
+            let vMin = Infinity, vMax = -Infinity;
+            for (const [u, v] of outer) {
+                uMin = Math.min(uMin, u);
+                uMax = Math.max(uMax, u);
+                vMin = Math.min(vMin, v);
+                vMax = Math.max(vMax, v);
+            }
+            for (const hole of holes) {
+                for (const [u, v] of hole) {
+                    uMin = Math.min(uMin, u);
+                    uMax = Math.max(uMax, u);
+                    vMin = Math.min(vMin, v);
+                    vMax = Math.max(vMax, v);
+                }
+            }
+
+            const uRange = uMax - uMin || 1;
+            const vRange = vMax - vMin || 1;
+            const scaleU = (width - 2 * padding) / uRange;
+            const scaleV = (height - 2 * padding) / vRange;
+
+            function toCanvas(u, v) {
+                return [
+                    padding + (u - uMin) * scaleU,
+                    height - padding - (v - vMin) * scaleV
+                ];
+            }
+
+            // Draw grid
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 0.5;
+            for (let u = Math.floor(uMin); u <= Math.ceil(uMax); u++) {
+                const [x, _] = toCanvas(u, vMin);
+                ctx.beginPath();
+                ctx.moveTo(x, padding);
+                ctx.lineTo(x, height - padding);
+                ctx.stroke();
+            }
+            for (let v = Math.floor(vMin); v <= Math.ceil(vMax); v++) {
+                const [_, y] = toCanvas(uMin, v);
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(width - padding, y);
+                ctx.stroke();
+            }
+
+            // Draw outer boundary
+            ctx.strokeStyle = '#4ade80';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            const [startX, startY] = toCanvas(outer[0][0], outer[0][1]);
+            ctx.moveTo(startX, startY);
+            for (let i = 1; i < outer.length; i++) {
+                const [x, y] = toCanvas(outer[i][0], outer[i][1]);
+                ctx.lineTo(x, y);
+            }
+            ctx.closePath();
+            ctx.stroke();
+
+            // Draw outer vertices
+            ctx.fillStyle = '#4ade80';
+            for (let i = 0; i < outer.length; i++) {
+                const [x, y] = toCanvas(outer[i][0], outer[i][1]);
+                ctx.beginPath();
+                ctx.arc(x, y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // Draw holes
+            const holeColors = ['#f87171', '#fbbf24', '#a78bfa'];
+            for (let h = 0; h < holes.length; h++) {
+                const hole = holes[h];
+                const color = holeColors[h % holeColors.length];
+
+                ctx.strokeStyle = color;
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                const [hx, hy] = toCanvas(hole[0][0], hole[0][1]);
+                ctx.moveTo(hx, hy);
+                for (let i = 1; i < hole.length; i++) {
+                    const [x, y] = toCanvas(hole[i][0], hole[i][1]);
+                    ctx.lineTo(x, y);
+                }
+                ctx.closePath();
+                ctx.stroke();
+
+                // Draw hole vertices
+                ctx.fillStyle = color;
+                for (let i = 0; i < hole.length; i++) {
+                    const [x, y] = toCanvas(hole[i][0], hole[i][1]);
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                }
+            }
+
+            // Labels
+            ctx.fillStyle = '#eee';
+            ctx.font = '12px monospace';
+            ctx.fillText(`U: [${uMin.toFixed(2)}, ${uMax.toFixed(2)}]`, 10, 20);
+            ctx.fillText(`V: [${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`, 10, 35);
+            ctx.fillText(`Outer: ${outer.length} pts`, 10, 50);
+            ctx.fillText(`Holes: ${holes.length}`, 10, 65);
+        }
+
+        async function test() {
+            log('='.repeat(60), 'info');
+            log('Testing cylinder-with-hole.step UV extraction', 'info');
+            log('='.repeat(60), 'info');
+
+            try {
+                // Fetch the file
+                const response = await fetch('/step-examples/c6-trimmed/cylinder-with-hole.step');
+                const content = await response.text();
+                log(`File size: ${content.length} bytes`, 'info');
+
+                // We need to hook into the tessellation to get UV data
+                // For now, let's manually trace through what happens
+
+                // Import OCC module
+                const { initOC, extractFacesWithEdges } = await import('/src/occ-test.ts');
+
+                log('\nInitializing OpenCascade...', 'info');
+                const oc = await initOC();
+                log('OpenCascade initialized', 'success');
+
+                // Parse STEP file
+                log('\nParsing STEP file...', 'info');
+                const contentBytes = new TextEncoder().encode(content);
+
+                // Use the reader to get shapes
+                const reader = new oc.STEPControl_Reader_1();
+                const readResult = reader.ReadStream(new oc.IFStream(contentBytes));
+
+                if (readResult !== 1) { // IFSelect_RetDone = 1
+                    log(`Read failed with status ${readResult}`, 'error');
+                    return;
+                }
+
+                reader.TransferRoots(new oc.Message_ProgressRange_1());
+                const shape = reader.OneShape();
+                log('STEP file parsed', 'success');
+
+                // Extract faces with edges
+                log('\nExtracting faces...', 'info');
+                const { faces } = await extractFacesWithEdges(oc, shape, false);
+                log(`Found ${faces.length} faces`, 'info');
+
+                // Find cylindrical face with holes
+                for (let i = 0; i < faces.length; i++) {
+                    const face = faces[i];
+                    log(`\nFace ${i}: ${face.surfaceType}, outerLoop=${face.outerLoop.length} edges, innerLoops=${face.innerLoops.length}`, 'info');
+
+                    if (face.surfaceType === 'Cylinder' && face.innerLoops.length > 0) {
+                        log(`\n*** Found cylindrical face with ${face.innerLoops.length} holes ***`, 'success');
+
+                        // Get UV coordinates using the same logic as tessellateCurvedFaceFromOCC
+                        const { getFaceTrimLoopsUV_debug } = await import('/src/occ-test.ts');
+
+                        // We can't easily call the internal function, so let's trace manually
+                        log(`\nFace UV bounds from OCC: U=[${face.uvBounds.uMin.toFixed(3)}, ${face.uvBounds.uMax.toFixed(3)}], V=[${face.uvBounds.vMin.toFixed(3)}, ${face.uvBounds.vMax.toFixed(3)}]`, 'info');
+
+                        // Log outer loop edges
+                        log(`\nOuter loop edges:`, 'info');
+                        for (let e = 0; e < face.outerLoop.length; e++) {
+                            const edge = face.outerLoop[e];
+                            log(`  Edge ${e}: ${edge.curveType}, (${edge.startPoint.x.toFixed(3)}, ${edge.startPoint.y.toFixed(3)}, ${edge.startPoint.z.toFixed(3)}) -> (${edge.endPoint.x.toFixed(3)}, ${edge.endPoint.y.toFixed(3)}, ${edge.endPoint.z.toFixed(3)})`, 'info');
+                            if (edge.sampledPoints) {
+                                log(`    Sampled points: ${edge.sampledPoints.length}`, 'info');
+                            }
+                        }
+
+                        // Log inner loop edges
+                        for (let h = 0; h < face.innerLoops.length; h++) {
+                            log(`\nInner loop ${h} edges:`, 'warn');
+                            const loop = face.innerLoops[h];
+                            for (let e = 0; e < loop.length; e++) {
+                                const edge = loop[e];
+                                log(`  Edge ${e}: ${edge.curveType}, (${edge.startPoint.x.toFixed(3)}, ${edge.startPoint.y.toFixed(3)}, ${edge.startPoint.z.toFixed(3)}) -> (${edge.endPoint.x.toFixed(3)}, ${edge.endPoint.y.toFixed(3)}, ${edge.endPoint.z.toFixed(3)})`, 'warn');
+                                if (edge.sampledPoints) {
+                                    log(`    Sampled points: ${edge.sampledPoints.length}`, 'warn');
+                                }
+                            }
+                        }
+                    }
+                }
+
+            } catch (e) {
+                log(`ERROR: ${e.message}`, 'error');
+                log(e.stack, 'error');
+            }
+        }
+
+        test();
+    </script>
+</body>
+</html>
