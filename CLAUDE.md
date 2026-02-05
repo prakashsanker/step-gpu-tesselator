@@ -97,6 +97,20 @@ All GPU operations use a shared WebGPU device obtained via `lib.ts:getGPUDevice(
 - The ear clipping algorithm runs iteratively on CPU but executes compute shaders on GPU each iteration
 
 
+## Critical Dependencies
+
+**IMPORTANT - OpenCascade.js Version**: This project requires `opencascade.js@2.0.0-beta.fdece36` (NOT the stable 1.1.1 version). The beta version includes:
+- XCAF support for colors and document structure
+- Dynamic module loading (`loadDynamicLibrary`)
+- All the `module.TK*.wasm` files needed for STEP parsing
+
+If you ever need to reinstall node_modules:
+1. Make sure `package.json` has `"opencascade.js": "2.0.0-beta.fdece36"`
+2. Run `npm install` (not yarn, to avoid lock file conflicts)
+3. Verify the install by checking that `node_modules/opencascade.js/dist/` contains many `module.*.wasm` files
+
+The stable npm version (1.1.1) is a minimal build that does NOT support STEP file parsing properly.
+
 ## Testing
 
 **IMPORTANT**: When testing STEP file rendering, always use `tests/visual-validation.html` instead of `occ-test.html` or `occ-test.js`. The visual validation harness provides proper screenshot comparison and regression testing.
@@ -104,4 +118,26 @@ All GPU operations use a shared WebGPU device obtained via `lib.ts:getGPUDevice(
 ## Style
 
 1. Prefer descriptive variable names.
-2. Instead of using ternary operators, prefer using if statements. 
+2. Instead of using ternary operators, prefer using if statements.
+
+## Debugging Approach
+
+When debugging tessellation issues, **always explain problems visually using ASCII diagrams** before attempting a fix. This helps ensure the problem and proposed solution are clearly understood. For example:
+
+```
+Problem: UV boundary crosses seam
+┌─────────────────┐
+│ B               │
+│ │               │  Point A at V=+π
+│ │   JUMP!       │  Point B at V=-π
+│ └───────────────┤ A  (they're neighbors in 3D but far apart in UV)
+└─────────────────┘
+
+Fix: Shift V to [0, 2π] range
+┌─────────────────┐
+│                 │
+│    ┌───────┐    │  Now A and B are adjacent
+│    │ A───B │    │  (continuous boundary)
+│    └───────┘    │
+└─────────────────┘
+``` 

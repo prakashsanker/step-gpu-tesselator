@@ -167,10 +167,44 @@ yarn dev
 
 ---
 
+## Progress: Planar Faces with Holes (2026-02-04)
+
+### Fixes Applied
+
+1. **Edge orientation fix for curved edges** (`occ-test.ts`)
+   - Curved edges (Circle, BSpline, etc.) weren't being sampled in the correct direction
+   - Added logic to detect reversed edges by comparing sampled start point with `TopExp.FirstVertex`
+   - If the last sampled point is closer to startPoint, reverse the sampled points array
+
+2. **Reliable outer wire identification** (`occ-test.ts`)
+   - Previously used "longest wire = outer" heuristic which could fail
+   - Now uses `BRepTools.OuterWire(face)` for reliable outer wire detection
+
+3. **earcut for planar faces with holes** (`occ-test.ts`, `triangulate-fast.ts`)
+   - Planar faces WITH holes now use `triangulateWithHoles()` which calls earcut
+   - earcut natively supports holes via `holeIndices` parameter
+   - No more bridging needed (which caused artificial edges crossing the interior)
+
+### Known Limitations
+
+1. **Circular arcs vs straight lines for "hexagonal" edges**
+   - Some models represent hexagon sides as 60° circular arcs instead of LINE edges
+   - Our pipeline samples these arcs faithfully, resulting in a rounded/circular appearance
+   - The reference renderer (occt-import-js) may linearize these or use different tessellation
+   - **Impact:** Visual difference in some models (hex nuts appear circular vs hexagonal)
+   - **Workaround:** Could detect large-radius arcs and linearize, but not implemented
+
+2. **GPU optimization limited for faces with holes**
+   - Planar faces WITHOUT holes → GPU ear-clipping ✓
+   - Planar faces WITH holes → CPU earcut (no GPU) ✗
+   - **Future:** Consider GPU CDT (Constrained Delaunay Triangulation) for holes
+
+---
+
 ## Next Steps
 
 Priority issues to fix:
-1. **Re-run AI visual tests** - Verify c2-holes pass rate after test file fixes
+1. **Re-run AI visual tests** - Verify c2-holes pass rate after edge orientation fixes
 2. **Cylinder trimming (5 failures)** - Inner hole bounds on curved surfaces
 3. **BSpline surfaces (2 real failures)** - Different geometry/orientation
 4. **Curved edges (2 failures)** - quarter-circle, rounded-cube

@@ -38,7 +38,7 @@
 
         .render-container {
             display: grid;
-            grid-template-columns: repeat(3, 1fr);
+            grid-template-columns: repeat(2, 1fr);
             gap: 10px;
             margin-bottom: 20px;
         }
@@ -250,14 +250,7 @@
         </div>
         <div class="render-panel">
             <div class="render-header">
-                <h3>Our Pipeline (CDT)</h3>
-                <span class="render-stats" id="stats-cdt">-</span>
-            </div>
-            <canvas id="canvas-cdt" class="render-canvas"></canvas>
-        </div>
-        <div class="render-panel">
-            <div class="render-header">
-                <h3>occt-import-js</h3>
+                <h3>occt-import-js (Reference)</h3>
                 <span class="render-stats" id="stats-occt">-</span>
             </div>
             <canvas id="canvas-occt" class="render-canvas"></canvas>
@@ -508,26 +501,7 @@
                 document.getElementById('stats-occ').textContent = occStats;
                 log(`Our pipeline (ear-clipping): ${occStats}`, 'pass');
 
-                // Run CDT pipeline (using OCC parsing with CDT triangulation)
-                setStatus('Running CDT pipeline...', 'loading');
-                log('Running our pipeline (CDT)...', 'info');
-                const cdtStart = performance.now();
-                try {
-                    const cdtMesh = await parseStepWithOCC(new TextEncoder().encode(stepContent), 'cdt');
-                    const cdtTime = performance.now() - cdtStart;
-
-                    const cdtThreeMesh = createMeshFromOurPipeline(cdtMesh);
-                    setMesh('canvas-cdt', cdtThreeMesh);
-
-                    const cdtStats = `${cdtMesh.indices.length / 3} tris, ${cdtTime.toFixed(0)}ms`;
-                    document.getElementById('stats-cdt').textContent = cdtStats;
-                    log(`Our pipeline (CDT): ${cdtStats}`, 'pass');
-                } catch (cdtError) {
-                    log(`CDT failed: ${cdtError.message}`, 'fail');
-                    document.getElementById('stats-cdt').textContent = 'Failed';
-                }
-
-                // Run occt-import-js
+                // Run occt-import-js (reference)
                 setStatus('Running occt-import-js...', 'loading');
                 log('Running occt-import-js...', 'info');
                 const occtResult = await parseStepWithOcctImportFull(stepContent);
@@ -611,8 +585,8 @@
             log(`Capturing screenshots for ${testName}...`, 'info');
 
             // Get canvas data URLs
-            const canvases = ['canvas-occ', 'canvas-cdt', 'canvas-occt'];
-            const labels = ['ear-clip', 'cdt', 'occt-import'];
+            const canvases = ['canvas-occ', 'canvas-occt'];
+            const labels = ['ear-clip', 'occt-import'];
 
             for (let i = 0; i < canvases.length; i++) {
                 const canvas = document.getElementById(canvases[i]);
@@ -634,7 +608,7 @@
         function animate() {
             requestAnimationFrame(animate);
 
-            for (const canvasId of ['canvas-occ', 'canvas-cdt', 'canvas-occt']) {
+            for (const canvasId of ['canvas-occ', 'canvas-occt']) {
                 if (renderers[canvasId] && scenes[canvasId] && cameras[canvasId]) {
                     controls[canvasId].update();
                     renderers[canvasId].render(scenes[canvasId], cameras[canvasId]);
@@ -651,7 +625,7 @@
             const sourceControls = controls[sourceId];
             const sourceCamera = cameras[sourceId];
 
-            for (const canvasId of ['canvas-occ', 'canvas-cdt', 'canvas-occt']) {
+            for (const canvasId of ['canvas-occ', 'canvas-occt']) {
                 if (canvasId !== sourceId && controls[canvasId] && cameras[canvasId]) {
                     cameras[canvasId].position.copy(sourceCamera.position);
                     cameras[canvasId].quaternion.copy(sourceCamera.quaternion);
@@ -675,13 +649,13 @@
 
                 // Initialize renderers
                 log('Initializing Three.js renderers...', 'info');
-                for (const canvasId of ['canvas-occ', 'canvas-cdt', 'canvas-occt']) {
+                for (const canvasId of ['canvas-occ', 'canvas-occt']) {
                     initRenderer(canvasId);
                 }
                 log('Renderers initialized', 'pass');
 
                 // Setup control sync
-                for (const canvasId of ['canvas-occ', 'canvas-cdt', 'canvas-occt']) {
+                for (const canvasId of ['canvas-occ', 'canvas-occt']) {
                     controls[canvasId].addEventListener('change', () => syncControls(canvasId));
                 }
 
@@ -725,7 +699,6 @@
             getStats() {
                 return {
                     occ: document.getElementById('stats-occ').textContent,
-                    cdt: document.getElementById('stats-cdt').textContent,
                     occt: document.getElementById('stats-occt').textContent,
                 };
             }
