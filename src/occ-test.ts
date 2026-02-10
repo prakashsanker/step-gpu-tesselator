@@ -81,6 +81,7 @@ import {
   tessellateTorus,
   tessellateBSplineSurface,
   tessellateTrimmedSurface,
+  type TrimmedSurfaceBuildOptions,
 } from './surface-tessellation';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
@@ -91,6 +92,18 @@ const DEBUG_OCC = false;
 function logOCC(...args: unknown[]): void {
   if (DEBUG_OCC) {
     console.log('[OCC]', ...args);
+  }
+}
+
+function curveDebugLog(...args: unknown[]): void {
+  if ((globalThis as any)?.__CURVE_VERBOSE_LOGS__ === true) {
+    console.log(...args);
+  }
+}
+
+function faceExtractionLog(...args: unknown[]): void {
+  if ((globalThis as any)?.__FACE_EXTRACTION_LOGS__ === true) {
+    console.log(...args);
   }
 }
 
@@ -2971,6 +2984,7 @@ interface FaceWithEdgesInfo {
   uvBounds: { uMin: number; uMax: number; vMin: number; vMax: number };
   outerLoop: EdgeInfo[];
   innerLoops: EdgeInfo[][]; // Holes
+  occFace?: any; // TopoDS_Face (used for robust point-in-face UV classification)
   occSurface?: any; // Handle<Geom_Surface> (used for UV projection on curved faces)
   surfaceParams?: SurfaceParams; // For curved surfaces
   color?: RGBColor; // Face color from STEP styling
@@ -3079,7 +3093,7 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
         totalEdgesInWire++;
         tempExplorer.Next();
       }
-      console.log(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex}: TopExp_Explorer found ${totalEdgesInWire} edges, hashes: [${edgeHashes.join(', ')}]`);
+      faceExtractionLog(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex}: TopExp_Explorer found ${totalEdgesInWire} edges, hashes: [${edgeHashes.join(', ')}]`);
 
       // Also count edges from WireExplorer for comparison
       let wireExplorerEdgeCount = 0;
@@ -3181,7 +3195,7 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
               // Log arc parameters for debugging (only for first few faces)
               if (faceIndex < 3 && curveType === 'Circle') {
                 const angleDegrees = (paramRange * 180 / Math.PI).toFixed(1);
-                console.log(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex} Edge ${edgeIndex}: Circle arc ${angleDegrees}° (params: ${first.toFixed(3)} to ${last.toFixed(3)})`);
+                faceExtractionLog(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex} Edge ${edgeIndex}: Circle arc ${angleDegrees}° (params: ${first.toFixed(3)} to ${last.toFixed(3)})`);
               }
               const MIN_SAMPLES = 32;
               const MAX_SAMPLES = 256;
@@ -3230,7 +3244,7 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
                 // If the last sampled point is closer to startPoint, edge is reversed
                 if (distToEnd < distToStart) {
                   sampledPoints.reverse();
-                  console.log(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex} Edge ${edgeIndex}: Reversed sampled points (edge orientation)`);
+                  faceExtractionLog(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex} Edge ${edgeIndex}: Reversed sampled points (edge orientation)`);
                 }
               }
 
@@ -3289,10 +3303,10 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
     console.error(`[OCC] Error extracting edges for face ${faceIndex}:`, e);
   }
 
-  console.log(`[extractFaceEdges] Face ${faceIndex}: Found ${wires.length} wire(s)`);
+  faceExtractionLog(`[extractFaceEdges] Face ${faceIndex}: Found ${wires.length} wire(s)`);
   for (let i = 0; i < wires.length; i++) {
     const w = wires[i];
-    console.log(`  Wire ${i}: ${w.length} edges, types: [${w.map(e => e.curveType).join(', ')}]`);
+    faceExtractionLog(`  Wire ${i}: ${w.length} edges, types: [${w.map(e => e.curveType).join(', ')}]`);
   }
 
   if (wires.length === 0) {
@@ -3327,7 +3341,7 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
       if (wireHashes[i] === outerWireHash) {
         outerIdx = i;
         usedOuterWire = true;
-        console.log(`[extractFaceEdges] Face ${faceIndex}: Using OuterWire (hash ${outerWireHash}) -> Wire ${outerIdx}`);
+        faceExtractionLog(`[extractFaceEdges] Face ${faceIndex}: Using OuterWire (hash ${outerWireHash}) -> Wire ${outerIdx}`);
         break;
       }
     }
@@ -3348,7 +3362,7 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
 
     // Log wire lengths to debug outer/inner selection
     if (wires.length > 1) {
-      console.log(`[extractFaceEdges] Face ${faceIndex}: Wire lengths: [${wireLengths.map(l => l.toFixed(2)).join(', ')}], selected outer: Wire ${outerIdx} (by length heuristic)`);
+      faceExtractionLog(`[extractFaceEdges] Face ${faceIndex}: Wire lengths: [${wireLengths.map(l => l.toFixed(2)).join(', ')}], selected outer: Wire ${outerIdx} (by length heuristic)`);
     }
   }
 
@@ -3857,7 +3871,7 @@ async function extractFacesWithEdges(
           isReversed = orientation.value === oc.TopAbs_Orientation.TopAbs_REVERSED.value;
         }
         if (faceIndex < 5) {
-          console.log(`[extractFacesWithEdges] Face ${faceIndex}: orientation=${isReversed ? 'REVERSED' : 'FORWARD'} (raw: ${orientation.value})`);
+          faceExtractionLog(`[extractFacesWithEdges] Face ${faceIndex}: orientation=${isReversed ? 'REVERSED' : 'FORWARD'} (raw: ${orientation.value})`);
         }
       } catch (e) {
         // Orientation not available, assume FORWARD
@@ -3865,11 +3879,11 @@ async function extractFacesWithEdges(
       }
 
       // Debug logging for edge extraction
-      console.log(`[extractFacesWithEdges] Face ${faceIndex}: surfaceType=${surfaceType}, outerLoop=${outerLoop.length} edges, innerLoops=${innerLoops.length}, reversed=${isReversed}`);
+      faceExtractionLog(`[extractFacesWithEdges] Face ${faceIndex}: surfaceType=${surfaceType}, outerLoop=${outerLoop.length} edges, innerLoops=${innerLoops.length}, reversed=${isReversed}`);
       if (outerLoop.length === 0) {
         console.warn(`[extractFacesWithEdges] Face ${faceIndex} has 0 edges in outerLoop!`);
       } else if (outerLoop.length > 0 && outerLoop.length < 5) {
-        console.log(`[extractFacesWithEdges] Face ${faceIndex} outerLoop edges:`, outerLoop.map(e => ({
+        faceExtractionLog(`[extractFacesWithEdges] Face ${faceIndex} outerLoop edges:`, outerLoop.map(e => ({
           curveType: e.curveType,
           start: [e.startPoint.x.toFixed(2), e.startPoint.y.toFixed(2), e.startPoint.z.toFixed(2)],
           end: [e.endPoint.x.toFixed(2), e.endPoint.y.toFixed(2), e.endPoint.z.toFixed(2)]
@@ -4044,6 +4058,7 @@ async function extractFacesWithEdges(
         uvBounds: { uMin, uMax, vMin, vMax },
         outerLoop,
         innerLoops,
+        occFace: face,
         occSurface: surface,
         surfaceParams,
         color,
@@ -4330,6 +4345,280 @@ function tessellatedMeshToVerticesAndTriangles(mesh: { positions: Float32Array; 
   return { vertices, triangles };
 }
 
+function topAbsStateToValue(state: any): number | undefined {
+  if (typeof state === 'number') return state;
+  if (state && typeof state === 'object' && typeof state.value === 'number') {
+    return state.value;
+  }
+  return undefined;
+}
+
+function topAbsStateEquals(lhs: any, rhs: any): boolean {
+  const lhsValue = topAbsStateToValue(lhs);
+  const rhsValue = topAbsStateToValue(rhs);
+  if (lhsValue !== undefined && rhsValue !== undefined) {
+    return lhsValue === rhsValue;
+  }
+  return lhs === rhs;
+}
+
+type DebugMode = 'off' | 'skip' | 'only';
+
+function readGlobalString(key: string): string | undefined {
+  const raw = (globalThis as any)?.[key];
+  return typeof raw === 'string' ? raw : undefined;
+}
+
+function readGlobalNumber(key: string): number | undefined {
+  const raw = (globalThis as any)?.[key];
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
+}
+
+function readGlobalBoolean(key: string, fallback: boolean): boolean {
+  const raw = (globalThis as any)?.[key];
+  return typeof raw === 'boolean' ? raw : fallback;
+}
+
+function readDebugModeFromGlobal(key: string, fallback: DebugMode): DebugMode {
+  const raw = readGlobalString(key)?.trim().toLowerCase();
+  if (raw === 'off' || raw === 'skip' || raw === 'only') {
+    return raw;
+  }
+  return fallback;
+}
+
+function readFaceIdsFromGlobal(key: string, fallback: number[]): Set<number> {
+  const raw = (globalThis as any)?.[key];
+  if (!raw) return new Set(fallback);
+  if (Array.isArray(raw)) {
+    const ids = raw
+      .map((v) => Number(v))
+      .filter((v) => Number.isInteger(v) && v >= 0);
+    return new Set(ids.length ? ids : fallback);
+  }
+  if (typeof raw === 'string') {
+    const ids = raw
+      .split(',')
+      .map((s) => Number(s.trim()))
+      .filter((v) => Number.isInteger(v) && v >= 0);
+    return new Set(ids.length ? ids : fallback);
+  }
+  return new Set(fallback);
+}
+
+function filterMeshTrianglesByFaceUVClassification<T extends { positions: Float32Array; indices: Uint32Array; uvs?: Float32Array }>(
+  oc: any,
+  occFace: any,
+  mesh: T,
+  options?: {
+    tol?: number;
+    recadreOnPeriodic?: boolean;
+    label?: string;
+    logAlways?: boolean;
+    sampleMode?: 'centroid' | 'multi7';
+    maxOutSamples?: number;
+    maxDropRatio?: number;
+    faceIndex?: number;
+    surfaceType?: string;
+    periodicProof?: boolean;
+  }
+): T {
+  if (!mesh.uvs || mesh.uvs.length < (mesh.positions.length / 3) * 2) {
+    return mesh;
+  }
+
+  if (!occFace || !oc?.BRepTopAdaptor_FClass2d || !oc?.gp_Pnt2d_3 || !oc?.TopAbs_State) {
+    return mesh;
+  }
+
+  const tol = options?.tol ?? 1e-7;
+  const recadreOnPeriodic = options?.recadreOnPeriodic ?? true;
+  const label = options?.label ?? 'mesh';
+  const logAlways = options?.logAlways ?? false;
+  const sampleMode = options?.sampleMode ?? 'multi7';
+  const maxOutSamples = options?.maxOutSamples ?? (sampleMode === 'multi7' ? 1 : 0);
+  const defaultMaxDropRatio = readGlobalNumber('__SEAM_MAX_DROP_RATIO__') ?? 0.35;
+  const maxDropRatio = options?.maxDropRatio ?? defaultMaxDropRatio;
+  const proofFailOpen = readGlobalBoolean('__SEAM_PROOF_FAIL_OPEN__', true);
+  const triCount = mesh.indices.length / 3;
+  const kept: number[] = [];
+  let dropped = 0;
+  let classifier: any | undefined;
+  const faceIndex = options?.faceIndex ?? -1;
+  const surfaceType = options?.surfaceType ?? 'Unknown';
+  const periodicProof = options?.periodicProof ?? false;
+  let proofRecoverableByU = 0;
+  let proofRecoverableByUV = 0;
+  let proofCheckedDropped = 0;
+
+  function classifyOut(classifierInst: any, u: number, v: number): boolean {
+    const uvPoint = new oc.gp_Pnt2d_3(u, v);
+    try {
+      const state = classifierInst.Perform(uvPoint, recadreOnPeriodic);
+      return topAbsStateEquals(state, oc.TopAbs_State.TopAbs_OUT);
+    } catch {
+      // Treat failures as OUT for proof conservatism.
+      return true;
+    } finally {
+      uvPoint.delete?.();
+    }
+  }
+
+  function outSamplesWithShiftModes(classifierInst: any, samples: Array<[number, number]>): { outU: number; outUV: number } {
+    const twoPi = Math.PI * 2;
+    let outU = 0;
+    let outUV = 0;
+    const uShifts = [-twoPi, 0, twoPi];
+    const uvShifts = surfaceType === 'Torus'
+      ? [
+          [-twoPi, -twoPi], [-twoPi, 0], [-twoPi, twoPi],
+          [0, -twoPi], [0, 0], [0, twoPi],
+          [twoPi, -twoPi], [twoPi, 0], [twoPi, twoPi],
+        ]
+      : [[0, 0]];
+
+    for (const [u, v] of samples) {
+      let uEquivalentInside = false;
+      for (const du of uShifts) {
+        if (!classifyOut(classifierInst, u + du, v)) {
+          uEquivalentInside = true;
+          break;
+        }
+      }
+      if (!uEquivalentInside) {
+        outU++;
+        if (outU > maxOutSamples) {
+          // Keep counting outUV for signal quality, but u-only already failed.
+        }
+      }
+
+      let uvEquivalentInside = false;
+      for (const [du, dv] of uvShifts) {
+        if (!classifyOut(classifierInst, u + du, v + dv)) {
+          uvEquivalentInside = true;
+          break;
+        }
+      }
+      if (!uvEquivalentInside) {
+        outUV++;
+      }
+    }
+
+    return { outU, outUV };
+  }
+
+  try {
+    classifier = new oc.BRepTopAdaptor_FClass2d(occFace, tol);
+
+    for (let i = 0; i < mesh.indices.length; i += 3) {
+      const ia = mesh.indices[i + 0];
+      const ib = mesh.indices[i + 1];
+      const ic = mesh.indices[i + 2];
+
+      const uvs = mesh.uvs!;
+      const uA = uvs[ia * 2 + 0];
+      const vA = uvs[ia * 2 + 1];
+      const uB = uvs[ib * 2 + 0];
+      const vB = uvs[ib * 2 + 1];
+      const uC = uvs[ic * 2 + 0];
+      const vC = uvs[ic * 2 + 1];
+      const uCentroid = (uA + uB + uC) / 3;
+      const vCentroid = (vA + vB + vC) / 3;
+
+      const samplePoints: Array<[number, number]> = sampleMode === 'centroid'
+        ? [[uCentroid, vCentroid]]
+        : [
+            [uA, vA],
+            [uB, vB],
+            [uC, vC],
+            [(uA + uB) / 2, (vA + vB) / 2],
+            [(uB + uC) / 2, (vB + vC) / 2],
+            [(uC + uA) / 2, (vC + vA) / 2],
+            [uCentroid, vCentroid],
+          ];
+
+      let outSamples = 0;
+      for (const [u, v] of samplePoints) {
+        try {
+          if (classifyOut(classifier, u, v)) {
+            outSamples++;
+            if (outSamples > maxOutSamples) {
+              break;
+            }
+          }
+        } catch {
+          // Ignore per-point classification failures and keep evaluating other samples.
+        }
+      }
+
+      if (outSamples <= maxOutSamples) {
+        kept.push(ia, ib, ic);
+      } else {
+        if (periodicProof) {
+          proofCheckedDropped++;
+          const { outU, outUV } = outSamplesWithShiftModes(classifier, samplePoints);
+          if (outU <= maxOutSamples) {
+            proofRecoverableByU++;
+          }
+          if (outUV <= maxOutSamples) {
+            proofRecoverableByUV++;
+          }
+        }
+        dropped++;
+      }
+    }
+  } catch (e) {
+    console.warn(`[seam-filter] ${label}: classifier setup failed, keeping original mesh`, e);
+    return mesh;
+  } finally {
+    classifier?.delete?.();
+  }
+
+  if (dropped === 0) {
+    if (logAlways) {
+      console.log(
+        `[seam-filter] ${label}: dropped 0/${triCount} triangles (kept ${triCount}) mode=${sampleMode} maxOut=${maxOutSamples}`
+      );
+    }
+    return mesh;
+  }
+
+  if (kept.length === 0) {
+    console.warn(`[seam-filter] ${label}: classifier dropped all ${triCount} triangles, keeping original mesh`);
+    return mesh;
+  }
+
+  if (periodicProof && proofFailOpen && proofCheckedDropped > 0 && proofRecoverableByUV > 0) {
+    const pctUV = (proofRecoverableByUV / proofCheckedDropped * 100).toFixed(2);
+    console.warn(
+      `[seam-filter] ${label}: proof found ${proofRecoverableByUV}/${proofCheckedDropped} dropped triangles recoverable by UV shifts (${pctUV}%), keeping original mesh`
+    );
+    return mesh;
+  }
+
+  if (triCount > 0) {
+    const dropRatio = dropped / triCount;
+    if (dropRatio > maxDropRatio) {
+      console.warn(
+        `[seam-filter] ${label}: dropped ${(dropRatio * 100).toFixed(1)}% (>${(maxDropRatio * 100).toFixed(1)}% cap), keeping original mesh`
+      );
+      return mesh;
+    }
+  }
+
+  console.log(
+    `[seam-filter] ${label}: dropped ${dropped}/${triCount} triangles (kept ${kept.length / 3}) mode=${sampleMode} maxOut=${maxOutSamples}`
+  );
+  if (periodicProof && proofCheckedDropped > 0) {
+    const pctU = (proofRecoverableByU / proofCheckedDropped * 100).toFixed(2);
+    const pctUV = (proofRecoverableByUV / proofCheckedDropped * 100).toFixed(2);
+    console.log(
+      `[seam-proof] face=${faceIndex} type=${surfaceType} dropped=${proofCheckedDropped} recoverableByU=${proofRecoverableByU} (${pctU}%) recoverableByUV=${proofRecoverableByUV} (${pctUV}%) mode=${sampleMode} maxOut=${maxOutSamples}`
+    );
+  }
+  return { ...mesh, indices: new Uint32Array(kept) } as T;
+}
+
 type Vec2 = [number, number];
 
 function wrapToPi(angleRad: number): number {
@@ -4339,6 +4628,186 @@ function wrapToPi(angleRad: number): number {
   if (angleRad > Math.PI) angleRad -= twoPi;
   if (angleRad < -Math.PI) angleRad += twoPi;
   return angleRad;
+}
+
+function unwrapPeriodicLoopU(points: Vec2[], period: number = Math.PI * 2): Vec2[] {
+  return unwrapPeriodicLoopComponent(points, 0, period);
+}
+
+function shiftLoopU(points: Vec2[], deltaU: number): Vec2[] {
+  if (deltaU === 0) return points;
+  return points.map(([u, v]): Vec2 => [u + deltaU, v]);
+}
+
+function getLoopUBounds(points: Vec2[]): { uMin: number; uMax: number } {
+  let uMin = Infinity;
+  let uMax = -Infinity;
+  for (const [u] of points) {
+    uMin = Math.min(uMin, u);
+    uMax = Math.max(uMax, u);
+  }
+  return { uMin, uMax };
+}
+
+function meanLoopU(points: Vec2[]): number {
+  if (points.length === 0) return 0;
+  let sum = 0;
+  for (const [u] of points) {
+    sum += u;
+  }
+  return sum / points.length;
+}
+
+function chooseShiftToRange(
+  uMin: number,
+  uMax: number,
+  period: number,
+  targetMin: number,
+  targetMax: number
+): number {
+  let bestK = 0;
+  let bestScore = Infinity;
+  const targetCenter = (targetMin + targetMax) * 0.5;
+
+  for (let k = -3; k <= 3; k++) {
+    const shiftedMin = uMin + k * period;
+    const shiftedMax = uMax + k * period;
+    const under = Math.max(0, targetMin - shiftedMin);
+    const over = Math.max(0, shiftedMax - targetMax);
+    const center = (shiftedMin + shiftedMax) * 0.5;
+    const centerPenalty = Math.abs(center - targetCenter) * 1e-3;
+    const score = under + over + centerPenalty;
+
+    if (score < bestScore) {
+      bestScore = score;
+      bestK = k;
+    }
+  }
+
+  return bestK;
+}
+
+function unwrapPeriodicLoopComponent(
+  points: Vec2[],
+  component: 0 | 1,
+  period: number = Math.PI * 2
+): Vec2[] {
+  if (points.length === 0) return [];
+  // Only unwrap near full-period jumps (seam crossings), not ~half-period jumps.
+  const unwrapThreshold = period * 0.75;
+  const eps = 1e-6;
+  const out: Vec2[] = [];
+
+  let offset = 0;
+  let prevUnwrapped = points[0][component];
+  out.push([points[0][0], points[0][1]]);
+
+  for (let i = 1; i < points.length; i++) {
+    const raw = points[i][component];
+    let unwrapped = raw + offset;
+    const delta = unwrapped - prevUnwrapped;
+
+    if (delta > unwrapThreshold + eps) {
+      offset -= period;
+      unwrapped = raw + offset;
+    } else if (delta < -unwrapThreshold - eps) {
+      offset += period;
+      unwrapped = raw + offset;
+    }
+
+    const nextPoint: Vec2 = [points[i][0], points[i][1]];
+    nextPoint[component] = unwrapped;
+    out.push(nextPoint);
+    prevUnwrapped = unwrapped;
+  }
+
+  return out;
+}
+
+function shiftLoopComponent(points: Vec2[], component: 0 | 1, delta: number): Vec2[] {
+  if (delta === 0) return points;
+  return points.map(([u, v]): Vec2 => {
+    if (component === 0) {
+      return [u + delta, v];
+    }
+    return [u, v + delta];
+  });
+}
+
+function getLoopComponentBounds(points: Vec2[], component: 0 | 1): { min: number; max: number } {
+  let min = Infinity;
+  let max = -Infinity;
+  for (const p of points) {
+    const value = p[component];
+    min = Math.min(min, value);
+    max = Math.max(max, value);
+  }
+  return { min, max };
+}
+
+function meanLoopComponent(points: Vec2[], component: 0 | 1): number {
+  if (points.length === 0) return 0;
+  let sum = 0;
+  for (const p of points) {
+    sum += p[component];
+  }
+  return sum / points.length;
+}
+
+function normalizePeriodicTrimLoops(
+  uvOuter: Vec2[],
+  uvHoles: Vec2[][],
+  options: {
+    periodicU: boolean;
+    periodicV: boolean;
+    periodU?: number;
+    periodV?: number;
+  }
+): { uvOuter: Vec2[]; uvHoles: Vec2[][] } {
+  let outer = uvOuter;
+  let holes = uvHoles.map((h) => h);
+  const periodU = options.periodU ?? (Math.PI * 2);
+  const periodV = options.periodV ?? (Math.PI * 2);
+
+  const normalizeComponent = (
+    component: 0 | 1,
+    period: number,
+    targetMin: number,
+    targetMax: number
+  ) => {
+    outer = unwrapPeriodicLoopComponent(outer, component, period);
+    const { min, max } = getLoopComponentBounds(outer, component);
+    const outerShiftK = chooseShiftToRange(min, max, period, targetMin, targetMax);
+    if (outerShiftK !== 0) {
+      outer = shiftLoopComponent(outer, component, outerShiftK * period);
+    }
+
+    const outerMean = meanLoopComponent(outer, component);
+    holes = holes.map((hole) => {
+      let alignedHole = unwrapPeriodicLoopComponent(hole, component, period);
+      if (outerShiftK !== 0) {
+        alignedHole = shiftLoopComponent(alignedHole, component, outerShiftK * period);
+      }
+      const holeMean = meanLoopComponent(alignedHole, component);
+      const alignK = Math.round((outerMean - holeMean) / period);
+      if (alignK !== 0) {
+        alignedHole = shiftLoopComponent(alignedHole, component, alignK * period);
+      }
+      return alignedHole;
+    });
+  };
+
+  if (options.periodicU) {
+    normalizeComponent(0, periodU, 0, periodU);
+  }
+  if (options.periodicV) {
+    normalizeComponent(1, periodV, 0, periodV);
+  }
+
+  return {
+    uvOuter: simplifyLoop2D(outer),
+    uvHoles: holes.map((h) => simplifyLoop2D(h)),
+  };
 }
 
 function simplifyLoop2D(points: Vec2[], eps: number = 1e-10): Vec2[] {
@@ -4393,32 +4862,294 @@ function projectPointsToUV(
   return simplifyLoop2D(uv);
 }
 
+function curveTypeNameFromGeomAbs(curveTypeEnum: any): string {
+  const typeValue = typeof curveTypeEnum === 'object' && curveTypeEnum !== null
+    ? curveTypeEnum.value
+    : curveTypeEnum;
+  const typeMap: Record<number, string> = {
+    0: 'Line',
+    1: 'Circle',
+    2: 'Ellipse',
+    3: 'Hyperbola',
+    4: 'Parabola',
+    5: 'BezierCurve',
+    6: 'BSplineCurve',
+    7: 'OffsetCurve',
+    8: 'OtherCurve'
+  };
+  return typeMap[typeValue] || `Unknown(${typeValue})`;
+}
+
+function curveSampleCount(curveType: string, paramRange: number): number {
+  const MIN_SAMPLES = 2;
+  const MAX_SAMPLES = 256;
+  let count = 32;
+  if (curveType === 'Line') {
+    count = 2;
+  } else if (curveType === 'Circle') {
+    // ~5.6 degree step
+    const angleStep = Math.PI / 32;
+    count = Math.ceil(Math.abs(paramRange) / angleStep);
+  } else if (curveType === 'Ellipse' || curveType === 'BSplineCurve') {
+    count = 96;
+  }
+  if (!isFinite(count)) count = 32;
+  return Math.max(MIN_SAMPLES, Math.min(MAX_SAMPLES, count));
+}
+
+function dist2D(a: Vec2, b: Vec2): number {
+  const du = a[0] - b[0];
+  const dv = a[1] - b[1];
+  return Math.sqrt(du * du + dv * dv);
+}
+
+function appendLoopSegment(loop: Vec2[], segment: Vec2[], eps: number = 1e-8): void {
+  if (segment.length === 0) return;
+  if (loop.length === 0) {
+    loop.push(...segment);
+    return;
+  }
+  const last = loop[loop.length - 1];
+  const first = segment[0];
+  if (dist2D(last, first) <= eps) {
+    loop.push(...segment.slice(1));
+  } else {
+    loop.push(...segment);
+  }
+}
+
+function sampleEdgePcurveUV(
+  oc: any,
+  edge: any,
+  occFace: any
+): Vec2[] | null {
+  if (!oc.BRepAdaptor_Curve2d_2) return null;
+
+  let adaptor2d: any | null = null;
+  try {
+    adaptor2d = new oc.BRepAdaptor_Curve2d_2(edge, occFace);
+    const first = adaptor2d.FirstParameter();
+    const last = adaptor2d.LastParameter();
+    if (!isFinite(first) || !isFinite(last) || Math.abs(last - first) < 1e-12) {
+      adaptor2d.delete?.();
+      return null;
+    }
+
+    const curveType = curveTypeNameFromGeomAbs(adaptor2d.GetType());
+    const sampleCount = curveSampleCount(curveType, last - first);
+    const sampled: Vec2[] = [];
+    for (let i = 0; i <= sampleCount; i++) {
+      const t = first + (i / sampleCount) * (last - first);
+      const p2 = adaptor2d.Value(t);
+      sampled.push([p2.X(), p2.Y()]);
+      p2.delete?.();
+    }
+
+    // Re-align to topological orientation so edge chaining is stable.
+    let startUV: Vec2 | null = null;
+    if (oc.TopExp?.FirstVertex && oc.BRep_Tool?.Parameters) {
+      try {
+        const firstVertex = oc.TopExp.FirstVertex(edge, true);
+        if (firstVertex && !firstVertex.IsNull?.()) {
+          const uvFirst = oc.BRep_Tool.Parameters(firstVertex, occFace);
+          if (uvFirst) {
+            startUV = [uvFirst.X(), uvFirst.Y()];
+            uvFirst.delete?.();
+          }
+        }
+        firstVertex?.delete?.();
+      } catch {
+        // Keep sampled order when vertex UV lookup fails.
+      }
+    }
+    if (startUV && sampled.length >= 2) {
+      const dFirst = dist2D(sampled[0], startUV);
+      const dLast = dist2D(sampled[sampled.length - 1], startUV);
+      if (dLast + 1e-10 < dFirst) {
+        sampled.reverse();
+      }
+    }
+
+    adaptor2d.delete?.();
+    return simplifyLoop2D(sampled);
+  } catch {
+    adaptor2d?.delete?.();
+    return null;
+  }
+}
+
+function loopPerimeterUV(points: Vec2[]): number {
+  if (points.length < 2) return 0;
+  let perimeter = 0;
+  for (let i = 0; i < points.length; i++) {
+    const a = points[i];
+    const b = points[(i + 1) % points.length];
+    perimeter += dist2D(a, b);
+  }
+  return perimeter;
+}
+
+function getFaceTrimLoopsUVFromPCurves(
+  oc: any,
+  face: FaceWithEdgesInfo
+): { uvOuter: Vec2[]; uvHoles: Vec2[][] } | null {
+  if (!face.occFace || !oc.TopExp_Explorer_2 || !oc.BRepTools_WireExplorer_2 || !oc.TopoDS?.Wire_1 || !oc.TopoDS?.Edge_1) {
+    return null;
+  }
+
+  const wires: Vec2[][] = [];
+  const wireHashes: number[] = [];
+  let outerWireHash: number | null = null;
+  if (oc.BRepTools?.OuterWire) {
+    try {
+      const outerWire = oc.BRepTools.OuterWire(face.occFace);
+      if (outerWire && !outerWire.IsNull?.()) {
+        outerWireHash = outerWire.HashCode ? outerWire.HashCode(2147483647) : null;
+      }
+      outerWire?.delete?.();
+    } catch {
+      // Keep heuristic fallback.
+    }
+  }
+
+  try {
+    const wireExplorer = new oc.TopExp_Explorer_2(
+      face.occFace,
+      oc.TopAbs_ShapeEnum.TopAbs_WIRE,
+      oc.TopAbs_ShapeEnum.TopAbs_SHAPE
+    );
+
+    while (wireExplorer.More()) {
+      const wireShape = wireExplorer.Current();
+      const wire = oc.TopoDS.Wire_1(wireShape);
+      const wireHash = wire.HashCode ? wire.HashCode(2147483647) : wireHashes.length;
+
+      const edgeExplorer = oc.BRepTools_WireExplorer_3
+        ? new oc.BRepTools_WireExplorer_3(wire, face.occFace)
+        : new oc.BRepTools_WireExplorer_2(wire);
+      const loopUV: Vec2[] = [];
+
+      while (edgeExplorer.More()) {
+        const edgeShape = edgeExplorer.Current();
+        const edge = oc.TopoDS.Edge_1(edgeShape);
+        const sampled = sampleEdgePcurveUV(oc, edge, face.occFace);
+        if (sampled && sampled.length >= 2) {
+          appendLoopSegment(loopUV, sampled);
+        }
+        edgeExplorer.Next();
+      }
+      edgeExplorer.delete?.();
+
+      const simplified = simplifyLoop2D(loopUV);
+      if (simplified.length >= 3) {
+        wires.push(simplified);
+        wireHashes.push(wireHash);
+      }
+      wireExplorer.Next();
+    }
+    wireExplorer.delete?.();
+  } catch {
+    return null;
+  }
+
+  if (wires.length === 0) {
+    return null;
+  }
+
+  let outerIdx = 0;
+  if (outerWireHash !== null) {
+    const matchIdx = wireHashes.findIndex((h) => h === outerWireHash);
+    if (matchIdx >= 0) {
+      outerIdx = matchIdx;
+    }
+  } else {
+    let bestPerimeter = -Infinity;
+    for (let i = 0; i < wires.length; i++) {
+      const perimeter = loopPerimeterUV(wires[i]);
+      if (perimeter > bestPerimeter) {
+        bestPerimeter = perimeter;
+        outerIdx = i;
+      }
+    }
+  }
+
+  const uvOuter = wires[outerIdx];
+  const uvHoles = wires.filter((_, i) => i !== outerIdx && wires[i].length >= 3);
+  if (!uvOuter || uvOuter.length < 3) {
+    return null;
+  }
+  return { uvOuter, uvHoles };
+}
+
 function getFaceTrimLoopsUV(
   oc: any,
   face: FaceWithEdgesInfo
 ): { uvOuter: Vec2[]; uvHoles: Vec2[][] } | null {
   if (!face.occSurface) return null;
 
-  const sa = new oc.ShapeAnalysis_Surface(face.occSurface);
+  const isUPeriodic = ['Cylinder', 'Sphere', 'Cone', 'Torus'].includes(face.surfaceType);
+  const isVPeriodic = face.surfaceType === 'Torus';
 
+  const normalizeAndFinalize = (
+    source: 'pcurve' | 'projection',
+    uvOuter: Vec2[],
+    uvHoles: Vec2[][]
+  ): { uvOuter: Vec2[]; uvHoles: Vec2[][] } | null => {
+    let normalizedOuter = uvOuter;
+    let normalizedHoles = uvHoles;
+    const shouldNormalizePeriodicTrimLoops = face.surfaceType === 'Cone' || face.surfaceType === 'Torus';
+    if (shouldNormalizePeriodicTrimLoops && normalizedOuter.length >= 3) {
+      const beforeUBounds = getLoopComponentBounds(normalizedOuter, 0);
+      const beforeVBounds = getLoopComponentBounds(normalizedOuter, 1);
+      const normalized = normalizePeriodicTrimLoops(normalizedOuter, normalizedHoles, {
+        periodicU: isUPeriodic,
+        periodicV: isVPeriodic,
+      });
+      normalizedOuter = normalized.uvOuter;
+      normalizedHoles = normalized.uvHoles;
+      const afterUBounds = getLoopComponentBounds(normalizedOuter, 0);
+      const afterVBounds = getLoopComponentBounds(normalizedOuter, 1);
+      curveDebugLog(
+        `[trim-loop-normalize] face ${face.faceIndex} ${face.surfaceType} source=${source}: ` +
+        `U [${beforeUBounds.min.toFixed(3)}, ${beforeUBounds.max.toFixed(3)}] -> ` +
+        `[${afterUBounds.min.toFixed(3)}, ${afterUBounds.max.toFixed(3)}], ` +
+        `V [${beforeVBounds.min.toFixed(3)}, ${beforeVBounds.max.toFixed(3)}] -> ` +
+        `[${afterVBounds.min.toFixed(3)}, ${afterVBounds.max.toFixed(3)}]`
+      );
+    }
+
+    // Ensure closed loops for robust polygon tests; duplicate endpoint is removed by simplifyLoop2D.
+    normalizedOuter = simplifyLoop2D(normalizedOuter);
+    normalizedHoles = normalizedHoles.map((h) => simplifyLoop2D(h));
+    if (normalizedOuter.length < 3) return null;
+    return { uvOuter: normalizedOuter, uvHoles: normalizedHoles };
+  };
+
+  const pcurveLoops = getFaceTrimLoopsUVFromPCurves(oc, face);
+  if (pcurveLoops && pcurveLoops.uvOuter.length >= 3) {
+    const finalized = normalizeAndFinalize('pcurve', pcurveLoops.uvOuter, pcurveLoops.uvHoles);
+    if (finalized) {
+      curveDebugLog(`[trim-loop-source] face ${face.faceIndex} ${face.surfaceType}: source=pcurve`);
+      return finalized;
+    }
+  }
+
+  const sa = new oc.ShapeAnalysis_Surface(face.occSurface);
   const outer3d = occEdgesToPolygon(face.outerLoop);
   if (outer3d.length < 3) {
     sa.delete?.();
     return null;
   }
 
-  const isUPeriodic = ['Cylinder', 'Sphere', 'Cone', 'Torus'].includes(face.surfaceType);
-  const isVPeriodic = face.surfaceType === 'Torus';
-
   // Debug: show outer3d for cone and torus
   if (face.surfaceType === 'Torus' || face.surfaceType === 'Cone') {
-    console.log(`[getFaceTrimLoopsUV] ${face.surfaceType} outer3d has ${outer3d.length} points`);
+    curveDebugLog(`[getFaceTrimLoopsUV] ${face.surfaceType} outer3d has ${outer3d.length} points`);
     if (outer3d.length > 0) {
-      console.log(`[getFaceTrimLoopsUV] First 5 points: ${outer3d.slice(0, 5).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)})`).join(', ')}`);
+      curveDebugLog(`[getFaceTrimLoopsUV] First 5 points: ${outer3d.slice(0, 5).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)})`).join(', ')}`);
     }
-    console.log(`[getFaceTrimLoopsUV] outerLoop has ${face.outerLoop.length} edges`);
+    curveDebugLog(`[getFaceTrimLoopsUV] outerLoop has ${face.outerLoop.length} edges`);
     face.outerLoop.forEach((e, i) => {
-      console.log(`[getFaceTrimLoopsUV] Edge ${i}: curveType=${e.curveType}, sampledPoints=${e.sampledPoints?.length || 0}`);
+      curveDebugLog(`[getFaceTrimLoopsUV] Edge ${i}: curveType=${e.curveType}, sampledPoints=${e.sampledPoints?.length || 0}`);
     });
   }
 
@@ -4426,22 +5157,22 @@ function getFaceTrimLoopsUV(
 
   // Debug: show uvOuter for cone and torus
   if (face.surfaceType === 'Torus' || face.surfaceType === 'Cone') {
-    console.log(`[getFaceTrimLoopsUV] ${face.surfaceType} uvOuter has ${uvOuter.length} points after projection`);
+    curveDebugLog(`[getFaceTrimLoopsUV] ${face.surfaceType} uvOuter has ${uvOuter.length} points after projection`);
     if (uvOuter.length > 0) {
-      console.log(`[getFaceTrimLoopsUV] UV First 10: ${uvOuter.slice(0, 10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
+      curveDebugLog(`[getFaceTrimLoopsUV] UV First 10: ${uvOuter.slice(0, 10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
       // Also show middle and end
       const mid = Math.floor(uvOuter.length / 2);
-      console.log(`[getFaceTrimLoopsUV] UV Middle 10 (${mid}): ${uvOuter.slice(mid, mid+10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
-      console.log(`[getFaceTrimLoopsUV] UV Last 10: ${uvOuter.slice(-10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
+      curveDebugLog(`[getFaceTrimLoopsUV] UV Middle 10 (${mid}): ${uvOuter.slice(mid, mid+10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
+      curveDebugLog(`[getFaceTrimLoopsUV] UV Last 10: ${uvOuter.slice(-10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
     }
   }
   // Debug: log inner loop edge info for cylinders
   if (face.surfaceType === 'Cylinder' && face.innerLoops.length > 0) {
-    console.log(`[getFaceTrimLoopsUV] Cylinder has ${face.innerLoops.length} inner loops`);
+    curveDebugLog(`[getFaceTrimLoopsUV] Cylinder has ${face.innerLoops.length} inner loops`);
     face.innerLoops.forEach((loop, loopIdx) => {
-      console.log(`[getFaceTrimLoopsUV] Inner loop ${loopIdx}: ${loop.length} edges`);
+      curveDebugLog(`[getFaceTrimLoopsUV] Inner loop ${loopIdx}: ${loop.length} edges`);
       loop.forEach((e, edgeIdx) => {
-        console.log(`  Edge ${edgeIdx}: curveType=${e.curveType}, sampledPoints=${e.sampledPoints?.length || 0}, start=(${e.startPoint.x.toFixed(3)},${e.startPoint.y.toFixed(3)},${e.startPoint.z.toFixed(3)}), end=(${e.endPoint.x.toFixed(3)},${e.endPoint.y.toFixed(3)},${e.endPoint.z.toFixed(3)})`);
+        curveDebugLog(`  Edge ${edgeIdx}: curveType=${e.curveType}, sampledPoints=${e.sampledPoints?.length || 0}, start=(${e.startPoint.x.toFixed(3)},${e.startPoint.y.toFixed(3)},${e.startPoint.z.toFixed(3)}), end=(${e.endPoint.x.toFixed(3)},${e.endPoint.y.toFixed(3)},${e.endPoint.z.toFixed(3)})`);
       });
     });
   }
@@ -4450,9 +5181,9 @@ function getFaceTrimLoopsUV(
     .map((loop, loopIdx) => {
       const poly3d = occEdgesToPolygon(loop);
       if (face.surfaceType === 'Cylinder') {
-        console.log(`[getFaceTrimLoopsUV] Inner loop ${loopIdx} -> 3D polygon: ${poly3d.length} points`);
+        curveDebugLog(`[getFaceTrimLoopsUV] Inner loop ${loopIdx} -> 3D polygon: ${poly3d.length} points`);
         if (poly3d.length > 0) {
-          console.log(`  First 5 3D: ${poly3d.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)},${p[2].toFixed(2)})`).join(' ')}`);
+          curveDebugLog(`  First 5 3D: ${poly3d.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)},${p[2].toFixed(2)})`).join(' ')}`);
         }
       }
       return poly3d;
@@ -4461,10 +5192,9 @@ function getFaceTrimLoopsUV(
     .map((loop3d) => projectPointsToUV(oc, sa, loop3d, { wrapU: isUPeriodic, wrapV: isVPeriodic }))
     .filter((loop2d) => loop2d.length >= 3);
 
+  const finalized = normalizeAndFinalize('projection', uvOuter, uvHoles);
   sa.delete?.();
-
-  if (uvOuter.length < 3) return null;
-  return { uvOuter, uvHoles };
+  return finalized;
 }
 
 function chooseTrimGridDensity(uvOuter: Vec2[], uvHoles: Vec2[][]): number {
@@ -4482,6 +5212,31 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   triangles: number[][];
 }> {
   const faceStart = performance.now();
+  const STRICT_CLASSIFIER_FACE_IDS = readFaceIdsFromGlobal('__STRICT_CLASSIFIER_FACE_IDS__', [14, 63, 64, 65, 66, 994]);
+  const PERIODIC_PROOF_FACE_IDS = readFaceIdsFromGlobal('__PERIODIC_PROOF_FACE_IDS__', []);
+  const shouldRunPeriodicProof = PERIODIC_PROOF_FACE_IDS.has(face.faceIndex);
+  const isKnownLidFace = STRICT_CLASSIFIER_FACE_IDS.has(face.faceIndex);
+  // Runtime debug controls (set in browser console):
+  //   globalThis.__FACE_DEBUG_MODE__ = 'off' | 'skip' | 'only'
+  //   globalThis.__FACE_DEBUG_IDS__ = [14,63,64,65,66,994] or "14,63,64,65,66,994"
+  const FACE_DEBUG_IDS = readFaceIdsFromGlobal('__FACE_DEBUG_IDS__', [14, 63, 64, 65, 66, 994]);
+  const FACE_DEBUG_MODE = readDebugModeFromGlobal('__FACE_DEBUG_MODE__', 'off');
+  const isTargetFace = FACE_DEBUG_IDS.has(face.faceIndex);
+  if (FACE_DEBUG_MODE === 'skip' && isTargetFace) {
+    console.warn(`[FACE DEBUG] skip face=${face.faceIndex} type=${face.surfaceType}`);
+    return { vertices: [], triangles: [] };
+  }
+  if (FACE_DEBUG_MODE === 'only' && !isTargetFace) {
+    return { vertices: [], triangles: [] };
+  }
+  if (FACE_DEBUG_MODE === 'only' && isTargetFace) {
+    console.warn(`[FACE DEBUG] keep-only face=${face.faceIndex} type=${face.surfaceType}`);
+  }
+  // Runtime sliver debug controls:
+  //   globalThis.__SLIVER_DEBUG_MODE__ = 'off' | 'skip' | 'only'
+  //   globalThis.__SLIVER_EPS__ = 0.005
+  const SLIVER_EPS = readGlobalNumber('__SLIVER_EPS__') ?? 0.005;
+  const SLIVER_DEBUG_MODE = readDebugModeFromGlobal('__SLIVER_DEBUG_MODE__', 'off');
 
   if (!face.surfaceParams) {
     console.warn(`[Tessellate] No surface params for ${face.surfaceType} face ${face.faceIndex}`);
@@ -4489,6 +5244,8 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   }
 
   const params = face.surfaceParams;
+  const isSeamSensitivePeriodicFace = face.surfaceType === 'Cylinder' || face.surfaceType === 'Cone' || face.surfaceType === 'Torus';
+  let avoidFullSurfaceFallback = false;
 
   // Prefer UV-trimmed tessellation using the actual face boundary wires.
   // The previous approach tessellated the whole (u,v) bounds rectangle, which drops trim details.
@@ -4496,6 +5253,11 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
     const oc = await initOC();
     const loops = getFaceTrimLoopsUV(oc, face);
     if (loops) {
+      let coneCrossesSeam = false;
+      let cylinderCrossesSeam = false;
+      let torusCrossesSeam = false;
+      let degeneratePeriodicTrim = false;
+
       // Check if the UV boundary is degenerate (all points have same U or same V)
       // This happens for complete periodic surfaces like full torus where the boundary
       // in 3D maps to a line in UV space
@@ -4513,24 +5275,41 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         // Check if UV boundary represents the full periodic domain
         // For a complete torus, the 3D boundary edges form a "seam" that maps to a
         // rectangle in UV space that doesn't actually enclose the domain center.
-        const tolerance = 0.1; // ~6 degrees
+        const fullPeriodTolerance = 0.1; // ~6 degrees, only for full-period seam heuristics
+        const degenerateSpanTolerance = 1e-6; // true UV collapse only
+        const fullPeriodSpanThreshold = (2 * Math.PI) - fullPeriodTolerance;
         const centerU = (uMin + uMax) / 2;
         const centerV = (vMin + vMax) / 2;
-        console.log(`[tessellateCurvedFace] UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
-        console.log(`[tessellateCurvedFace] UV center: (${centerU.toFixed(3)}, ${centerV.toFixed(3)}), spans: uSpan=${uSpan.toFixed(3)}, vSpan=${vSpan.toFixed(3)}`);
+        curveDebugLog(`[tessellateCurvedFace] UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+        curveDebugLog(`[tessellateCurvedFace] UV center: (${centerU.toFixed(3)}, ${centerV.toFixed(3)}), spans: uSpan=${uSpan.toFixed(3)}, vSpan=${vSpan.toFixed(3)}`);
+        const isSliver = Math.abs(uSpan) < SLIVER_EPS || Math.abs(vSpan) < SLIVER_EPS;
+        if (SLIVER_DEBUG_MODE === 'skip' && isSliver) {
+          console.warn(
+            `[SLIVER] skip face=${face.faceIndex} type=${face.surfaceType} uSpan=${uSpan.toFixed(6)} vSpan=${vSpan.toFixed(6)}`
+          );
+          return { vertices: [], triangles: [] };
+        }
+        if (SLIVER_DEBUG_MODE === 'only' && !isSliver) {
+          return { vertices: [], triangles: [] };
+        }
+        if (SLIVER_DEBUG_MODE === 'only' && isSliver) {
+          console.warn(
+            `[SLIVER] keep-only face=${face.faceIndex} type=${face.surfaceType} uSpan=${uSpan.toFixed(6)} vSpan=${vSpan.toFixed(6)}`
+          );
+        }
 
         // For periodic surfaces (torus), if the UV boundary spans close to 2π in both dimensions,
         // check if the bounding box center is actually inside the polygon.
         // If not, the boundary is a "seam rectangle" that doesn't enclose the intended area.
         const PI = Math.PI;
-        const isNearFullPeriod = uSpan > 5.5 && vSpan > 5.5; // ~315 degrees
+        const isNearFullPeriod = uSpan > fullPeriodSpanThreshold && vSpan > fullPeriodSpanThreshold;
 
         if (face.surfaceType === 'Torus' && isNearFullPeriod) {
           // Quick point-in-polygon test for the center
           const centerInside = isPointInPolygonSimple([centerU, centerV], uvOuter);
-          console.log(`[tessellateCurvedFace] Torus center (${centerU.toFixed(3)}, ${centerV.toFixed(3)}) inside polygon: ${centerInside}`);
+          curveDebugLog(`[tessellateCurvedFace] Torus center (${centerU.toFixed(3)}, ${centerV.toFixed(3)}) inside polygon: ${centerInside}`);
           if (!centerInside) {
-            console.log(`[tessellateCurvedFace] Torus UV boundary doesn't enclose center - falling back to full surface`);
+            curveDebugLog(`[tessellateCurvedFace] Torus UV boundary doesn't enclose center - falling back to full surface`);
             throw new Error('Torus seam boundary - use full surface tessellation');
           }
         }
@@ -4546,15 +5325,17 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             const vJump = Math.abs(v2 - v1);
             if (vJump > PI) {
               crossesVSeam = true;
-              console.log(`[tessellateCurvedFace] Torus V-seam detected: jump of ${vJump.toFixed(3)} at index ${i} (${v1.toFixed(3)} -> ${v2.toFixed(3)})`);
+              curveDebugLog(`[tessellateCurvedFace] Torus V-seam detected: jump of ${vJump.toFixed(3)} at index ${i} (${v1.toFixed(3)} -> ${v2.toFixed(3)})`);
               break;
             }
           }
 
-          console.log(`[tessellateCurvedFace] Torus V-seam check: vSpan=${vSpan.toFixed(3)}, crossesVSeam=${crossesVSeam}`);
+          curveDebugLog(`[tessellateCurvedFace] Torus V-seam check: vSpan=${vSpan.toFixed(3)}, crossesVSeam=${crossesVSeam}`);
 
           if (crossesVSeam) {
-            console.log(`[tessellateCurvedFace] Torus V boundary crosses seam - shifting V to [0, 2π]`);
+            torusCrossesSeam = true;
+            avoidFullSurfaceFallback = true;
+            curveDebugLog(`[tessellateCurvedFace] Torus V boundary crosses seam - shifting V to [0, 2π]`);
 
             // Shift V coordinates from [-π, π] to [0, 2π] for continuous boundary
             loops.uvOuter = uvOuter.map(([u, v]): Vec2 => {
@@ -4568,7 +5349,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             const shiftedVs = loops.uvOuter.map(p => p[1]);
             const shiftedVMin = Math.min(...shiftedVs);
             const shiftedVMax = Math.max(...shiftedVs);
-            console.log(`[tessellateCurvedFace] Torus V shifted to [0, 2π]: V=[${shiftedVMin.toFixed(3)}, ${shiftedVMax.toFixed(3)}]`);
+            curveDebugLog(`[tessellateCurvedFace] Torus V shifted to [0, 2π]: V=[${shiftedVMin.toFixed(3)}, ${shiftedVMax.toFixed(3)}]`);
 
             // Shift holes as well
             if (loops.uvHoles.length > 0) {
@@ -4580,7 +5361,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
                   return [u, v];
                 });
                 const holeVs = shiftedHole.map(p => p[1]);
-                console.log(`[tessellateCurvedFace] Torus hole ${h} V shifted to [0, 2π]: V=[${Math.min(...holeVs).toFixed(3)}, ${Math.max(...holeVs).toFixed(3)}]`);
+                curveDebugLog(`[tessellateCurvedFace] Torus hole ${h} V shifted to [0, 2π]: V=[${Math.min(...holeVs).toFixed(3)}, ${Math.max(...holeVs).toFixed(3)}]`);
                 return shiftedHole;
               });
             }
@@ -4598,15 +5379,17 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             const uJump = Math.abs(u2 - u1);
             if (uJump > PI) {
               crossesUSeam = true;
-              console.log(`[tessellateCurvedFace] Torus U-seam detected: jump of ${uJump.toFixed(3)} at index ${i} (${u1.toFixed(3)} -> ${u2.toFixed(3)})`);
+              curveDebugLog(`[tessellateCurvedFace] Torus U-seam detected: jump of ${uJump.toFixed(3)} at index ${i} (${u1.toFixed(3)} -> ${u2.toFixed(3)})`);
               break;
             }
           }
 
-          console.log(`[tessellateCurvedFace] Torus U-seam check: uSpan=${uSpan.toFixed(3)}, crossesUSeam=${crossesUSeam}`);
+          curveDebugLog(`[tessellateCurvedFace] Torus U-seam check: uSpan=${uSpan.toFixed(3)}, crossesUSeam=${crossesUSeam}`);
 
           if (crossesUSeam) {
-            console.log(`[tessellateCurvedFace] Torus U boundary crosses seam - shifting U to [0, 2π]`);
+            torusCrossesSeam = true;
+            avoidFullSurfaceFallback = true;
+            curveDebugLog(`[tessellateCurvedFace] Torus U boundary crosses seam - shifting U to [0, 2π]`);
 
             // Shift U coordinates from [-π, π] to [0, 2π] for continuous boundary
             loops.uvOuter = loops.uvOuter.map(([u, v]): Vec2 => {
@@ -4620,7 +5403,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             const shiftedUs = loops.uvOuter.map(p => p[0]);
             const shiftedUMin = Math.min(...shiftedUs);
             const shiftedUMax = Math.max(...shiftedUs);
-            console.log(`[tessellateCurvedFace] Torus U shifted to [0, 2π]: U=[${shiftedUMin.toFixed(3)}, ${shiftedUMax.toFixed(3)}]`);
+            curveDebugLog(`[tessellateCurvedFace] Torus U shifted to [0, 2π]: U=[${shiftedUMin.toFixed(3)}, ${shiftedUMax.toFixed(3)}]`);
 
             // Shift holes as well
             if (loops.uvHoles.length > 0) {
@@ -4632,48 +5415,77 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
                   return [u, v];
                 });
                 const holeUs = shiftedHole.map(p => p[0]);
-                console.log(`[tessellateCurvedFace] Torus hole ${h} U shifted to [0, 2π]: U=[${Math.min(...holeUs).toFixed(3)}, ${Math.max(...holeUs).toFixed(3)}]`);
+                curveDebugLog(`[tessellateCurvedFace] Torus hole ${h} U shifted to [0, 2π]: U=[${Math.min(...holeUs).toFixed(3)}, ${Math.max(...holeUs).toFixed(3)}]`);
                 return shiftedHole;
               });
             }
           }
         }
 
-        // For cones with full-circle base (U spans ~2π), the UV boundary crosses the ±π seam.
-        // Similar to cylinders, CDT constraint recovery fails on edges that span the seam.
-        // Use seam detection and rectangular boundary in [0, 2π] range.
+        // For cones with full-circle base (U spans ~2π), the UV boundary may cross the ±π seam.
+        // We must unwrap by edge continuity (not simple sign shift), otherwise seam-adjacent
+        // points can collapse to the same U and clip away valid surface regions.
         if (face.surfaceType === 'Cone' && uSpan > 5.5) {
           const nearPosPI = uvOuter.filter(p => p[0] > PI - 0.3).length;
           const nearNegPI = uvOuter.filter(p => p[0] < -PI + 0.3).length;
-          const crossesSeam = nearPosPI > 2 && nearNegPI > 2;
+          const crossesByCounts = nearPosPI > 2 && nearNegPI > 2;
 
-          console.log(`[tessellateCurvedFace] Cone seam check: nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, crossesSeam=${crossesSeam}`);
+          const period = 2 * PI;
+          const seamJumpThreshold = period * 0.75; // near full-wrap jump (avoid legitimate ~π meridian jumps)
+          let maxJump = 0;
+          let crossesByJump = false;
+          for (let i = 0; i < uvOuter.length; i++) {
+            const u1 = uvOuter[i][0];
+            const u2 = uvOuter[(i + 1) % uvOuter.length][0];
+            const jump = Math.abs(u2 - u1);
+            maxJump = Math.max(maxJump, jump);
+            if (jump > seamJumpThreshold) {
+              crossesByJump = true;
+            }
+          }
+
+          // Some seam-crossing trims only have a few samples on one side of ±π.
+          // Use either robust count-based detection or a near-2π continuity jump.
+          const crossesSeam = crossesByCounts || crossesByJump;
+          coneCrossesSeam = crossesSeam;
+          if (crossesSeam) {
+            avoidFullSurfaceFallback = true;
+          }
+
+          curveDebugLog(`[tessellateCurvedFace] Cone seam check: nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, maxJump=${maxJump.toFixed(3)}, byCounts=${crossesByCounts}, byJump=${crossesByJump}, crossesSeam=${crossesSeam}`);
 
           if (crossesSeam) {
-            console.log(`[tessellateCurvedFace] Full cone crosses seam - using rectangular UV boundary`);
+            curveDebugLog(`[tessellateCurvedFace] Cone crosses seam - unwrapping U by continuity`);
 
-            const rectBoundary: Vec2[] = [
-              [0, vMin],
-              [2 * PI, vMin],
-              [2 * PI, vMax],
-              [0, vMax]
-            ];
+            let unwrappedOuter = unwrapPeriodicLoopU(uvOuter, period);
+            const unwrappedBounds = getLoopUBounds(unwrappedOuter);
+            const outerShiftK = chooseShiftToRange(unwrappedBounds.uMin, unwrappedBounds.uMax, period, 0, period);
+            if (outerShiftK !== 0) {
+              unwrappedOuter = shiftLoopU(unwrappedOuter, outerShiftK * period);
+            }
+            loops.uvOuter = unwrappedOuter;
 
-            loops.uvOuter = rectBoundary;
-            console.log(`[tessellateCurvedFace] Cone using rectangular boundary: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+            const shiftedBounds = getLoopUBounds(loops.uvOuter);
+            const outerMidU = meanLoopU(loops.uvOuter);
+            console.log(
+              `[tessellateCurvedFace] Cone unwrapped boundary: U=[${shiftedBounds.uMin.toFixed(3)}, ${shiftedBounds.uMax.toFixed(3)}], shiftK=${outerShiftK}, meanU=${outerMidU.toFixed(3)}, V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`
+            );
 
-            // Shift holes to [0, 2π] range to match outer boundary
+            // Unwrap holes by continuity and align each hole near the outer loop band.
             if (loops.uvHoles.length > 0) {
               loops.uvHoles = loops.uvHoles.map((hole, h) => {
-                const shiftedHole = hole.map(([u, v]): Vec2 => {
-                  if (u < 0) {
-                    return [u + 2 * PI, v];
-                  }
-                  return [u, v];
-                });
-                const holeUs = shiftedHole.map(p => p[0]);
-                console.log(`[tessellateCurvedFace] Cone hole ${h} shifted to [0, 2π]: U=[${Math.min(...holeUs).toFixed(3)}, ${Math.max(...holeUs).toFixed(3)}]`);
-                return shiftedHole;
+                let alignedHole = unwrapPeriodicLoopU(hole, period);
+                if (outerShiftK !== 0) {
+                  alignedHole = shiftLoopU(alignedHole, outerShiftK * period);
+                }
+                const holeMidU = meanLoopU(alignedHole);
+                const alignK = Math.round((outerMidU - holeMidU) / period);
+                if (alignK !== 0) {
+                  alignedHole = shiftLoopU(alignedHole, alignK * period);
+                }
+                const holeBounds = getLoopUBounds(alignedHole);
+                curveDebugLog(`[tessellateCurvedFace] Cone hole ${h} unwrapped: U=[${holeBounds.uMin.toFixed(3)}, ${holeBounds.uMax.toFixed(3)}], alignK=${alignK}`);
+                return alignedHole;
               });
             }
           }
@@ -4682,9 +5494,9 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         // For spheres with nearly full coverage, check if the center is inside
         if (face.surfaceType === 'Sphere' && uSpan > 5.5) {
           const centerInside = isPointInPolygonSimple([centerU, centerV], uvOuter);
-          console.log(`[tessellateCurvedFace] Sphere center (${centerU.toFixed(3)}, ${centerV.toFixed(3)}) inside polygon: ${centerInside}`);
+          curveDebugLog(`[tessellateCurvedFace] Sphere center (${centerU.toFixed(3)}, ${centerV.toFixed(3)}) inside polygon: ${centerInside}`);
           if (!centerInside) {
-            console.log(`[tessellateCurvedFace] Sphere UV boundary doesn't enclose center - falling back to full surface`);
+            curveDebugLog(`[tessellateCurvedFace] Sphere UV boundary doesn't enclose center - falling back to full surface`);
             throw new Error('Sphere seam boundary - use full surface tessellation');
           }
         }
@@ -4700,21 +5512,39 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           // Check if boundary crosses the seam (has points near both +π and -π)
           const nearPosPI = uvOuter.filter(p => p[0] > PI - 0.3).length;
           const nearNegPI = uvOuter.filter(p => p[0] < -PI + 0.3).length;
-          const crossesSeam = nearPosPI > 2 && nearNegPI > 2;
+          const crossesByCounts = nearPosPI > 2 && nearNegPI > 2;
+          const period = 2 * PI;
+          const seamJumpThreshold = period * 0.75;
+          let maxJump = 0;
+          let crossesByJump = false;
+          for (let i = 0; i < uvOuter.length; i++) {
+            const u1 = uvOuter[i][0];
+            const u2 = uvOuter[(i + 1) % uvOuter.length][0];
+            const jump = Math.abs(u2 - u1);
+            maxJump = Math.max(maxJump, jump);
+            if (jump > seamJumpThreshold) {
+              crossesByJump = true;
+            }
+          }
+          const crossesSeam = crossesByCounts || crossesByJump;
+          cylinderCrossesSeam = crossesSeam;
+          if (crossesSeam) {
+            avoidFullSurfaceFallback = true;
+          }
 
-          console.log(`[tessellateCurvedFace] Cylinder seam check: nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, crossesSeam=${crossesSeam}`);
-          console.log(`[tessellateCurvedFace] Cylinder has ${loops.uvHoles.length} holes`);
+          curveDebugLog(`[tessellateCurvedFace] Cylinder seam check: nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, maxJump=${maxJump.toFixed(3)}, byCounts=${crossesByCounts}, byJump=${crossesByJump}, crossesSeam=${crossesSeam}`);
+          curveDebugLog(`[tessellateCurvedFace] Cylinder has ${loops.uvHoles.length} holes`);
 
           if (crossesSeam) {
             // DETAILED LOGGING: Analyze the actual boundary before replacing
-            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Analyzing boundary before rectangle replacement`);
-            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary has ${uvOuter.length} points`);
+            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Analyzing boundary before rectangle replacement`);
+            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary has ${uvOuter.length} points`);
 
             // Log first 10 and last 10 points
             const first10 = uvOuter.slice(0, 10).map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
             const last10 = uvOuter.slice(-10).map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
-            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: First 10 points: ${first10}`);
-            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Last 10 points: ${last10}`);
+            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: First 10 points: ${first10}`);
+            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Last 10 points: ${last10}`);
 
             // Find the actual V range at different U positions
             const pointsNearU0 = uvOuter.filter(p => Math.abs(p[0]) < 0.5);
@@ -4723,23 +5553,23 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
 
             if (pointsNearU0.length > 0) {
               const vAtU0 = pointsNearU0.map(p => p[1]);
-              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈0: [${Math.min(...vAtU0).toFixed(2)}, ${Math.max(...vAtU0).toFixed(2)}]`);
+              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈0: [${Math.min(...vAtU0).toFixed(2)}, ${Math.max(...vAtU0).toFixed(2)}]`);
             }
             if (pointsNearUPosPI.length > 0) {
               const vAtPosPI = pointsNearUPosPI.map(p => p[1]);
-              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈+π: [${Math.min(...vAtPosPI).toFixed(2)}, ${Math.max(...vAtPosPI).toFixed(2)}]`);
+              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈+π: [${Math.min(...vAtPosPI).toFixed(2)}, ${Math.max(...vAtPosPI).toFixed(2)}]`);
             }
             if (pointsNearUNegPI.length > 0) {
               const vAtNegPI = pointsNearUNegPI.map(p => p[1]);
-              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈-π: [${Math.min(...vAtNegPI).toFixed(2)}, ${Math.max(...vAtNegPI).toFixed(2)}]`);
+              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈-π: [${Math.min(...vAtNegPI).toFixed(2)}, ${Math.max(...vAtNegPI).toFixed(2)}]`);
             }
 
             // Check if boundary has any points at low V values
             const pointsBelowV5 = uvOuter.filter(p => p[1] < 5);
-            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Points with V < 5: ${pointsBelowV5.length}`);
+            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Points with V < 5: ${pointsBelowV5.length}`);
             if (pointsBelowV5.length > 0 && pointsBelowV5.length < 20) {
               const lowVPoints = pointsBelowV5.map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
-              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Low V points: ${lowVPoints}`);
+              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Low V points: ${lowVPoints}`);
             }
 
             // Convert some UV points to 3D to see where they actually are
@@ -4762,7 +5592,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
                 for (const pt of testPoints) {
                   // Use Value method which returns a gp_Pnt
                   const pnt = surf.Value(pt.u, pt.v);
-                  console.log(`[SEAM DEBUG] Face ${face.faceIndex}: 3D at ${pt.label}: (${pnt.X().toFixed(2)}, ${pnt.Y().toFixed(2)}, ${pnt.Z().toFixed(2)})`);
+                  curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: 3D at ${pt.label}: (${pnt.X().toFixed(2)}, ${pnt.Y().toFixed(2)}, ${pnt.Z().toFixed(2)})`);
                   pnt.delete();
                 }
 
@@ -4770,7 +5600,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
                 if (pointsBelowV5.length > 0) {
                   const lowestVPoint = pointsBelowV5.reduce((min, p) => p[1] < min[1] ? p : min, pointsBelowV5[0]);
                   const pnt = surf.Value(lowestVPoint[0], lowestVPoint[1]);
-                  console.log(`[SEAM DEBUG] Face ${face.faceIndex}: 3D at lowest V boundary point (U=${lowestVPoint[0].toFixed(2)}, V=${lowestVPoint[1].toFixed(2)}): (${pnt.X().toFixed(2)}, ${pnt.Y().toFixed(2)}, ${pnt.Z().toFixed(2)})`);
+                  curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: 3D at lowest V boundary point (U=${lowestVPoint[0].toFixed(2)}, V=${lowestVPoint[1].toFixed(2)}): (${pnt.X().toFixed(2)}, ${pnt.Y().toFixed(2)}, ${pnt.Z().toFixed(2)})`);
                   pnt.delete();
                 }
 
@@ -4786,15 +5616,15 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
                   zVals.push(pnt.Z());
                   pnt.delete();
                 }
-                console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary 3D ranges: X=[${Math.min(...xVals).toFixed(2)}, ${Math.max(...xVals).toFixed(2)}], Y=[${Math.min(...yVals).toFixed(2)}, ${Math.max(...yVals).toFixed(2)}], Z=[${Math.min(...zVals).toFixed(2)}, ${Math.max(...zVals).toFixed(2)}]`);
+                curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary 3D ranges: X=[${Math.min(...xVals).toFixed(2)}, ${Math.max(...xVals).toFixed(2)}], Y=[${Math.min(...yVals).toFixed(2)}, ${Math.max(...yVals).toFixed(2)}], Z=[${Math.min(...zVals).toFixed(2)}, ${Math.max(...zVals).toFixed(2)}]`);
               } catch (e) {
-                console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Could not evaluate 3D points: ${e}`);
+                curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Could not evaluate 3D points: ${e}`);
               }
             }
 
             // Log what the rectangle will be
-            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Rectangle will be: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
-            console.log(`[SEAM DEBUG] Face ${face.faceIndex}: This fills ${(vMax - vMin).toFixed(2)} units of V`);
+            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Rectangle will be: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: This fills ${(vMax - vMin).toFixed(2)} units of V`);
 
             // Decide whether to use rectangle or preserve actual boundary
             // Check if the boundary's 3D extent matches what a rectangle would produce
@@ -4806,19 +5636,19 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
               // If Z range is much smaller than V range, the boundary is trimmed
               // and we should preserve it rather than using a rectangle
               const zToVRatio = zRange / vRange;
-              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Z range=${zRange.toFixed(2)}, V range=${vRange.toFixed(2)}, ratio=${zToVRatio.toFixed(3)}`);
+              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Z range=${zRange.toFixed(2)}, V range=${vRange.toFixed(2)}, ratio=${zToVRatio.toFixed(3)}`);
 
               // If Z range is less than 50% of V range, boundary is significantly trimmed
               if (zToVRatio < 0.5) {
                 useRectangle = false;
-                console.log(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary is trimmed (ratio < 0.5) - will preserve actual boundary`);
+                curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary is trimmed (ratio < 0.5) - will preserve actual boundary`);
               }
             }
 
             if (useRectangle) {
               // The boundary crosses the ±π seam. CDT constraint recovery will fail on edges
               // that span the seam. Use a rectangular boundary in [0, 2π] range instead.
-              console.log(`[tessellateCurvedFace] Full cylinder crosses seam - using rectangular UV boundary`);
+              curveDebugLog(`[tessellateCurvedFace] Full cylinder crosses seam - using rectangular UV boundary`);
 
               const rectBoundary: Vec2[] = [
                 [0, vMin],
@@ -4828,10 +5658,10 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
               ];
 
               loops.uvOuter = rectBoundary;
-              console.log(`[tessellateCurvedFace] Using rectangular boundary: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+              curveDebugLog(`[tessellateCurvedFace] Using rectangular boundary: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
             } else {
               // Boundary is trimmed - preserve actual shape but shift U to [0, 2π]
-              console.log(`[tessellateCurvedFace] Trimmed cylinder - shifting U to [0, 2π], preserving actual boundary`);
+              curveDebugLog(`[tessellateCurvedFace] Trimmed cylinder - shifting U to [0, 2π], preserving actual boundary`);
 
               // Shift U coordinates from [-π, π] to [0, 2π] for continuous boundary
               const shiftedOuter = uvOuter.map(([u, v]): Vec2 => {
@@ -4844,13 +5674,13 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
               // Log boundary before and after shift
               const beforeUs = uvOuter.slice(0, 5).map(p => p[0].toFixed(2)).join(', ');
               const afterUs = shiftedOuter.slice(0, 5).map(p => p[0].toFixed(2)).join(', ');
-              console.log(`[SEAM DEBUG] Face ${face.faceIndex}: U shift: before=[${beforeUs}...], after=[${afterUs}...]`);
+              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: U shift: before=[${beforeUs}...], after=[${afterUs}...]`);
 
               loops.uvOuter = shiftedOuter;
 
               const shiftedUMin = Math.min(...shiftedOuter.map(p => p[0]));
               const shiftedUMax = Math.max(...shiftedOuter.map(p => p[0]));
-              console.log(`[tessellateCurvedFace] Shifted boundary: U=[${shiftedUMin.toFixed(3)}, ${shiftedUMax.toFixed(3)}], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
+              curveDebugLog(`[tessellateCurvedFace] Shifted boundary: U=[${shiftedUMin.toFixed(3)}, ${shiftedUMax.toFixed(3)}], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
             }
 
             // Shift holes to [0, 2π] range to match the outer boundary
@@ -4863,16 +5693,22 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
                   return [u, v];
                 });
                 const holeUs = shiftedHole.map(p => p[0]);
-                console.log(`[tessellateCurvedFace] Hole ${h} shifted to [0, 2π]: U=[${Math.min(...holeUs).toFixed(3)}, ${Math.max(...holeUs).toFixed(3)}]`);
+                curveDebugLog(`[tessellateCurvedFace] Hole ${h} shifted to [0, 2π]: U=[${Math.min(...holeUs).toFixed(3)}, ${Math.max(...holeUs).toFixed(3)}]`);
                 return shiftedHole;
               });
             }
           }
         }
 
-        if (uSpan < tolerance || vSpan < tolerance) {
-          console.log(`[tessellateCurvedFace] UV boundary degenerate - falling back to full surface`);
-          throw new Error('Degenerate UV boundary - use full surface tessellation');
+        if (uSpan < degenerateSpanTolerance || vSpan < degenerateSpanTolerance) {
+          if (isSeamSensitivePeriodicFace) {
+            degeneratePeriodicTrim = true;
+            avoidFullSurfaceFallback = true;
+            console.warn(`[tessellateCurvedFace] Face ${face.faceIndex} (${face.surfaceType}) has degenerate UV span (uSpan=${uSpan.toFixed(6)}, vSpan=${vSpan.toFixed(6)}) - continuing trimmed path and disabling full-surface fallback`);
+          } else {
+            curveDebugLog(`[tessellateCurvedFace] UV boundary degenerate - falling back to full surface`);
+            throw new Error('Degenerate UV boundary - use full surface tessellation');
+          }
         }
       }
 
@@ -4924,20 +5760,122 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
               yMin: Math.min(...ys), yMax: Math.max(...ys),
               zMin: Math.min(...zs), zMax: Math.max(...zs)
             };
-            console.log(`[tessellateCurvedFace] Face ${face.faceIndex}: Cylinder 3D bbox:`);
-            console.log(`  X: [${bbox3d.xMin.toFixed(2)}, ${bbox3d.xMax.toFixed(2)}]`);
-            console.log(`  Y: [${bbox3d.yMin.toFixed(2)}, ${bbox3d.yMax.toFixed(2)}]`);
-            console.log(`  Z: [${bbox3d.zMin.toFixed(2)}, ${bbox3d.zMax.toFixed(2)}]`);
+            curveDebugLog(`[tessellateCurvedFace] Face ${face.faceIndex}: Cylinder 3D bbox:`);
+            curveDebugLog(`  X: [${bbox3d.xMin.toFixed(2)}, ${bbox3d.xMax.toFixed(2)}]`);
+            curveDebugLog(`  Y: [${bbox3d.yMin.toFixed(2)}, ${bbox3d.yMax.toFixed(2)}]`);
+            curveDebugLog(`  Z: [${bbox3d.zMin.toFixed(2)}, ${bbox3d.zMax.toFixed(2)}]`);
           }
         }
 
-        const mesh = await tessellateTrimmedSurface(surface, loops.uvOuter, gridDensity, loops.uvHoles, bbox3d);
+        let occBuildClassifier: any | undefined;
+        let usedOccBuildClassifier = false;
+        let trimmedBuildOptions: TrimmedSurfaceBuildOptions | undefined;
+        const useOccPrimaryBuildForKnownFace = isKnownLidFace && !!face.occFace;
+        if (useOccPrimaryBuildForKnownFace && oc?.BRepTopAdaptor_FClass2d && oc?.gp_Pnt2d_3 && oc?.TopAbs_State) {
+          try {
+            // For known problematic lid faces, use OCC classification during triangle build.
+            // This avoids destructive post-filtering that can drop most of a valid face.
+            occBuildClassifier = new oc.BRepTopAdaptor_FClass2d(face.occFace, 1e-7);
+            usedOccBuildClassifier = true;
+            const classifyInside = (u: number, v: number): boolean => {
+              const uvPoint = new oc.gp_Pnt2d_3(u, v);
+              try {
+                const state = occBuildClassifier.Perform(uvPoint, true);
+                return !topAbsStateEquals(state, oc.TopAbs_State.TopAbs_OUT);
+              } catch {
+                // Fail open to avoid catastrophic face loss when classifier is unstable.
+                return true;
+              } finally {
+                uvPoint.delete?.();
+              }
+            };
+            const maxOutSamples = 1;
+            trimmedBuildOptions = {
+              uvInsideTest: classifyInside,
+              keepTriangle: (samples) => {
+                let outCount = 0;
+                for (const [u, v] of samples) {
+                  if (!classifyInside(u, v)) {
+                    outCount++;
+                    if (outCount > maxOutSamples) {
+                      return false;
+                    }
+                  }
+                }
+                return true;
+              },
+              // Partial quad triangles are the most frequent source of slivers on these faces.
+              allowPartialCellTriangles: false,
+              logLabel: `occ-face-${face.faceIndex}`,
+            };
+            console.log(`[seam-build] face ${face.faceIndex} ${face.surfaceType}: OCC-guided triangle build enabled`);
+          } catch (e) {
+            console.warn(`[seam-build] face ${face.faceIndex} ${face.surfaceType}: OCC-guided build unavailable, falling back`, e);
+          }
+        }
+
+        let mesh;
+        try {
+          mesh = await tessellateTrimmedSurface(surface, loops.uvOuter, gridDensity, loops.uvHoles, bbox3d, trimmedBuildOptions);
+        } finally {
+          occBuildClassifier?.delete?.();
+        }
+
+        // Robust safety pass: keep only triangles whose UV samples are classified
+        // as not OUT by OCC. This is critical for seam-sensitive periodic trims and
+        // for known problematic faces that produce lid artifacts.
+        const aggressivePeriodicFiltering = readGlobalBoolean('__ENABLE_AGGRESSIVE_PERIODIC_FILTER__', false);
+        const shouldClassifyPeriodicTrim = !usedOccBuildClassifier && isSeamSensitivePeriodicFace &&
+          (coneCrossesSeam || cylinderCrossesSeam || torusCrossesSeam || degeneratePeriodicTrim);
+        const shouldClassifyComplexConeOrTorus = aggressivePeriodicFiltering && !usedOccBuildClassifier && (
+          (face.surfaceType === 'Torus') ||
+          (face.surfaceType === 'Cone' && (loops.uvHoles.length > 0 || face.outerLoop.length > 8))
+        );
+        const shouldClassifyKnownLidFace = isKnownLidFace && !usedOccBuildClassifier;
+        const shouldClassifyByOcc =
+          (shouldClassifyPeriodicTrim || shouldClassifyComplexConeOrTorus || shouldClassifyKnownLidFace) && !!face.occFace;
+        if (shouldClassifyByOcc && face.occFace) {
+          const reason: string[] = [];
+          if (coneCrossesSeam) reason.push('cone-seam');
+          if (cylinderCrossesSeam) reason.push('cylinder-seam');
+          if (torusCrossesSeam) reason.push('torus-seam');
+          if (degeneratePeriodicTrim) reason.push('degenerate');
+          if (face.surfaceType === 'Torus' && !torusCrossesSeam) reason.push('torus-complex');
+          if (face.surfaceType === 'Cone' && !coneCrossesSeam) reason.push('cone-complex');
+          if (shouldClassifyKnownLidFace) reason.push('known-lid-face');
+          // Keep torus filtering strict, but keep cones tolerant and capped.
+          // Cone strictness was removing valid side-wall triangles.
+          const isComplexTorus = shouldClassifyComplexConeOrTorus && face.surfaceType === 'Torus';
+          const isComplexCone = shouldClassifyComplexConeOrTorus && face.surfaceType === 'Cone';
+          const maxOutSamples = isComplexTorus ? 0 : 1;
+          const maxDropRatio = (shouldClassifyKnownLidFace || isComplexCone) ? 0.30 : undefined;
+          mesh = filterMeshTrianglesByFaceUVClassification(oc, face.occFace, mesh, {
+            tol: 1e-7,
+            recadreOnPeriodic: true,
+            label: `face ${face.faceIndex} ${face.surfaceType} ${reason.join('+')}`,
+            logAlways: shouldClassifyComplexConeOrTorus || shouldClassifyKnownLidFace,
+            sampleMode: 'multi7',
+            maxOutSamples,
+            maxDropRatio,
+            faceIndex: face.faceIndex,
+            surfaceType: face.surfaceType,
+            periodicProof: shouldRunPeriodicProof,
+          });
+        }
+
         tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
         tessellationProfile.tessellateCurvedFace.calls++;
         return tessellatedMeshToVerticesAndTriangles(mesh);
       }
     }
   } catch (e) {
+    if (avoidFullSurfaceFallback && isSeamSensitivePeriodicFace) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn(`[tessellateCurvedFace] Face ${face.faceIndex} (${face.surfaceType}) trimmed path failed (${message}) - skipping unsafe full-surface fallback`);
+      tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
+      tessellationProfile.tessellateCurvedFace.calls++;
+      return { vertices: [], triangles: [] };
+    }
     // Fall through to non-trimmed fallback below
   }
 
