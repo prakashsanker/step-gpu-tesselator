@@ -167,6 +167,9 @@ const LOAD_SUBPHASE_KEYS = [
     'loadStepFile_readFile',
     'loadStepFile_transfer',
     'loadStepFile_getTools',
+    'loadStepFile_oneShape',
+    'loadStepFile_fsWrite',
+    'loadStepFile_fsCleanup',
     'loadStepFile_colorParsing',
 ];
 

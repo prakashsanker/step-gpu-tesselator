@@ -324,6 +324,106 @@ M1.2.2 closes the canary perf gap and yields 6/6 wins against `occt-import-js` i
 
 ---
 
+## M1.3.1 Cylinder 3D Bbox Gating (2026-02-11)
+
+### Why
+
+Representative runs still showed `Electronic Enclosure` as the primary laggard. Profiling pointed at unnecessary cylinder-side `bbox3d` work (`occEdgesToPolygon` + per-grid-point 3D filtering) being applied too broadly.
+
+### Changes
+
+- In `src/occ-test.ts`:
+  - Added `shouldUseCylinderBbox3d` guard.
+  - Cylinder `bbox3d` is now computed only for seam-sensitive/degenerate periodic trims:
+    - `cylinderCrossesSeam`
+    - `degeneratePeriodicTrim`
+    - or explicit override `__FORCE_CYLINDER_BBOX3D__`.
+  - Non-problematic cylinder faces skip expensive 3D bbox prep/filter path.
+
+### Canary Result
+
+Command:
+- `npm run -s bench:canary`
+
+Aggregate:
+- Wins vs `occt-import-js`: `6/6`
+- Speedup median: `2.25x`
+- Ours avg runtime: `155.8ms` (p90 `377.2ms`)
+- Ref avg runtime: `391.5ms` (p90 `919.8ms`)
+
+### Representative Result
+
+Command:
+- `npm run -s bench:representative`
+
+Aggregate:
+- Wins vs `occt-import-js`: `5/6`
+- Speedup median: `4.11x`
+- Ours avg runtime: `1827.7ms` (p90 `5444.8ms`)
+- Ref avg runtime: `982.2ms` (p90 `2752.9ms`)
+
+Remaining laggard:
+- `Electronic Enclosure`: ours `10631.1ms`, ref `5239.8ms` (`2.03x` slower)
+- `loadStepFile`: `3582.5ms` (`33.7%` of ours)
+- top sub-phases: `transfer 2794.8ms`, `readFile 785.2ms`, `fsWrite 1.1ms`
+
+Delta vs previous representative run in this branch:
+- `Electronic Enclosure`: `11120.3ms -> 10631.1ms` (`-489.2ms`, `-4.4%`)
+
+### Verdict
+
+Small but real representative improvement; hot gap remains concentrated in `Electronic Enclosure` with load path still accounting for ~1/3 of runtime.
+
+---
+
+## M1.2.3 Perf Diagnostics Hard-Off (2026-02-11)
+
+### Why
+
+Benchmark runs should not inherit expensive debug/diagnostic flags from prior interactive sessions. Even occasional leakage can distort canary and representative measurements.
+
+### Changes
+
+- `src/occ-test.ts`
+  - Added `loadDiagnosticsEnabled()` helper:
+    - returns `false` in perf geometry-only mode (`__PERF_GEOMETRY_ONLY_LOAD__`)
+    - otherwise mirrors `__ENABLE_LOAD_DIAGNOSTICS__`
+  - Replaced direct diagnostic-flag reads in load/solid-color mapping helpers with `loadDiagnosticsEnabled()`.
+- `tests/benchmark-comprehensive.html`
+  - During `runOCC`, force-disable and restore:
+    - `__ENABLE_LOAD_DIAGNOSTICS__`
+    - `__CURVE_VERBOSE_LOGS__`
+    - `__TESSELLATION_VERBOSE_LOGS__`
+
+### Canary Result
+
+Command:
+- `npm run -s bench:canary`
+
+Aggregate:
+- Wins vs `occt-import-js`: `6/6`
+- Speedup median: `3.77x`
+- Ours avg runtime: `179.8ms` (p90 `390.4ms`)
+- Ref avg runtime: `553.7ms` (p90 `965.4ms`)
+
+### Representative Spot Checks
+
+Commands:
+- `npm run -s bench:representative -- --filter "Electronic Enclosure"`
+- `npm run -s bench:representative -- --filter "VM-001"`
+
+Results:
+- `Electronic Enclosure`: ours `12384.4ms`, ref `5130.0ms` (`2.41x` slower)
+  - `loadStepFile`: `4959.9ms` (`40.1%` of ours)
+  - top sub-phases: `transfer 3732.7ms`, `readFile 1199.2ms`, `fsWrite 2.4ms`
+- `VM-001`: ours `493.5ms`, ref `610.7ms` (`1.24x` faster)
+
+### Verdict
+
+This step hardens benchmark fidelity and removes diagnostic-flag contamination risk. It does not close the Electronic Enclosure gap; primary remaining drivers are load transfer/read and curved/trimmed tessellation cost.
+
+---
+
 ## Current Results (2026-01-04)
 
 ### Summary
@@ -467,3 +567,46 @@ Final Mesh (positions, indices, normals)
 - Added Promise.all for face processing
 - Large: 3.10ms (from 26.67ms)
 - 8.6x improvement on large files
+
+---
+
+## M2.1 CDT Recovery Optimization (2026-02-11)
+
+### Change Summary
+
+Implemented a first M2 optimization in `src/cdt-gpu.ts` to cut constraint-recovery overhead:
+
+- Added AABB fast-reject for triangle-vs-constraint checks in `triangleIntersectsEdge(...)`.
+- Hoisted per-constraint edge endpoints and edge bbox in `recoverConstraintEdge(...)`.
+- Reworked cavity boundary ordering:
+  - cycle-aware walker for degree-2 boundaries,
+  - greedy fallback for irregular boundaries,
+  - retry ordering from alternate endpoint before failing.
+
+### Commands
+
+```bash
+npm run -s bench:canary
+npm run -s bench:representative -- --filter "Electronic Enclosure"
+```
+
+### Results
+
+Canary:
+- wins vs `occt-import-js`: `6/6`
+- speedup median: `2.48x`
+- ours avg: `92.5ms` (p90 `192.0ms`)
+- ref avg: `186.8ms` (p90 `376.2ms`)
+
+Representative spot-check (`Electronic Enclosure`):
+- ours: `11778.6ms`
+- ref: `5128.8ms`
+- relative: `2.30x slower`
+- `loadStepFile`: `4416.9ms` (`37.5%` of ours)
+- top load sub-phases: `transfer 3299.6ms`, `readFile 1113.4ms`, `fsWrite 1.3ms`
+- triangles: `58745` vs `39148` (`1.50x`)
+
+### Verdict
+
+- `improved` for M2 canary path and trim-related hot-loop cost.
+- Still not enough to close Electronic Enclosure; remaining gap is mostly load-path plus residual triangle inflation.

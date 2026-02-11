@@ -194,8 +194,10 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 6. [x] Execute M1.1.2: planar-hole complexity dispatch + UV cleanup and re-run canary.
 7. [x] Execute M1.2.1: add `loadStepFile` sub-phase instrumentation and capture canary deltas.
 8. [x] Execute M1.2.2: add geometry-only fast parse path (default for perf), keep XCAF behind flag.
-9. [ ] Execute M1.2.3: disable heavy diagnostics by default in perf mode and re-run canary.
+9. [x] Execute M1.2.3: disable heavy diagnostics by default in perf mode and re-run canary.
 10. [x] Run full correctness suite every 2-3 perf steps to prevent regressions.
+11. [x] Execute M1.3.1: gate cylinder 3D bbox filtering to seam-sensitive trims and re-run canary/representative.
+12. [x] Execute M2.1: reduce CDT constraint-recovery cost (edge bbox fast-reject + robust cavity boundary ordering) and re-run canary + representative spot-check.
 
 ### 2026-02-11 M1.1 Progress (In Flight)
 
@@ -315,6 +317,95 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 
 - Correctness check:
   - `npm test` still hits known visual timeout in `testVisualHoleRendering` (60s wait exceeded).
+
+
+### 2026-02-11 M1.3.1 Iteration (Cylinder 3D Bbox Gating)
+
+- What changed:
+  - In `src/occ-test.ts`, cylinder `bbox3d` computation is no longer unconditional.
+  - `occEdgesToPolygon(face.outerLoop)` + bbox path now runs only when:
+    - `face.surfaceType === 'Cylinder'` and
+    - (`cylinderCrossesSeam` OR `degeneratePeriodicTrim` OR `__FORCE_CYLINDER_BBOX3D__ === true`).
+  - This avoids expensive boundary resampling and per-grid-point 3D filtering on non-problematic cylinder faces.
+
+- Canary result (`npm run -s bench:canary`):
+  - Wins vs `occt-import-js`: `6/6`
+  - Speedup median: `2.25x`
+  - Ours avg runtime: `155.8ms` (p90 `377.2ms`)
+  - Ref avg runtime: `391.5ms` (p90 `919.8ms`)
+
+- Representative result (`npm run -s bench:representative`):
+  - Wins vs `occt-import-js`: `5/6`
+  - Speedup median: `4.11x`
+  - Ours avg runtime: `1827.7ms` (p90 `5444.8ms`)
+  - Ref avg runtime: `982.2ms` (p90 `2752.9ms`)
+  - Remaining laggard:
+    - `Electronic Enclosure`: ours `10631.1ms`, ref `5239.8ms` (`2.03x` slower)
+    - `loadStepFile`: `3582.5ms` (`33.7%` of ours)
+    - top load sub-phases: `transfer 2794.8ms`, `readFile 785.2ms`, `fsWrite 1.1ms`
+
+- Delta vs prior representative run in this branch:
+  - `Electronic Enclosure`: `11120.3ms -> 10631.1ms` (`-489.2ms`, `-4.4%`)
+
+
+### 2026-02-11 M1.2.3 Iteration (Force Diagnostics Off in Perf Mode)
+
+- What changed:
+  - Added `loadDiagnosticsEnabled()` in `src/occ-test.ts`:
+    - returns `false` whenever `__PERF_GEOMETRY_ONLY_LOAD__ === true`
+    - otherwise respects `__ENABLE_LOAD_DIAGNOSTICS__`
+  - Switched load/solid-color diagnostic gates to use `loadDiagnosticsEnabled()`.
+  - Hardened `tests/benchmark-comprehensive.html` perf run wrapper to explicitly set:
+    - `__ENABLE_LOAD_DIAGNOSTICS__ = false`
+    - `__CURVE_VERBOSE_LOGS__ = false`
+    - `__TESSELLATION_VERBOSE_LOGS__ = false`
+    - and restore prior values after each run.
+
+- Canary result (`npm run -s bench:canary`):
+  - Wins vs `occt-import-js`: `6/6`
+  - Speedup median: `3.77x`
+  - Ours avg runtime: `179.8ms` (p90 `390.4ms`)
+  - Ref avg runtime: `553.7ms` (p90 `965.4ms`)
+
+- Representative spot checks:
+  - `npm run -s bench:representative -- --filter "Electronic Enclosure"`:
+    - ours `12384.4ms`, ref `5130.0ms` (`2.41x` slower)
+    - `loadStepFile`: `4959.9ms` (`40.1%` of ours)
+    - top sub-phases: `transfer 3732.7ms`, `readFile 1199.2ms`, `fsWrite 2.4ms`
+  - `npm run -s bench:representative -- --filter "VM-001"`:
+    - ours `493.5ms`, ref `610.7ms` (`1.24x` faster)
+
+- Conclusion:
+  - M1.2.3 successfully prevents perf-run contamination from diagnostic flags.
+  - Electronic Enclosure remains dominated by `loadStepFile` (`transfer` + `readFile`) and curved/trimmed tessellation costs, so M2/M3 and load-path reduction remain the next blockers.
+
+
+### 2026-02-11 M2.1 Iteration (CDT Recovery Fast-Reject + Boundary Ordering)
+
+- What changed (`src/cdt-gpu.ts`):
+  - Added triangle-vs-constraint edge AABB fast-reject inside `triangleIntersectsEdge(...)` to skip expensive segment crossing checks when boxes do not overlap.
+  - Hoisted edge endpoints and edge bbox computation in `recoverConstraintEdge(...)` so they are computed once per constraint edge and reused for all triangle checks.
+  - Reworked cavity boundary ordering:
+    - Added cycle-aware `orderBoundaryEdges(...)` walker (degree-2 cycle path).
+    - Added `orderBoundaryEdgesGreedy(...)` fallback for irregular boundaries.
+    - Added endpoint-based retry (`v1` first, retry from `v2`) before declaring `Constraint endpoints not on cavity boundary`.
+
+- Canary result (`npm run -s bench:canary`):
+  - Wins vs `occt-import-js`: `6/6`
+  - Speedup median: `2.48x`
+  - Ours avg runtime: `92.5ms` (p90 `192.0ms`)
+  - Ref avg runtime: `186.8ms` (p90 `376.2ms`)
+
+- Representative spot-check (`npm run -s bench:representative -- --filter "Electronic Enclosure"`):
+  - `Electronic Enclosure`: ours `11778.6ms`, ref `5128.8ms` (`2.30x` slower)
+  - `loadStepFile`: `4416.9ms` (`37.5%` of ours)
+  - top load sub-phases: `transfer 3299.6ms`, `readFile 1113.4ms`, `fsWrite 1.3ms`
+  - triangle ratio: `58745 / 39148` (`1.50x`)
+
+- Conclusion:
+  - M2.1 reduced CDT hot-loop overhead and stabilized cone/trim canary performance.
+  - Electronic Enclosure remains dominated by load path (`transfer` + `readFile`) plus residual curved/trim triangle inflation.
+  - Next steps stay unchanged: continue M2/M3 while parallelizing load-path reductions.
 
 
 ### 2026-02-11 M0 Checkpoint
