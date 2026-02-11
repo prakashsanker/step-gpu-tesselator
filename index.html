@@ -323,7 +323,7 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
         import { parseStepFile } from '/src/tessellator.ts';
-        import { parseStepWithOCC, parseStepWithOcctImportFull } from '/src/occ-test.ts';
+        import { parseStepWithOCC, parseStepWithOcctImportFull, buildFaceDiffReport } from '/src/occ-test.ts';
         import { getGPUDevice } from '/src/lib.ts';
 
         // State
@@ -778,6 +778,15 @@
                 await runComparison();
                 // Wait for render to complete
                 await new Promise(r => setTimeout(r, 500));
+            },
+
+            async runFaceDiff(testFilePath, targetFaceIndices = [63, 64, 65, 66]) {
+                const response = await fetch('/' + testFilePath);
+                if (!response.ok) {
+                    throw new Error(`Failed to load ${testFilePath}`);
+                }
+                const stepContent = await response.text();
+                return await buildFaceDiffReport(stepContent, { targetFaceIndices });
             },
 
             getCanvasDataUrl(canvasId) {

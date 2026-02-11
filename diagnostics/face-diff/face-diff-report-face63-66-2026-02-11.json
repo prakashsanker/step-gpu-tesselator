@@ -1,0 +1,121 @@
+{
+  "generatedAtIso": "2026-02-11T04:13:36.225Z",
+  "targetFaceIndices": [
+    63,
+    64,
+    65,
+    66
+  ],
+  "assumptions": [
+    "Face index alignment assumes OCC faceIndex order matches occt-import-js brep_faces global order.",
+    "Rows with missing reference data usually indicate meshes without brep_faces entries."
+  ],
+  "totals": {
+    "oursFaceCount": 4,
+    "referenceFaceCount": 4,
+    "oursTriangles": 49386,
+    "referenceTriangles": 2151
+  },
+  "rows": [
+    {
+      "faceIndex": 63,
+      "ours": {
+        "faceIndex": 63,
+        "surfaceType": "Cone",
+        "status": "ok",
+        "isReversed": false,
+        "outerEdgeCount": 11,
+        "innerLoopCount": 21,
+        "outputVertexCount": 7248,
+        "outputTriangleCount": 6996,
+        "durationMs": 37255.340000003576
+      },
+      "reference": {
+        "globalFaceIndex": 63,
+        "meshIndex": 0,
+        "meshName": "Electronic Enclousre - With Errors",
+        "firstTriangle": 5285,
+        "lastTriangle": 6009,
+        "triangleCount": 725,
+        "hasNativeColor": false
+      },
+      "triangleDelta": 6271,
+      "triangleDeltaPct": 864.9655172413793
+    },
+    {
+      "faceIndex": 64,
+      "ours": {
+        "faceIndex": 64,
+        "surfaceType": "Cone",
+        "status": "ok",
+        "isReversed": true,
+        "outerEdgeCount": 27,
+        "innerLoopCount": 1,
+        "outputVertexCount": 3291,
+        "outputTriangleCount": 3328,
+        "durationMs": 8152.1500000059605
+      },
+      "reference": {
+        "globalFaceIndex": 64,
+        "meshIndex": 0,
+        "meshName": "Electronic Enclousre - With Errors",
+        "firstTriangle": 6010,
+        "lastTriangle": 6406,
+        "triangleCount": 397,
+        "hasNativeColor": false
+      },
+      "triangleDelta": 2931,
+      "triangleDeltaPct": 738.287153652393
+    },
+    {
+      "faceIndex": 65,
+      "ours": {
+        "faceIndex": 65,
+        "surfaceType": "Cone",
+        "status": "ok",
+        "isReversed": true,
+        "outerEdgeCount": 26,
+        "innerLoopCount": 0,
+        "outputVertexCount": 16416,
+        "outputTriangleCount": 32312,
+        "durationMs": 6926.92999997735
+      },
+      "reference": {
+        "globalFaceIndex": 65,
+        "meshIndex": 0,
+        "meshName": "Electronic Enclousre - With Errors",
+        "firstTriangle": 6407,
+        "lastTriangle": 6745,
+        "triangleCount": 339,
+        "hasNativeColor": false
+      },
+      "triangleDelta": 31973,
+      "triangleDeltaPct": 9431.563421828909
+    },
+    {
+      "faceIndex": 66,
+      "ours": {
+        "faceIndex": 66,
+        "surfaceType": "Cone",
+        "status": "ok",
+        "isReversed": false,
+        "outerEdgeCount": 26,
+        "innerLoopCount": 18,
+        "outputVertexCount": 6935,
+        "outputTriangleCount": 6750,
+        "durationMs": 36781.735000014305
+      },
+      "reference": {
+        "globalFaceIndex": 66,
+        "meshIndex": 0,
+        "meshName": "Electronic Enclousre - With Errors",
+        "firstTriangle": 6746,
+        "lastTriangle": 7435,
+        "triangleCount": 690,
+        "hasNativeColor": false
+      },
+      "triangleDelta": 6060,
+      "triangleDeltaPct": 878.2608695652174
+    }
+  ]
+}
