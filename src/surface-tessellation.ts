@@ -14,6 +14,7 @@
  */
 
 import { constrainedDelaunayTriangulation, cdtWithHoles } from "./cdt-gpu";
+import { triangulateWithHoles } from "./triangulate-fast";
 import { evaluateSurface, surfaceNormal } from "./surfaces";
 import { createRectangularUVBoundary } from "./uv-extraction";
 import {
@@ -112,6 +113,14 @@ function trimDebugLog(...args: unknown[]): void {
     if ((globalThis as any)?.__TRIM_VERBOSE_LOGS__ === true) {
         console.log(...args);
     }
+}
+
+function readTrimNumber(key: string): number | null {
+    const raw = (globalThis as any)?.[key];
+    if (typeof raw !== "number" || !Number.isFinite(raw)) {
+        return null;
+    }
+    return raw;
 }
 
 /**
@@ -511,19 +520,24 @@ export async function tessellateTrimmedSurface(
     // ===== Use CDT with holes for proper hole support =====
     // CDT (Constrained Delaunay Triangulation) with cavity-based constraint recovery
     // ensures hole boundary edges are preserved in the triangulation
-    if (continuousHoles.length > 0 && !preferGridForHoles) {
-        trimDebugLog(`[tessellateTrimmedSurface] Using CDT with ${continuousHoles.length} holes`);
+    if (continuousHoles.length > 0) {
+        trimDebugLog(`[tessellateTrimmedSurface] Triangulating ${continuousHoles.length} hole loops`);
 
         // If boundary is sparse (e.g., just 4 rectangle corners), densify it
         // to get better triangulation quality on curved surfaces
         let denseBoundary: Vec2[];
         if (continuousBoundary.length <= 8) {
             denseBoundary = [];
+            const maxDenseBoundaryPoints = Math.max(
+                24,
+                Math.floor(readTrimNumber("__TRIM_MAX_DENSE_BOUNDARY_POINTS__") ?? 96)
+            );
+            const edgePointCap = Math.max(4, Math.floor(maxDenseBoundaryPoints / Math.max(1, continuousBoundary.length)));
             for (let i = 0; i < continuousBoundary.length; i++) {
                 const p1 = continuousBoundary[i];
                 const p2 = continuousBoundary[(i + 1) % continuousBoundary.length];
                 // Add points along this edge
-                const edgePoints = Math.max(8, gridDensityU, gridDensityV);
+                const edgePoints = Math.max(4, Math.min(edgePointCap, Math.max(6, Math.floor(gridDensity * 0.5))));
                 for (let t = 0; t < edgePoints; t++) {
                     const u = p1[0] + (p2[0] - p1[0]) * (t / edgePoints);
                     const v = p1[1] + (p2[1] - p1[1]) * (t / edgePoints);
@@ -535,10 +549,37 @@ export async function tessellateTrimmedSurface(
             denseBoundary = continuousBoundary;
         }
 
-        // Use CDT with holes - proper Constrained Delaunay Triangulation
-        // that recovers constraint edges using cavity-based approach
-        const triangles = await cdtWithHoles(denseBoundary, continuousHoles);
-        trimDebugLog(`[tessellateTrimmedSurface] CDT with holes generated ${triangles.length} triangles`);
+        // Complexity dispatch:
+        // - earcut for small/medium simple hole domains (lower overhead)
+        // - CDT for heavier domains or when earcut fails
+        const totalHolePoints = continuousHoles.reduce((sum, hole) => sum + hole.length, 0);
+        const totalLoopPoints = denseBoundary.length + totalHolePoints;
+        const holeCount = continuousHoles.length;
+        const forceMode = (globalThis as any)?.__TRIM_HOLE_TRIANGULATION_MODE__;
+        const earcutMaxPoints = Math.max(64, Math.floor(readTrimNumber("__TRIM_HOLE_EARCUT_MAX_POINTS__") ?? 512));
+        const earcutMaxHoles = Math.max(1, Math.floor(readTrimNumber("__TRIM_HOLE_EARCUT_MAX_HOLES__") ?? 24));
+        const canUseEarcut =
+            forceMode === "earcut" ||
+            (forceMode !== "cdt" && totalLoopPoints <= earcutMaxPoints && holeCount <= earcutMaxHoles);
+
+        let triangles: [number, number, number][] = [];
+        if (canUseEarcut) {
+            const earcutTriangles = triangulateWithHoles(denseBoundary, continuousHoles);
+            triangles = earcutTriangles.map((tri) => [tri[0], tri[1], tri[2]] as [number, number, number]);
+            if (triangles.length === 0) {
+                triangles = await cdtWithHoles(denseBoundary, continuousHoles);
+            } else {
+                trimDebugLog(
+                    `[tessellateTrimmedSurface] Hole mode=earcut points=${totalLoopPoints} holes=${holeCount} tris=${triangles.length}`
+                );
+            }
+        } else {
+            triangles = await cdtWithHoles(denseBoundary, continuousHoles);
+            trimDebugLog(
+                `[tessellateTrimmedSurface] Hole mode=cdt points=${totalLoopPoints} holes=${holeCount} tris=${triangles.length}`
+            );
+        }
+        trimDebugLog(`[tessellateTrimmedSurface] Hole triangulation generated ${triangles.length} triangles`);
 
         // Build combined vertex array (boundary + all holes)
         const allVertices: Vec2[] = [...denseBoundary];
