@@ -1,179 +1,30 @@
 /**
- * Comprehensive Benchmark Runner for OCC Tessellator
+ * Representative benchmark runner for OCC tessellation vs occt-import-js.
  *
- * Compares our pipeline (OpenCascade.js + GPU tessellation) against occt-import-js
+ * Profiles:
+ *   canary         Fast iteration set (default)
+ *   representative Real-world set including Electronic Enclosure
+ *   full           Broader set for milestone/baseline runs
  *
  * Usage:
- *   node tests/benchmark-comprehensive.js                 # Run canary suite
- *   node tests/benchmark-comprehensive.js --suite canary  # Run canary suite
- *   node tests/benchmark-comprehensive.js --filter bowl   # Filter by name/path substring
- *   node tests/benchmark-comprehensive.js --max-files 20  # Limit files for quick checks
+ *   node tests/benchmark-comprehensive.js
+ *   node tests/benchmark-comprehensive.js --suite representative
+ *   node tests/benchmark-comprehensive.js --suite full --runs 2 --warmup 1
+ *   node tests/benchmark-comprehensive.js --all            # alias for --suite full
+ *   node tests/benchmark-comprehensive.js --filter VM      # substring match on name/path
  */
 
 import puppeteer from 'puppeteer';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import { basename, dirname, join } from 'path';
+import { dirname, join } from 'path';
 import fs from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
 
-function parseArgs(argv) {
-    const parsed = {
-        suite: 'canary',
-        filter: '',
-        maxFiles: null,
-        warmupRuns: 0,
-        benchmarkRuns: 1,
-        timeoutMs: 300000,
-    };
+const args = process.argv.slice(2);
 
-    for (let i = 0; i < argv.length; i++) {
-        const arg = argv[i];
-        if (arg === '--suite' && i + 1 < argv.length) {
-            parsed.suite = argv[++i];
-        } else if (arg === '--filter' && i + 1 < argv.length) {
-            parsed.filter = argv[++i].toLowerCase();
-        } else if (arg === '--max-files' && i + 1 < argv.length) {
-            parsed.maxFiles = Math.max(1, Number(argv[++i]) || 0) || null;
-        } else if (arg === '--warmup' && i + 1 < argv.length) {
-            parsed.warmupRuns = Math.max(0, Number(argv[++i]) || 0);
-        } else if (arg === '--runs' && i + 1 < argv.length) {
-            parsed.benchmarkRuns = Math.max(1, Number(argv[++i]) || 1);
-        } else if (arg === '--timeout' && i + 1 < argv.length) {
-            parsed.timeoutMs = Math.max(30000, Number(argv[++i]) || 300000);
-        } else if (arg === '--help' || arg === '-h') {
-            console.log(`Usage:
-  node tests/benchmark-comprehensive.js [options]
-
-Options:
-  --suite canary          Canary suite (all non-real-world test STEP/STP files)
-  --filter PATTERN        Substring filter on path/name
-  --max-files N           Limit number of files after filtering
-  --warmup N              Warmup runs per file (default: 0)
-  --runs N                Benchmark runs per file (default: 1)
-  --timeout MS            Per-file timeout in ms (default: 300000)
-`);
-            process.exit(0);
-        }
-    }
-
-    return parsed;
-}
-
-const args = parseArgs(process.argv.slice(2));
-
-// Configuration
-const CONFIG = {
-    vitePort: 5175,
-    timeout: args.timeoutMs,
-    headless: true,
-    warmupRuns: args.warmupRuns,
-    benchmarkRuns: args.benchmarkRuns,
-};
-
-const REAL_WORLD_PATH_PATTERNS = [
-    /^step-examples\/Electronic Enclousre\.STEP$/i,
-    /^step-examples\/VM-\d+\.STEP$/i,
-    /^step-examples\/external\//i,
-];
-const CANARY_FORCE_INCLUDE_FILES = new Set([
-    'step-examples/VM-001.STEP',
-]);
-const EXCLUDED_BASENAME_PATTERNS = [
-    /rocky_house/i,
-    /rotor/i,
-];
-const BROKEN_CANARY_FILES = new Set([
-    'step-examples/c2-holes/2.2-projection/tilted-triangle-no-plane.step',
-    'step-examples/complex/air.step',
-    'step-examples/complex/nissan.step',
-]);
-
-function walkStepFiles(relativeDir) {
-    const root = join(PROJECT_ROOT, relativeDir);
-    const out = [];
-
-    const recurse = (absDir, relDir) => {
-        const entries = fs.readdirSync(absDir, { withFileTypes: true });
-        for (const entry of entries) {
-            const absPath = join(absDir, entry.name);
-            const relPath = `${relDir}/${entry.name}`;
-            if (entry.isDirectory()) {
-                recurse(absPath, relPath);
-                continue;
-            }
-            if (!entry.isFile()) continue;
-            if (!/\.(step|stp)$/i.test(entry.name)) continue;
-            out.push(relPath);
-        }
-    };
-
-    recurse(root, relativeDir);
-    return out.sort();
-}
-
-function categorizePath(relativePath) {
-    const parts = relativePath.split('/');
-    return parts.length >= 2 ? parts[1] : 'misc';
-}
-
-function shouldExcludeCanary(relativePath) {
-    if (CANARY_FORCE_INCLUDE_FILES.has(relativePath)) {
-        return null;
-    }
-    for (const pattern of REAL_WORLD_PATH_PATTERNS) {
-        if (pattern.test(relativePath)) return 'real-world';
-    }
-    if (BROKEN_CANARY_FILES.has(relativePath)) {
-        return 'known-broken';
-    }
-    const fileName = basename(relativePath);
-    for (const pattern of EXCLUDED_BASENAME_PATTERNS) {
-        if (pattern.test(fileName)) return 'requested-exclusion';
-    }
-    return null;
-}
-
-function percentile(values, pct) {
-    if (!values.length) return null;
-    const sorted = [...values].sort((a, b) => a - b);
-    const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1));
-    return sorted[index];
-}
-
-function buildCanaryBenchmarks() {
-    const allStepFiles = walkStepFiles('step-examples');
-    const excluded = [];
-    let selected = [];
-
-    for (const relativePath of allStepFiles) {
-        const excludedReason = shouldExcludeCanary(relativePath);
-        if (excludedReason) {
-            excluded.push({ path: relativePath, reason: excludedReason });
-            continue;
-        }
-        selected.push(relativePath);
-    }
-
-    if (args.filter) {
-        selected = selected.filter((path) => path.toLowerCase().includes(args.filter));
-    }
-    if (args.maxFiles != null) {
-        selected = selected.slice(0, args.maxFiles);
-    }
-
-    const models = selected.map((path) => ({
-        name: path.replace('step-examples/', ''),
-        path,
-        category: categorizePath(path),
-    }));
-
-    return { models, excluded };
-}
-
-// Colors for terminal output
 const colors = {
     reset: '\x1b[0m',
     green: '\x1b[32m',
@@ -189,58 +40,250 @@ function log(message, color = 'reset') {
     console.log(`${colors[color]}${message}${colors.reset}`);
 }
 
-/**
- * Start Vite dev server
- */
-async function startViteServer() {
+function parseArgs(argv) {
+    const parsed = {
+        suite: 'canary',
+        runs: null,
+        warmup: null,
+        timeoutMs: null,
+        filter: null,
+        prewarm: true,
+    };
+
+    for (let i = 0; i < argv.length; i++) {
+        const arg = argv[i];
+        if (arg === '--all') {
+            parsed.suite = 'full';
+        } else if (arg === '--complex-only') {
+            parsed.suite = 'representative';
+            parsed.filter = 'VM|Electronic|conical|raw';
+        } else if (arg === '--suite') {
+            parsed.suite = (argv[i + 1] || '').toLowerCase();
+            i += 1;
+        } else if (arg === '--runs') {
+            parsed.runs = Number(argv[i + 1]);
+            i += 1;
+        } else if (arg === '--warmup') {
+            parsed.warmup = Number(argv[i + 1]);
+            i += 1;
+        } else if (arg === '--timeout-ms') {
+            parsed.timeoutMs = Number(argv[i + 1]);
+            i += 1;
+        } else if (arg === '--filter') {
+            parsed.filter = argv[i + 1] || null;
+            i += 1;
+        } else if (arg === '--no-prewarm') {
+            parsed.prewarm = false;
+        } else if (arg === '--help' || arg === '-h') {
+            printUsage();
+            process.exit(0);
+        }
+    }
+
+    return parsed;
+}
+
+function printUsage() {
+    console.log(`Usage:
+  node tests/benchmark-comprehensive.js [options]
+
+Options:
+  --suite canary|representative|full
+  --all                     Alias for --suite full
+  --runs N                  Benchmark runs per model
+  --warmup N                Warmup runs per model
+  --timeout-ms N            Per-run timeout in milliseconds
+  --filter PATTERN          Substring filter on model name/path
+  --no-prewarm              Disable one-time harness prewarm run
+  --help                    Show this help
+`);
+}
+
+const SUITES = {
+    canary: {
+        description: 'Fast representative set for tight dev loop',
+        timeoutMs: 180000,
+        warmupRuns: 0,
+        benchmarkRuns: 1,
+        models: [
+            { name: 'Plate XLarge (holes)', path: 'step-examples/benchmark/plate-xlarge-20x20.step', category: 'holes' },
+            { name: 'Cone (primitive)', path: 'step-examples/c4-surfaces/cone.step', category: 'cone' },
+            { name: 'Cylinder With Hole (trim)', path: 'step-examples/c6-trimmed/cylinder-with-hole.step', category: 'trimmed' },
+            { name: 'BSpline Bowl', path: 'step-examples/c5-bspline/bspline-bowl.step', category: 'bspline' },
+            { name: 'Conical Surface (complex)', path: 'step-examples/complex/conical-surface.step', category: 'complex' },
+            { name: 'VM-001', path: 'step-examples/VM-001.STEP', category: 'industry' },
+        ],
+    },
+    representative: {
+        description: 'Real-world performance gate including electronic enclosure',
+        timeoutMs: 360000,
+        warmupRuns: 0,
+        benchmarkRuns: 1,
+        models: [
+            { name: 'Electronic Enclosure', path: 'step-examples/Electronic Enclousre.STEP', category: 'enclosure' },
+            { name: 'VM-001', path: 'step-examples/VM-001.STEP', category: 'industry' },
+            { name: 'VM-002', path: 'step-examples/VM-002.STEP', category: 'industry' },
+            { name: 'Raw Material', path: 'step-examples/complex/raw-material.step', category: 'complex' },
+            { name: 'Conical Surface (complex)', path: 'step-examples/complex/conical-surface.step', category: 'complex' },
+            { name: 'Pipe With Porthole (trim)', path: 'step-examples/c6-trimmed/pipe-with-porthole.step', category: 'trimmed' },
+        ],
+    },
+    full: {
+        description: 'Broader milestone suite (still excludes known pathological files)',
+        timeoutMs: 420000,
+        warmupRuns: 1,
+        benchmarkRuns: 2,
+        models: [
+            { name: 'Simple Square', path: 'step-examples/benchmark/simple-square.step', category: 'simple' },
+            { name: 'Plate Medium (holes)', path: 'step-examples/benchmark/plate-medium-5x5.step', category: 'holes' },
+            { name: 'Plate XLarge (holes)', path: 'step-examples/benchmark/plate-xlarge-20x20.step', category: 'holes' },
+            { name: 'Unit Box', path: 'step-examples/c4-multiface/unit-box.step', category: 'multiface' },
+            { name: 'Cone (primitive)', path: 'step-examples/c4-surfaces/cone.step', category: 'cone' },
+            { name: 'Cylinder', path: 'step-examples/c4-surfaces/cylinder.step', category: 'curved' },
+            { name: 'Sphere', path: 'step-examples/c4-surfaces/sphere.step', category: 'curved' },
+            { name: 'Torus', path: 'step-examples/c4-surfaces/torus.step', category: 'curved' },
+            { name: 'Cylinder With Hole (trim)', path: 'step-examples/c6-trimmed/cylinder-with-hole.step', category: 'trimmed' },
+            { name: 'Pipe With Porthole (trim)', path: 'step-examples/c6-trimmed/pipe-with-porthole.step', category: 'trimmed' },
+            { name: 'BSpline Bowl', path: 'step-examples/c5-bspline/bspline-bowl.step', category: 'bspline' },
+            { name: 'BSpline Dome', path: 'step-examples/c5-bspline/bspline-dome.step', category: 'bspline' },
+            { name: 'Conical Surface (complex)', path: 'step-examples/complex/conical-surface.step', category: 'complex' },
+            { name: 'Raw Material', path: 'step-examples/complex/raw-material.step', category: 'complex' },
+            { name: 'Electronic Enclosure', path: 'step-examples/Electronic Enclousre.STEP', category: 'enclosure' },
+            { name: 'VM-001', path: 'step-examples/VM-001.STEP', category: 'industry' },
+            { name: 'VM-002', path: 'step-examples/VM-002.STEP', category: 'industry' },
+        ],
+    },
+};
+
+const EXCLUDED_MODELS = [
+    { path: 'step-examples/complex/nissan.step', reason: 'Reference parser failure in baseline runs' },
+    { path: 'step-examples/complex/rocky_house.step', reason: 'Timeout (too slow for routine perf loop)' },
+    { path: 'step-examples/complex/rotor-201nal.step', reason: 'Timeout (too slow for routine perf loop)' },
+];
+
+const PHASE_KEYS = [
+    'loadStepFile',
+    'extractFacesWithEdges',
+    'tessellateOCCShape',
+    'tessellatePlanarFace',
+    'tessellateCurvedFace',
+    'earClipping',
+    'computeNormals',
+    'meshAssembly',
+];
+
+function selectConfig(parsed) {
+    const suiteConfig = SUITES[parsed.suite];
+    if (!suiteConfig) {
+        throw new Error(`Unknown suite: ${parsed.suite}. Use one of: ${Object.keys(SUITES).join(', ')}`);
+    }
+
+    const cfg = {
+        viteHost: '127.0.0.1',
+        vitePort: 5175,
+        timeoutMs: Number.isFinite(parsed.timeoutMs) ? parsed.timeoutMs : suiteConfig.timeoutMs,
+        headless: true,
+        warmupRuns: Number.isFinite(parsed.warmup) ? parsed.warmup : suiteConfig.warmupRuns,
+        benchmarkRuns: Number.isFinite(parsed.runs) ? parsed.runs : suiteConfig.benchmarkRuns,
+        suite: parsed.suite,
+        suiteDescription: suiteConfig.description,
+        prewarm: parsed.prewarm !== false,
+    };
+
+    let models = [...suiteConfig.models];
+    if (parsed.filter) {
+        const pattern = parsed.filter.toLowerCase();
+        models = models.filter((m) => (`${m.name} ${m.path}`).toLowerCase().includes(pattern));
+    }
+
+    return { cfg, models };
+}
+
+function percentile(values, p) {
+    if (values.length === 0) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const idx = (p / 100) * (sorted.length - 1);
+    const lo = Math.floor(idx);
+    const hi = Math.ceil(idx);
+    if (lo === hi) return sorted[lo];
+    const t = idx - lo;
+    return sorted[lo] * (1 - t) + sorted[hi] * t;
+}
+
+function mean(values) {
+    if (values.length === 0) return null;
+    return values.reduce((acc, v) => acc + v, 0) / values.length;
+}
+
+function formatMs(value) {
+    if (value === null || value === undefined) return 'n/a';
+    return `${value.toFixed(1)}ms`;
+}
+
+function formatRatio(value) {
+    if (value === null || value === undefined || !Number.isFinite(value)) return 'n/a';
+    return `${value.toFixed(2)}x`;
+}
+
+function loadStepFile(relativePath) {
+    const fullPath = join(PROJECT_ROOT, relativePath);
+    const content = fs.readFileSync(fullPath, 'utf8');
+    const size = fs.statSync(fullPath).size;
+    return { content, size };
+}
+
+async function startViteServer(config) {
     return new Promise((resolve, reject) => {
         log('Starting Vite dev server...', 'blue');
 
-        const vite = spawn('npx', ['vite', '--port', CONFIG.vitePort.toString()], {
+        const vite = spawn('npx', ['vite', '--host', config.viteHost, '--port', String(config.vitePort)], {
             cwd: PROJECT_ROOT,
             stdio: ['ignore', 'pipe', 'pipe'],
         });
 
         let started = false;
-        const timeout = setTimeout(() => {
+        let stderrBuffer = '';
+        const startupTimeout = setTimeout(() => {
             if (!started) {
                 vite.kill();
                 reject(new Error('Vite server startup timeout'));
             }
-        }, 30000);
+        }, 60000);
 
-        vite.stdout.on('data', (data) => {
-            const output = data.toString();
-            if (output.includes('Local:') && !started) {
+        vite.stdout.on('data', (chunk) => {
+            const text = chunk.toString();
+            if (text.includes('Local:') && !started) {
                 started = true;
-                clearTimeout(timeout);
-                log(`Vite server started on port ${CONFIG.vitePort}`, 'green');
-                resolve(vite);
+                clearTimeout(startupTimeout);
+                const match = text.match(/http:\/\/[^:]+:(\d+)\//);
+                const port = match ? Number(match[1]) : config.vitePort;
+                log(`Vite server started on port ${port}`, 'green');
+                resolve({ process: vite, port });
             }
         });
 
-        vite.stderr.on('data', (data) => {
-            const output = data.toString();
-            if (output.includes('error')) {
-                console.error('Vite error:', output);
-            }
+        vite.stderr.on('data', (chunk) => {
+            stderrBuffer += chunk.toString();
+        });
+
+        vite.on('close', (code) => {
+            if (started) return;
+            clearTimeout(startupTimeout);
+            const details = stderrBuffer.trim();
+            reject(new Error(`Vite exited before ready (code ${code}). ${details}`));
         });
 
         vite.on('error', (err) => {
-            clearTimeout(timeout);
+            clearTimeout(startupTimeout);
             reject(err);
         });
     });
 }
 
-/**
- * Launch browser with WebGPU support
- */
 async function launchBrowser() {
     log('Launching browser with WebGPU...', 'blue');
-
-    const browser = await puppeteer.launch({
-        headless: CONFIG.headless,
+    return puppeteer.launch({
+        headless: true,
         args: [
             '--enable-unsafe-webgpu',
             '--enable-features=Vulkan',
@@ -251,289 +294,352 @@ async function launchBrowser() {
             '--disable-setuid-sandbox',
         ],
     });
-
-    return browser;
 }
 
-/**
- * Load a STEP file from disk
- */
-function loadStepFile(relativePath) {
-    const fullPath = join(PROJECT_ROOT, relativePath);
-    const content = fs.readFileSync(fullPath, 'utf8');
-    const stats = fs.statSync(fullPath);
-    return { content, size: stats.size };
-}
-
-/**
- * Run benchmark for a single file
- */
-async function runBenchmark(page, benchmark) {
-    let stepData;
+async function withTimeout(promiseFactory, timeoutMs, label) {
+    let timeoutId = null;
     try {
-        stepData = loadStepFile(benchmark.path);
-    } catch (e) {
-        return { success: false, error: `Failed to load: ${e.message}` };
+        return await Promise.race([
+            promiseFactory(),
+            new Promise((_, reject) => {
+                timeoutId = setTimeout(() => {
+                    reject(new Error(`${label} timed out after ${timeoutMs}ms`));
+                }, timeoutMs);
+            }),
+        ]);
+    } finally {
+        if (timeoutId !== null) clearTimeout(timeoutId);
     }
-
-    const results = {
-        name: benchmark.name,
-        category: benchmark.category,
-        fileSize: stepData.size,
-        occ: { times: [], vertices: 0, triangles: 0 },
-        occtImport: { times: [], vertices: 0, triangles: 0 },
-    };
-
-    // Warmup runs
-    for (let i = 0; i < CONFIG.warmupRuns; i++) {
-        await page.evaluate(async (content) => {
-            try { await window.benchmark.runOCC(content); } catch (e) {}
-            try { await window.benchmark.runOcctImport(content); } catch (e) {}
-        }, stepData.content);
-    }
-
-    // Benchmark runs
-    for (let i = 0; i < CONFIG.benchmarkRuns; i++) {
-        const runResult = await page.evaluate(async (content) => {
-            const occResult = await window.benchmark.runOCC(content);
-            const occtResult = await window.benchmark.runOcctImport(content);
-            return { occResult, occtResult };
-        }, stepData.content);
-
-        if (runResult.occResult.success) {
-            results.occ.times.push(runResult.occResult.totalTime);
-            results.occ.vertices = runResult.occResult.vertexCount;
-            results.occ.triangles = runResult.occResult.triangleCount;
-            results.occ.phases = runResult.occResult.phases;
-        }
-
-        if (runResult.occtResult.success) {
-            results.occtImport.times.push(runResult.occtResult.totalTime);
-            results.occtImport.vertices = runResult.occtResult.vertexCount;
-            results.occtImport.triangles = runResult.occtResult.triangleCount;
-        }
-    }
-
-    // Calculate averages
-    if (results.occ.times.length > 0) {
-        results.occ.avgTime = results.occ.times.reduce((a, b) => a + b, 0) / results.occ.times.length;
-    }
-    if (results.occtImport.times.length > 0) {
-        results.occtImport.avgTime = results.occtImport.times.reduce((a, b) => a + b, 0) / results.occtImport.times.length;
-    }
-
-    // Calculate speedup
-    if (results.occ.avgTime && results.occtImport.avgTime) {
-        results.speedup = results.occtImport.avgTime / results.occ.avgTime;
-    }
-
-    results.success = results.occ.times.length > 0 && results.occtImport.times.length > 0;
-    return results;
 }
 
-/**
- * Print results table
- */
-function printResultsTable(results) {
+function summarizePhaseRuns(phaseRuns) {
+    const out = {};
+    for (const key of PHASE_KEYS) {
+        const vals = phaseRuns.map((run) => run[key]).filter((v) => Number.isFinite(v));
+        out[key] = mean(vals);
+    }
+    return out;
+}
+
+async function runBenchmark(page, model, config) {
+    let step;
+    try {
+        step = loadStepFile(model.path);
+    } catch (err) {
+        return {
+            name: model.name,
+            path: model.path,
+            category: model.category,
+            success: false,
+            error: `Failed to load STEP file: ${err.message}`,
+        };
+    }
+
+    const oursRuns = [];
+    const refRuns = [];
+    const phaseRuns = [];
+    const errors = [];
+    let lastSuccess = null;
+
+    for (let i = 0; i < config.warmupRuns; i++) {
+        try {
+            await withTimeout(
+                () => page.evaluate(async (content) => {
+                    try {
+                        await window.benchmark.runOCC(content);
+                    } catch (_) {}
+                    try {
+                        await window.benchmark.runOcctImport(content);
+                    } catch (_) {}
+                }, step.content),
+                config.timeoutMs,
+                `${model.name} warmup`,
+            );
+        } catch (err) {
+            errors.push(`warmup ${i + 1}: ${err.message}`);
+        }
+    }
+
+    for (let i = 0; i < config.benchmarkRuns; i++) {
+        try {
+            const run = await withTimeout(
+                () => page.evaluate(async (content) => {
+                    const ours = await window.benchmark.runOCC(content);
+                    const ref = await window.benchmark.runOcctImport(content);
+                    return { ours, ref };
+                }, step.content),
+                config.timeoutMs,
+                `${model.name} run ${i + 1}`,
+            );
+
+            if (run.ours?.success) {
+                oursRuns.push(run.ours.totalTime);
+                phaseRuns.push(run.ours.phases || {});
+            } else {
+                errors.push(`ours run ${i + 1}: ${run.ours?.error || 'unknown error'}`);
+            }
+
+            if (run.ref?.success) {
+                refRuns.push(run.ref.totalTime);
+            } else {
+                errors.push(`reference run ${i + 1}: ${run.ref?.error || 'unknown error'}`);
+            }
+
+            if (!run.ours?.success || !run.ref?.success) {
+                continue;
+            }
+            lastSuccess = run;
+        } catch (err) {
+            errors.push(`run ${i + 1}: ${err.message}`);
+        }
+    }
+
+    if (lastSuccess && oursRuns.length > 0 && refRuns.length > 0) {
+        return {
+            name: model.name,
+            path: model.path,
+            category: model.category,
+            fileSize: step.size,
+            success: true,
+            ours: {
+                avgMs: mean(oursRuns),
+                p50Ms: percentile(oursRuns, 50),
+                p90Ms: percentile(oursRuns, 90),
+                maxMs: percentile(oursRuns, 100),
+                runs: oursRuns,
+                phases: summarizePhaseRuns(phaseRuns),
+                vertexCount: lastSuccess.ours.vertexCount,
+                triangleCount: lastSuccess.ours.triangleCount,
+            },
+            ref: {
+                avgMs: mean(refRuns),
+                p50Ms: percentile(refRuns, 50),
+                p90Ms: percentile(refRuns, 90),
+                maxMs: percentile(refRuns, 100),
+                runs: refRuns,
+                vertexCount: lastSuccess.ref.vertexCount,
+                triangleCount: lastSuccess.ref.triangleCount,
+            },
+            speedup: mean(refRuns) / mean(oursRuns),
+            triangleRatio: lastSuccess.ref.triangleCount > 0
+                ? lastSuccess.ours.triangleCount / lastSuccess.ref.triangleCount
+                : null,
+            warnings: errors,
+        };
+    }
+
+    return {
+        name: model.name,
+        path: model.path,
+        category: model.category,
+        fileSize: step.size,
+        success: false,
+        error: errors.length > 0 ? errors.join(' | ') : 'No successful run',
+    };
+}
+
+async function prewarmHarness(page, config) {
+    if (!config.prewarm) return;
+    const warmFile = loadStepFile('step-examples/benchmark/simple-square.step');
+    log('Running one-time benchmark harness prewarm...', 'dim');
+    await withTimeout(
+        () => page.evaluate(async (content) => {
+            try { await window.benchmark.runOCC(content); } catch (_) {}
+            try { await window.benchmark.runOcctImport(content); } catch (_) {}
+        }, warmFile.content),
+        config.timeoutMs,
+        'harness prewarm',
+    );
+}
+
+function printSuiteHeader(config, models) {
     log('\n' + '='.repeat(120), 'blue');
-    log('  BENCHMARK RESULTS', 'bold');
+    log(` Representative Benchmark (${config.suite})`, 'bold');
+    log(` ${config.suiteDescription}`, 'cyan');
+    log(` runs=${config.benchmarkRuns}, warmup=${config.warmupRuns}, timeout=${config.timeoutMs}ms, models=${models.length}`, 'dim');
+    log(` prewarm=${config.prewarm ? 'on' : 'off'}`, 'dim');
     log('='.repeat(120), 'blue');
 
-    // Header
+    log('\nExcluded from routine suites:', 'yellow');
+    for (const ex of EXCLUDED_MODELS) {
+        log(`  - ${ex.path}: ${ex.reason}`, 'dim');
+    }
+}
+
+function printResultRow(result) {
+    if (!result.success) {
+        log(`FAIL  ${result.name}: ${result.error}`, 'red');
+        return;
+    }
+
+    const ours = result.ours.avgMs;
+    const ref = result.ref.avgMs;
+    const speed = result.speedup;
+
+    const speedLabel = speed >= 1 ? `${speed.toFixed(2)}x faster` : `${(1 / speed).toFixed(2)}x slower`;
+    const speedColor = speed >= 1 ? 'green' : 'red';
+
+    log(
+        `PASS  ${result.name} | ours=${ours.toFixed(1)}ms | ref=${ref.toFixed(1)}ms | ${speedLabel} | tris=${result.ours.triangleCount}/${result.ref.triangleCount}`,
+        speedColor,
+    );
+}
+
+function printResultsTable(results) {
+    log('\n' + '-'.repeat(154), 'dim');
     const header = [
-        'Model'.padEnd(30),
-        'Size'.padStart(10),
-        'OCC Time'.padStart(12),
-        'OCC Tris'.padStart(12),
-        'occt Time'.padStart(12),
-        'occt Tris'.padStart(12),
-        'Speedup'.padStart(10),
+        'Model'.padEnd(34),
+        'SizeKB'.padStart(8),
+        'Ours(ms)'.padStart(10),
+        'Ref(ms)'.padStart(10),
+        'Speedup'.padStart(12),
+        'OursTris'.padStart(10),
+        'RefTris'.padStart(10),
+        'TriRatio'.padStart(10),
     ].join(' | ');
     log(header, 'cyan');
-    log('-'.repeat(120), 'dim');
+    log('-'.repeat(154), 'dim');
 
-    // Rows
     for (const r of results) {
         if (!r.success) {
-            log(`${r.name.padEnd(30)} | FAILED: ${r.error || 'Unknown error'}`, 'red');
+            const row = [
+                r.name.padEnd(34),
+                ((r.fileSize || 0) / 1024).toFixed(1).padStart(8),
+                'FAILED'.padStart(10),
+                ''.padStart(10),
+                ''.padStart(12),
+                ''.padStart(10),
+                ''.padStart(10),
+                ''.padStart(10),
+            ].join(' | ');
+            log(row, 'red');
             continue;
         }
 
-        const sizeStr = (r.fileSize / 1024).toFixed(1) + ' KB';
-        const occTimeStr = r.occ.avgTime.toFixed(0) + ' ms';
-        const occTrisStr = r.occ.triangles.toLocaleString();
-        const occtTimeStr = r.occtImport.avgTime.toFixed(0) + ' ms';
-        const occtTrisStr = r.occtImport.triangles.toLocaleString();
-
-        let speedupStr = r.speedup.toFixed(2) + 'x';
-        let speedupColor = r.speedup >= 1 ? 'green' : 'red';
+        const speedStr = r.speedup >= 1
+            ? `${r.speedup.toFixed(2)}x`
+            : `${(1 / r.speedup).toFixed(2)}x`; // slower shown in color
 
         const row = [
-            r.name.padEnd(30),
-            sizeStr.padStart(10),
-            occTimeStr.padStart(12),
-            occTrisStr.padStart(12),
-            occtTimeStr.padStart(12),
-            occtTrisStr.padStart(12),
-            speedupStr.padStart(10),
+            r.name.padEnd(34),
+            (r.fileSize / 1024).toFixed(1).padStart(8),
+            r.ours.avgMs.toFixed(1).padStart(10),
+            r.ref.avgMs.toFixed(1).padStart(10),
+            speedStr.padStart(12),
+            String(r.ours.triangleCount).padStart(10),
+            String(r.ref.triangleCount).padStart(10),
+            (r.triangleRatio ?? 0).toFixed(2).padStart(10),
         ].join(' | ');
 
-        // Color the entire row based on speedup
-        log(row, speedupColor);
+        log(row, r.speedup >= 1 ? 'green' : 'red');
     }
 
-    log('='.repeat(120) + '\n', 'blue');
-
-    // Summary statistics
-    const successResults = results.filter(r => r.success);
-    if (successResults.length > 0) {
-        const speedups = successResults.map((r) => r.speedup);
-        const oursTimes = successResults.map((r) => r.occ.avgTime);
-        const refTimes = successResults.map((r) => r.occtImport.avgTime);
-        const avgSpeedup = successResults.reduce((a, r) => a + r.speedup, 0) / successResults.length;
-        const medianSpeedup = percentile(speedups, 50);
-        const p90Speedup = percentile(speedups, 90);
-        const oursMedian = percentile(oursTimes, 50);
-        const oursP90 = percentile(oursTimes, 90);
-        const refMedian = percentile(refTimes, 50);
-        const refP90 = percentile(refTimes, 90);
-        const fasterCount = successResults.filter(r => r.speedup >= 1).length;
-        const failedCount = results.length - successResults.length;
-
-        log('SUMMARY:', 'bold');
-        log(`  Total benchmarks: ${results.length}`, 'cyan');
-        log(`  Successful: ${successResults.length}`, 'cyan');
-        log(`  Failed: ${failedCount}`, failedCount === 0 ? 'green' : 'red');
-        log(`  Speedup median: ${medianSpeedup.toFixed(2)}x`, medianSpeedup >= 1 ? 'green' : 'red');
-        log(`  Speedup p90: ${p90Speedup.toFixed(2)}x`, p90Speedup >= 1 ? 'green' : 'red');
-        log(`  Average speedup: ${avgSpeedup.toFixed(2)}x`, avgSpeedup >= 1 ? 'green' : 'red');
-        log(`  Ours median/p90: ${oursMedian.toFixed(1)}ms / ${oursP90.toFixed(1)}ms`, 'cyan');
-        log(`  Ref median/p90: ${refMedian.toFixed(1)}ms / ${refP90.toFixed(1)}ms`, 'cyan');
-        log(`  Faster than occt-import-js: ${fasterCount}/${successResults.length}`, 'cyan');
-    }
+    log('-'.repeat(154), 'dim');
 }
 
-/**
- * Save results to JSON
- */
-function saveResultsJson(results) {
-    const outputPath = join(PROJECT_ROOT, 'tests', 'benchmark-results.json');
+function printAggregateSummary(results) {
+    const success = results.filter((r) => r.success);
+    const failed = results.filter((r) => !r.success);
+
+    log('\nAggregate:', 'bold');
+    log(`  successful: ${success.length}/${results.length}`, 'cyan');
+    log(`  failed: ${failed.length}/${results.length}`, failed.length > 0 ? 'yellow' : 'green');
+
+    if (success.length === 0) return;
+
+    const speedups = success.map((r) => r.speedup);
+    const oursTimes = success.map((r) => r.ours.avgMs);
+    const refTimes = success.map((r) => r.ref.avgMs);
+    const wins = success.filter((r) => r.speedup >= 1).length;
+
+    const speedMedian = percentile(speedups, 50);
+    const speedP90 = percentile(speedups, 90);
+
+    log(`  wins vs occt-import-js: ${wins}/${success.length}`, 'cyan');
+    log(`  speedup median: ${formatRatio(speedMedian)}`, speedMedian >= 1 ? 'green' : 'red');
+    log(`  speedup p90: ${formatRatio(speedP90)}`, speedP90 >= 1 ? 'green' : 'red');
+    log(`  ours avg runtime: ${formatMs(mean(oursTimes))} (p90 ${formatMs(percentile(oursTimes, 90))})`, 'cyan');
+    log(`  ref avg runtime: ${formatMs(mean(refTimes))} (p90 ${formatMs(percentile(refTimes, 90))})`, 'cyan');
+}
+
+function saveResultsJson(config, models, results) {
     const output = {
         timestamp: new Date().toISOString(),
-        suite: args.suite,
-        config: CONFIG,
-        filter: args.filter || null,
-        maxFiles: args.maxFiles,
-        results: results,
+        suite: config.suite,
+        suiteDescription: config.suiteDescription,
+        config: {
+            benchmarkRuns: config.benchmarkRuns,
+            warmupRuns: config.warmupRuns,
+            timeoutMs: config.timeoutMs,
+            modelCount: models.length,
+            prewarm: config.prewarm,
+        },
+        excluded: EXCLUDED_MODELS,
+        results,
     };
-    fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
-    log(`\nResults saved to: ${outputPath}`, 'dim');
+
+    const outPath = join(PROJECT_ROOT, 'tests', 'benchmark-results.json');
+    fs.writeFileSync(outPath, JSON.stringify(output, null, 2));
+    log(`\nResults saved to ${outPath}`, 'dim');
 }
 
-// ============================================================================
-// MAIN
-// ============================================================================
-
 async function main() {
-    log('\n' + '='.repeat(60), 'blue');
-    log('  OCC Tessellator Comprehensive Benchmark', 'blue');
-    log('='.repeat(60) + '\n', 'blue');
+    const parsed = parseArgs(args);
+    const { cfg: config, models } = selectConfig(parsed);
 
-    if (args.suite !== 'canary') {
-        throw new Error(`Unsupported suite "${args.suite}". This runner currently supports only --suite canary.`);
-    }
-    const { models: benchmarks, excluded } = buildCanaryBenchmarks();
-    log('Running CANARY benchmark suite (all non-real-world STEP test files)', 'yellow');
-    if (excluded.length > 0) {
-        const reasonCounts = excluded.reduce((acc, e) => {
-            acc[e.reason] = (acc[e.reason] || 0) + 1;
-            return acc;
-        }, {});
-        const reasonSummary = Object.entries(reasonCounts)
-            .map(([reason, count]) => `${reason}=${count}`)
-            .join(', ');
-        log(`Excluded files: ${excluded.length} (${reasonSummary})`, 'dim');
-    }
-    if (args.filter) {
-        log(`Filter: "${args.filter}"`, 'dim');
-    }
-    if (args.maxFiles != null) {
-        log(`Max files: ${args.maxFiles}`, 'dim');
-    }
-    if (benchmarks.length === 0) {
-        throw new Error('No benchmark files selected after exclusions/filters');
+    if (models.length === 0) {
+        throw new Error('No benchmark models selected. Check --filter or suite.');
     }
 
-    log(`Total benchmarks: ${benchmarks.length}\n`, 'cyan');
+    printSuiteHeader(config, models);
 
     let viteProcess = null;
+    let vitePort = config.vitePort;
     let browser = null;
     const results = [];
+    let hadFatalError = false;
 
     try {
-        // Start Vite server
-        viteProcess = await startViteServer();
-
-        // Launch browser
+        const vite = await startViteServer(config);
+        viteProcess = vite.process;
+        vitePort = vite.port;
         browser = await launchBrowser();
         const page = await browser.newPage();
 
-        // Set longer timeout for complex models
-        page.setDefaultTimeout(CONFIG.timeout);
-
-        // Enable console logging from page
+        page.setDefaultTimeout(config.timeoutMs);
         page.on('console', (msg) => {
             if (msg.type() === 'error') {
                 log(`[Browser Error] ${msg.text()}`, 'red');
             }
         });
 
-        // Navigate to benchmark harness
         log('Navigating to benchmark harness...', 'blue');
-        await page.goto(`http://localhost:${CONFIG.vitePort}/tests/benchmark-comprehensive.html`, {
+        await page.goto(`http://${config.viteHost}:${vitePort}/tests/benchmark-comprehensive.html`, {
             waitUntil: 'networkidle0',
-            timeout: CONFIG.timeout,
+            timeout: config.timeoutMs,
         });
 
-        // Wait for harness to be ready
-        await page.waitForFunction(
-            () => window.benchmarkReady === true,
-            { timeout: CONFIG.timeout }
-        );
-        log('Benchmark harness ready\n', 'green');
+        await page.waitForFunction(() => window.benchmarkReady === true, {
+            timeout: config.timeoutMs,
+        });
+        log('Benchmark harness ready', 'green');
+        await prewarmHarness(page, config);
 
-        // Run benchmarks
-        for (let i = 0; i < benchmarks.length; i++) {
-            const benchmark = benchmarks[i];
-            log(`[${i + 1}/${benchmarks.length}] ${benchmark.name}...`, 'cyan');
-
-            try {
-                const result = await runBenchmark(page, benchmark);
-                results.push(result);
-
-                if (result.success) {
-                    const speedupStr = result.speedup >= 1
-                        ? `${colors.green}${result.speedup.toFixed(2)}x faster${colors.reset}`
-                        : `${colors.red}${result.speedup.toFixed(2)}x slower${colors.reset}`;
-                    log(`  OCC: ${result.occ.avgTime.toFixed(0)}ms, occt-import: ${result.occtImport.avgTime.toFixed(0)}ms (${speedupStr})`);
-                } else {
-                    log(`  FAILED: ${result.error}`, 'red');
-                }
-            } catch (e) {
-                log(`  ERROR: ${e.message}`, 'red');
-                results.push({ name: benchmark.name, success: false, error: e.message });
-            }
+        for (let i = 0; i < models.length; i++) {
+            const model = models[i];
+            log(`\n[${i + 1}/${models.length}] ${model.name}`, 'blue');
+            const result = await runBenchmark(page, model, config);
+            results.push(result);
+            printResultRow(result);
         }
 
-        // Print results table
         printResultsTable(results);
-
-        // Save to JSON
-        saveResultsJson(results);
-
-    } catch (e) {
-        log(`\nBenchmark runner error: ${e.message}`, 'red');
-        console.error(e.stack);
+        printAggregateSummary(results);
+        saveResultsJson(config, models, results);
+    } catch (err) {
+        hadFatalError = true;
+        log(`\nBenchmark runner error: ${err.message}`, 'red');
+        console.error(err.stack);
     } finally {
         if (browser) {
             await browser.close();
@@ -544,6 +650,12 @@ async function main() {
             log('Vite server stopped', 'dim');
         }
     }
+
+    const hasFailure = results.some((r) => !r.success);
+    process.exit(hadFatalError || hasFailure ? 1 : 0);
 }
 
-main();
+main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});
