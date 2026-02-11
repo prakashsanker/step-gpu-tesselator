@@ -9,7 +9,12 @@
     "preview": "vite preview",
     "bench:canary": "node tests/benchmark-comprehensive.js --suite canary",
     "test": "node --experimental-vm-modules tests/run-tests.js",
-    "test:watch": "node --experimental-vm-modules tests/run-tests.js --watch"
+    "test:watch": "node --experimental-vm-modules tests/run-tests.js --watch",
+    "baseline:beat": "node scripts/run-beat-occt-baseline.mjs",
+    "bench:micro": "node tests/benchmark.js",
+    "bench:canary": "node tests/benchmark-comprehensive.js --suite canary",
+    "bench:representative": "node tests/benchmark-comprehensive.js --suite representative",
+    "bench:full": "node tests/benchmark-comprehensive.js --suite full"
   },
   "devDependencies": {
     "@types/earcut": "^3.0.0",

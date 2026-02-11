@@ -13,6 +13,24 @@
 import { getGPUDevice } from "./lib";
 import { earClipping } from "./ear-clipping";
 
+const DEBUG_CDT_LOGS = false;
+
+function cdtDebugEnabled(): boolean {
+    return DEBUG_CDT_LOGS || (globalThis as any)?.__CDT_DEBUG_LOGS__ === true;
+}
+
+function cdtDebugLog(...args: unknown[]): void {
+    if (cdtDebugEnabled()) {
+        console.log(...args);
+    }
+}
+
+function cdtDebugWarn(...args: unknown[]): void {
+    if (cdtDebugEnabled()) {
+        console.warn(...args);
+    }
+}
+
 // Edge representation for the half-edge data structure
 interface HalfEdge {
     origin: number;      // Vertex index
@@ -220,7 +238,7 @@ function cpuEdgeFlip(
         }
 
         if (!flipped) {
-            console.log(`[CDT] Edge flipping converged after ${iter + 1} iterations`);
+            cdtDebugLog(`[CDT] Edge flipping converged after ${iter + 1} iterations`);
             break;
         }
     }
@@ -1089,7 +1107,7 @@ function recoverConstraintEdge(
     const orderedBoundary = orderBoundaryEdges(boundaryEdges);
 
     if (orderedBoundary.length < 3) {
-        console.warn(`[CDT] Cavity boundary too small: ${orderedBoundary.length} vertices`);
+        cdtDebugWarn(`[CDT] Cavity boundary too small: ${orderedBoundary.length} vertices`);
         return false;
     }
 
@@ -1099,7 +1117,7 @@ function recoverConstraintEdge(
     const v2Pos = orderedBoundary.indexOf(v2);
 
     if (v1Pos === -1 || v2Pos === -1) {
-        console.warn(`[CDT] Constraint endpoints not on cavity boundary`);
+        cdtDebugWarn(`[CDT] Constraint endpoints not on cavity boundary`);
         return false;
     }
 
@@ -1255,11 +1273,11 @@ export async function cdtWithHoles(
         allVertices.push(...hole);
     }
 
-    console.log(`[CDT-Holes] ${allVertices.length} total vertices (${boundary.length} boundary + ${allVertices.length - boundary.length} hole)`);
+    cdtDebugLog(`[CDT-Holes] ${allVertices.length} total vertices (${boundary.length} boundary + ${allVertices.length - boundary.length} hole)`);
 
     // Step 1: Delaunay triangulation of all vertices
     let triangles = bowyerWatson(allVertices);
-    console.log(`[CDT-Holes] Bowyer-Watson produced ${triangles.length} triangles`);
+    cdtDebugLog(`[CDT-Holes] Bowyer-Watson produced ${triangles.length} triangles`);
 
     // Step 2: Recover constraint edges (boundary + holes)
     const constraintEdges = buildConstraintEdgesWithHoles(boundary.length, holeOffsets);
@@ -1273,7 +1291,7 @@ export async function cdtWithHoles(
             failedCount++;
         }
     }
-    console.log(`[CDT-Holes] Constraint recovery: ${recoveredCount} recovered, ${failedCount} failed`);
+    cdtDebugLog(`[CDT-Holes] Constraint recovery: ${recoveredCount} recovered, ${failedCount} failed`);
 
     // Step 3: Remove triangles outside boundary
     triangles = triangles.filter(tri => {
@@ -1283,7 +1301,7 @@ export async function cdtWithHoles(
         ];
         return isPointInsidePolygon(centroid, boundary);
     });
-    console.log(`[CDT-Holes] After boundary filter: ${triangles.length} triangles`);
+    cdtDebugLog(`[CDT-Holes] After boundary filter: ${triangles.length} triangles`);
 
     // Step 4: Remove triangles inside holes or crossing hole boundaries
     if (holes.length > 0) {
@@ -1332,7 +1350,7 @@ export async function cdtWithHoles(
 
             return true;
         });
-        console.log(`[CDT-Holes] After hole filter: ${triangles.length} triangles (removed ${beforeCount - triangles.length})`);
+        cdtDebugLog(`[CDT-Holes] After hole filter: ${triangles.length} triangles (removed ${beforeCount - triangles.length})`);
     }
 
     return triangles;
@@ -1461,7 +1479,7 @@ export async function constrainedDelaunayTriangulation(
     const initialTriangles = await earClipping(boundary3d);
 
     if (initialTriangles.length === 0) {
-        console.warn("[CDT] Ear clipping returned no triangles");
+        cdtDebugWarn("[CDT] Ear clipping returned no triangles");
         return [];
     }
 
@@ -1470,8 +1488,8 @@ export async function constrainedDelaunayTriangulation(
         t[0] === t[1] || t[1] === t[2] || t[0] === t[2]
     );
     if (degenerateTris.length > 0) {
-        console.warn(`[CDT] Ear clipping produced ${degenerateTris.length} degenerate triangles:`);
-        degenerateTris.slice(0, 5).forEach(t => console.warn(`  [${t.join(',')}]`));
+        cdtDebugWarn(`[CDT] Ear clipping produced ${degenerateTris.length} degenerate triangles:`);
+        degenerateTris.slice(0, 5).forEach(t => cdtDebugWarn(`  [${t.join(',')}]`));
     }
 
     let triangles = initialTriangles as [number, number, number][];
@@ -1496,8 +1514,8 @@ export async function constrainedDelaunayTriangulation(
             t[0] === t[1] || t[1] === t[2] || t[0] === t[2]
         );
         if (degenerateAfterFlip.length > 0) {
-            console.warn(`[CDT] Edge flipping produced ${degenerateAfterFlip.length} degenerate triangles:`);
-            degenerateAfterFlip.slice(0, 5).forEach(t => console.warn(`  [${t.join(',')}]`));
+            cdtDebugWarn(`[CDT] Edge flipping produced ${degenerateAfterFlip.length} degenerate triangles:`);
+            degenerateAfterFlip.slice(0, 5).forEach(t => cdtDebugWarn(`  [${t.join(',')}]`));
         }
     }
 
@@ -1507,7 +1525,7 @@ export async function constrainedDelaunayTriangulation(
         triangles = removeTrianglesInsideHoles(triangles, boundary, holes);
         const removedCount = beforeCount - triangles.length;
         if (removedCount > 0) {
-            console.log(`[CDT] Removed ${removedCount} triangles inside holes`);
+            cdtDebugLog(`[CDT] Removed ${removedCount} triangles inside holes`);
         }
     }
 

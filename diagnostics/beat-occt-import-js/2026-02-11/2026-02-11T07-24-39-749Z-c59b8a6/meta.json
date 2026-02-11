@@ -1,0 +1,24 @@
+{
+  "createdAt": "2026-02-11T07:24:39.772Z",
+  "date": "2026-02-11",
+  "git": {
+    "branch": "beat-occt-import-js",
+    "commit": "c59b8a6",
+    "dirty": true
+  },
+  "host": {
+    "platform": "darwin",
+    "release": "23.4.0",
+    "arch": "arm64",
+    "cpus": 0,
+    "node": "v23.11.0"
+  },
+  "args": {
+    "date": "2026-02-11",
+    "outDir": null,
+    "skipAi": true,
+    "aiFilter": null,
+    "aiSaveScreenshots": false,
+    "allBench": false
+  }
+}

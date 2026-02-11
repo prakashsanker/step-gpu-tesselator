@@ -17,6 +17,7 @@ const PROJECT_ROOT = join(__dirname, '..');
 
 // Benchmark configuration
 const CONFIG = {
+    viteHost: '127.0.0.1',
     vitePort: 5174,  // Different port from tests
     timeout: 120000,
     headless: true,
@@ -43,7 +44,7 @@ async function startViteServer() {
     return new Promise((resolve, reject) => {
         log('Starting Vite dev server...', 'blue');
 
-        const vite = spawn('npx', ['vite', '--port', CONFIG.vitePort.toString()], {
+        const vite = spawn('npx', ['vite', '--host', CONFIG.viteHost, '--port', CONFIG.vitePort.toString()], {
             cwd: PROJECT_ROOT,
             stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -394,6 +395,7 @@ async function main() {
 
     let viteProcess = null;
     let browser = null;
+    let hadFatalError = false;
 
     try {
         // Start Vite server
@@ -411,7 +413,7 @@ async function main() {
 
         // Navigate to benchmark page
         log('Navigating to benchmark page...', 'blue');
-        await page.goto(`http://localhost:${CONFIG.vitePort}/tests/benchmark.html`, {
+        await page.goto(`http://${CONFIG.viteHost}:${CONFIG.vitePort}/tests/benchmark.html`, {
             waitUntil: 'networkidle0',
             timeout: CONFIG.timeout,
         });
@@ -430,6 +432,7 @@ async function main() {
         printSummary(results);
 
     } catch (e) {
+        hadFatalError = true;
         log(`\nBenchmark error: ${e.message}`, 'red');
         console.error(e.stack);
     } finally {
@@ -442,6 +445,7 @@ async function main() {
             log('Vite server stopped', 'dim');
         }
     }
+    process.exit(hadFatalError ? 1 : 0);
 }
 
 main();
