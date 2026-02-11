@@ -6349,10 +6349,14 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   const faceStart = performance.now();
   const STRICT_CLASSIFIER_FACE_IDS = readFaceIdsFromGlobal('__STRICT_CLASSIFIER_FACE_IDS__', [14, 63, 64, 65, 66, 994]);
   const PERIODIC_PROOF_FACE_IDS = readFaceIdsFromGlobal('__PERIODIC_PROOF_FACE_IDS__', []);
-  const enableConeSeamSplit = readGlobalBoolean('__ENABLE_CONE_SEAM_SPLIT__', false);
-  const coneSeamSplitFaceIds = readFaceIdsFromGlobal('__CONE_SEAM_SPLIT_FACE_IDS__', [63, 64, 65, 66]);
-  const enableOcctInspiredTrimGraph = readGlobalBoolean('__ENABLE_OCCT_INSPIRED_TRIM_GRAPH__', false);
-  const occtInspiredTrimGraphFaceIds = readFaceIdsFromGlobal('__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__', [63, 64, 65, 66]);
+  // Default-on for the OCCT-inspired cone path. Face filters remain opt-in:
+  // when no FACE_IDS global is provided, all cone faces are eligible.
+  const enableConeSeamSplit = readGlobalBoolean('__ENABLE_CONE_SEAM_SPLIT__', true);
+  const coneSeamSplitFaceIdsRaw = (globalThis as any)?.__CONE_SEAM_SPLIT_FACE_IDS__;
+  const coneSeamSplitFaceIds = readFaceIdsFromGlobal('__CONE_SEAM_SPLIT_FACE_IDS__', []);
+  const enableOcctInspiredTrimGraph = readGlobalBoolean('__ENABLE_OCCT_INSPIRED_TRIM_GRAPH__', true);
+  const occtInspiredTrimGraphFaceIdsRaw = (globalThis as any)?.__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__;
+  const occtInspiredTrimGraphFaceIds = readFaceIdsFromGlobal('__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__', []);
   const enableOcctNativeFaceTessellation = readGlobalBoolean('__ENABLE_OCCT_NATIVE_FACE_TESSELLATION__', false);
   const allowOcctOraclePath = readGlobalBoolean('__ALLOW_OCCT_ORACLE_PATH__', false);
   const occtNativeFaceIds = readFaceIdsFromGlobal('__OCCT_NATIVE_FACE_IDS__', [63, 64, 65, 66]);
@@ -6411,7 +6415,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
     const shouldTryOcctInspiredTrimGraph =
       face.surfaceType === 'Cone' &&
       enableOcctInspiredTrimGraph &&
-      occtInspiredTrimGraphFaceIds.has(face.faceIndex);
+      (occtInspiredTrimGraphFaceIdsRaw == null || occtInspiredTrimGraphFaceIds.has(face.faceIndex));
     if (
       shouldTryOcctInspiredTrimGraph &&
       face.occFace &&
@@ -7079,10 +7083,12 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           }
         }
 
+        const isConeSeamSplitFaceEnabled =
+          coneSeamSplitFaceIdsRaw == null || coneSeamSplitFaceIds.has(face.faceIndex);
         const shouldTryConeSeamSplit =
           face.surfaceType === 'Cone' &&
           enableConeSeamSplit &&
-          coneSeamSplitFaceIds.has(face.faceIndex) &&
+          isConeSeamSplitFaceEnabled &&
           loops.uvOuter.length >= 3 &&
           loops.uvHoles.length > 0;
         const coneSplitSourceOuter =
@@ -7094,7 +7100,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         if (
           face.surfaceType === 'Cone' &&
           enableConeSeamSplit &&
-          coneSeamSplitFaceIds.has(face.faceIndex) &&
+          isConeSeamSplitFaceEnabled &&
           !shouldTryConeSeamSplit
         ) {
           console.log(
