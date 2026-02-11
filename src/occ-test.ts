@@ -13,7 +13,7 @@ import {
 import { earClipping } from './ear-clipping';
 import { constrainedDelaunayTriangulation } from './cdt-gpu';
 import { bridgeAllHoles } from './step-parser';
-import { triangulateWithHoles } from './triangulate-fast';
+import { triangulateFast, triangulateWithHoles } from './triangulate-fast';
 
 // Triangulation method type
 export type TriangulationMethod = 'ear-clipping' | 'cdt';
@@ -88,6 +88,17 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 // Set to true to enable debug logging (significantly impacts performance)
 const DEBUG_OCC = false;
+const DEBUG_TESSELLATION_VERBOSE = false;
+
+function tessellationVerboseEnabled(): boolean {
+  return DEBUG_TESSELLATION_VERBOSE || (globalThis as any)?.__TESSELLATION_VERBOSE_LOGS__ === true;
+}
+
+function tessellationVerboseLog(...args: unknown[]): void {
+  if (tessellationVerboseEnabled()) {
+    console.log(...args);
+  }
+}
 
 function logOCC(...args: unknown[]): void {
   if (DEBUG_OCC) {
@@ -3245,21 +3256,23 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
                 const angleDegrees = (paramRange * 180 / Math.PI).toFixed(1);
                 faceExtractionLog(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex} Edge ${edgeIndex}: Circle arc ${angleDegrees}° (params: ${first.toFixed(3)} to ${last.toFixed(3)})`);
               }
-              const MIN_SAMPLES = 32;
-              const MAX_SAMPLES = 256;
-              let numSamples = 64; // Default for curved edges (better detail)
+              // Keep extraction sampling moderate by default so planar/trim loops
+              // do not explode in vertex count. Values remain runtime-tunable.
+              const MIN_SAMPLES = Math.max(4, Math.floor(readGlobalNumber('__EDGE_MIN_SAMPLES__') ?? 6));
+              const MAX_SAMPLES = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_MAX_SAMPLES__') ?? 64));
+              let numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_DEFAULT_SAMPLES__') ?? 16));
 
               if (curveType === 'Circle') {
-                // Angle step ~5.6 degrees (π/32) => ~64 samples for full circle
-                const angleStep = Math.PI / 32;
+                // Angle step ~15 degrees (π/12) => ~24 samples for full circle.
+                const angleStep = readGlobalNumber('__EDGE_CIRCLE_ANGLE_STEP__') ?? (Math.PI / 12);
                 numSamples = Math.ceil(Math.abs(paramRange) / angleStep);
               } else if (curveType === 'Ellipse') {
-                numSamples = 96;
+                numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_ELLIPSE_SAMPLES__') ?? 20));
               } else if (curveType === 'BSplineCurve') {
-                numSamples = 96;
+                numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_BSPLINE_SAMPLES__') ?? 16));
               }
 
-              if (!isFinite(numSamples)) numSamples = 64;
+              if (!isFinite(numSamples)) numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_DEFAULT_SAMPLES__') ?? 16));
               numSamples = Math.max(MIN_SAMPLES, Math.min(MAX_SAMPLES, numSamples));
 
               sampledPoints = [];
@@ -4215,8 +4228,13 @@ async function runCheckpoint3(stepFileContent: string): Promise<{
  * For line edges: just use the start point
  * For curved edges: use the sampled points (excluding the last one to avoid duplicates)
  */
-function occEdgesToPolygon(edges: EdgeInfo[], debugLabel?: string): Vec3[] {
+function occEdgesToPolygon(
+  edges: EdgeInfo[],
+  debugLabel?: string,
+  options?: { lineSubdivideStep?: number }
+): Vec3[] {
   if (edges.length === 0) return [];
+  const lineSubdivideStep = options?.lineSubdivideStep ?? 0;
 
   const polygon: Vec3[] = [];
 
@@ -4224,7 +4242,7 @@ function occEdgesToPolygon(edges: EdgeInfo[], debugLabel?: string): Vec3[] {
     const edge = edges[i];
     const hasSamples = edge.sampledPoints && edge.sampledPoints.length > 0;
     if (debugLabel) {
-      console.log(`[occEdgesToPolygon ${debugLabel}] edge ${i}: type=${edge.curveType}, sampledPoints=${edge.sampledPoints?.length || 0}`);
+      tessellationVerboseLog(`[occEdgesToPolygon ${debugLabel}] edge ${i}: type=${edge.curveType}, sampledPoints=${edge.sampledPoints?.length || 0}`);
     }
 
     if (hasSamples) {
@@ -4238,23 +4256,23 @@ function occEdgesToPolygon(edges: EdgeInfo[], debugLabel?: string): Vec3[] {
       // We don't skip end point for LINE edges because they need proper polygon closure
       polygon.push([edge.startPoint.x, edge.startPoint.y, edge.startPoint.z]);
 
-      // For LINE edges, also add intermediate points if the edge is long
-      // This helps with UV projection on curved surfaces like cylinders
-      const dx = edge.endPoint.x - edge.startPoint.x;
-      const dy = edge.endPoint.y - edge.startPoint.y;
-      const dz = edge.endPoint.z - edge.startPoint.z;
-      const length = Math.sqrt(dx*dx + dy*dy + dz*dz);
-
-      // Add intermediate points for lines longer than 0.1 units
-      if (length > 0.1) {
-        const numSegments = Math.max(2, Math.ceil(length / 0.1));
-        for (let j = 1; j < numSegments; j++) {
-          const t = j / numSegments;
-          polygon.push([
-            edge.startPoint.x + t * dx,
-            edge.startPoint.y + t * dy,
-            edge.startPoint.z + t * dz
-          ]);
+      // Optional line densification for UV projection on curved periodic faces.
+      // Keep it off by default for planar tessellation to avoid triangle blowups.
+      if (lineSubdivideStep > 1e-9) {
+        const dx = edge.endPoint.x - edge.startPoint.x;
+        const dy = edge.endPoint.y - edge.startPoint.y;
+        const dz = edge.endPoint.z - edge.startPoint.z;
+        const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (length > lineSubdivideStep) {
+          const numSegments = Math.max(2, Math.ceil(length / lineSubdivideStep));
+          for (let j = 1; j < numSegments; j++) {
+            const t = j / numSegments;
+            polygon.push([
+              edge.startPoint.x + t * dx,
+              edge.startPoint.y + t * dy,
+              edge.startPoint.z + t * dz
+            ]);
+          }
         }
       }
     }
@@ -4287,12 +4305,12 @@ async function tessellatePlanarFaceFromOCC(
   tessellationProfile.occEdgesToPolygon.calls++;
 
   // Diagnostic logging for planar faces with holes
-  console.log(`[tessellatePlanarFace] outerLoop: ${face.outerLoop.length} edges -> ${outer.length} vertices`);
-  console.log(`[tessellatePlanarFace] innerLoops: ${face.innerLoops.length} loops`);
+  tessellationVerboseLog(`[tessellatePlanarFace] outerLoop: ${face.outerLoop.length} edges -> ${outer.length} vertices`);
+  tessellationVerboseLog(`[tessellatePlanarFace] innerLoops: ${face.innerLoops.length} loops`);
   for (let i = 0; i < face.innerLoops.length; i++) {
     const loop = face.innerLoops[i];
     const holeVerts = holes[i];
-    console.log(`  - hole ${i}: ${loop.length} edges -> ${holeVerts.length} vertices, types: [${loop.map(e => e.curveType).join(', ')}]`);
+    tessellationVerboseLog(`  - hole ${i}: ${loop.length} edges -> ${holeVerts.length} vertices, types: [${loop.map(e => e.curveType).join(', ')}]`);
   }
 
   if (outer.length < 3) {
@@ -4336,10 +4354,10 @@ async function tessellatePlanarFaceFromOCC(
   let triangles: number[][];
   let vertices3d: Vec3[];
 
-  console.log(`[tessellatePlanarFace] After projection: outer2d=${normalized.outer2d.length} verts, holes2d=${normalized.holes2d.length} holes`);
+  tessellationVerboseLog(`[tessellatePlanarFace] After projection: outer2d=${normalized.outer2d.length} verts, holes2d=${normalized.holes2d.length} holes`);
   if (normalized.holes2d.length > 0) {
     for (let i = 0; i < normalized.holes2d.length; i++) {
-      console.log(`  - hole2d ${i}: ${normalized.holes2d[i].length} vertices`);
+      tessellationVerboseLog(`  - hole2d ${i}: ${normalized.holes2d[i].length} vertices`);
     }
   }
 
@@ -4347,9 +4365,9 @@ async function tessellatePlanarFaceFromOCC(
     // HAS HOLES: Use earcut with native hole support (no bridging needed)
     // triangulateWithHoles expects vertices in order: outer, then holes concatenated
     // and returns indices into that combined array
-    console.log(`[tessellatePlanarFace] Using earcut with holes: outer=${normalized.outer2d.length}, holes=${normalized.holes2d.map(h => h.length).join(',')}`);
+    tessellationVerboseLog(`[tessellatePlanarFace] Using earcut with holes: outer=${normalized.outer2d.length}, holes=${normalized.holes2d.map(h => h.length).join(',')}`);
     triangles = triangulateWithHoles(normalized.outer2d, normalized.holes2d);
-    console.log(`[tessellatePlanarFace] earcut produced ${triangles.length} triangles`);
+    tessellationVerboseLog(`[tessellatePlanarFace] earcut produced ${triangles.length} triangles`);
 
     // Build combined 3D vertices: outer + all holes
     vertices3d = [...oriented3d.outer];
@@ -4357,10 +4375,18 @@ async function tessellatePlanarFaceFromOCC(
       vertices3d.push(...hole);
     }
   } else {
-    // NO HOLES: Use GPU tessellation (faster for simple polygons)
-    console.log(`[tessellatePlanarFace] Using GPU tessellation (no holes)`);
+    // NO HOLES: Use hybrid triangulation (earcut for medium loops, GPU for large loops)
+    tessellationVerboseLog(`[tessellatePlanarFace] Using hybrid triangulation (no holes)`);
     const points2dAsVec3: Vec3[] = normalized.outer2d.map(p => [p[0], p[1], 0]);
-    triangles = await earClipping(points2dAsVec3);
+    try {
+      triangles = await triangulateFast(points2dAsVec3);
+      if (triangles.length === 0 && points2dAsVec3.length >= 3) {
+        // Safety fallback for rare degenerate/predictor misses.
+        triangles = await earClipping(points2dAsVec3);
+      }
+    } catch {
+      triangles = await earClipping(points2dAsVec3);
+    }
     vertices3d = oriented3d.outer;
   }
 
@@ -5555,17 +5581,17 @@ function curveTypeNameFromGeomAbs(curveTypeEnum: any): string {
 }
 
 function curveSampleCount(curveType: string, paramRange: number): number {
-  const MIN_SAMPLES = 2;
-  const MAX_SAMPLES = 256;
-  let count = 32;
+  const MIN_SAMPLES = Math.max(2, Math.floor(readGlobalNumber('__PCURVE_MIN_SAMPLES__') ?? 6));
+  const MAX_SAMPLES = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__PCURVE_MAX_SAMPLES__') ?? 96));
+  let count = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__PCURVE_DEFAULT_SAMPLES__') ?? 20));
   if (curveType === 'Line') {
     count = 2;
   } else if (curveType === 'Circle') {
-    // ~5.6 degree step
-    const angleStep = Math.PI / 32;
+    // ~15 degree step for trimmed p-curves (full circle ~= 24 samples).
+    const angleStep = Math.PI / 12;
     count = Math.ceil(Math.abs(paramRange) / angleStep);
   } else if (curveType === 'Ellipse' || curveType === 'BSplineCurve') {
-    count = 96;
+    count = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__PCURVE_COMPLEX_SAMPLES__') ?? 28));
   }
   if (!isFinite(count)) count = 32;
   return Math.max(MIN_SAMPLES, Math.min(MAX_SAMPLES, count));
@@ -6079,7 +6105,8 @@ function getFaceTrimLoopsUV(
   }
 
   const sa = new oc.ShapeAnalysis_Surface(face.occSurface);
-  const outer3d = occEdgesToPolygon(face.outerLoop);
+  const lineSubdivideStep = Math.max(0.25, readGlobalNumber('__CURVED_UV_LINE_SUBDIVIDE_STEP__') ?? 2.0);
+  const outer3d = occEdgesToPolygon(face.outerLoop, undefined, { lineSubdivideStep });
   if (outer3d.length < 3) {
     sa.delete?.();
     return null;
@@ -6123,7 +6150,7 @@ function getFaceTrimLoopsUV(
 
   const uvHoles = face.innerLoops
     .map((loop, loopIdx) => {
-      const poly3d = occEdgesToPolygon(loop);
+      const poly3d = occEdgesToPolygon(loop, undefined, { lineSubdivideStep });
       if (face.surfaceType === 'Cylinder') {
         curveDebugLog(`[getFaceTrimLoopsUV] Inner loop ${loopIdx} -> 3D polygon: ${poly3d.length} points`);
         if (poly3d.length > 0) {
@@ -6143,8 +6170,10 @@ function getFaceTrimLoopsUV(
 
 function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles: Vec2[][]): number {
   const totalPts = uvHoles.reduce((acc, h) => acc + h.length, uvOuter.length);
-  // Heuristic: keep grid roughly proportional to boundary complexity.
-  let base = Math.ceil(Math.sqrt(totalPts) * 4);
+  // Keep trim-grid growth sublinear and capped by default. This is a key speed
+  // control for complex trims where boundary sampling can be very dense.
+  const trimGridScale = Math.max(0.3, readGlobalNumber('__TRIM_GRID_SCALE__') ?? 1.2);
+  let base = Math.ceil(Math.sqrt(totalPts) * trimGridScale);
 
   // OCCT-inspired guardrail: trim mesh density should not explode just because
   // trim loops are densely sampled. Cone seam faces are especially sensitive.
@@ -6161,7 +6190,9 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
     }
   }
 
-  return Math.max(16, Math.min(128, base));
+  const minGrid = Math.max(8, Math.floor(readGlobalNumber('__TRIM_MIN_GRID_DENSITY__') ?? 12));
+  const maxGrid = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY__') ?? 48));
+  return Math.max(minGrid, Math.min(maxGrid, base));
 }
 
 function estimateFaceSizeFromLoops(face: FaceWithEdgesInfo): number {
@@ -7555,7 +7586,7 @@ async function tessellateOCCShape(
           tri[1] = tri[2];
           tri[2] = temp;
         }
-        console.log(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
+        tessellationVerboseLog(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
       }
 
       tessellationProfile.computeNormals.total += performance.now() - normalStart;

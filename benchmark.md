@@ -4,6 +4,165 @@ This document tracks performance benchmarks comparing our GPU-accelerated STEP p
 
 ---
 
+## Latest Results (2026-02-11, Beat-OCCT M0 Baseline)
+
+### Harness Update (Representative Suites)
+
+Benchmark harness has been updated to use representative model suites instead of mostly synthetic-only defaults.
+
+New commands:
+
+- `npm run -s bench:canary` (fast dev loop)
+- `npm run -s bench:representative` (real-world gate, includes Electronic Enclosure)
+- `npm run -s bench:full` (broader milestone sweep)
+
+`tests/benchmark-comprehensive.js` now supports:
+
+- `--suite canary|representative|full`
+- `--runs N --warmup N --timeout-ms N`
+- `--filter PATTERN`
+
+Known long/pathological files are explicitly excluded from routine suites:
+
+- `step-examples/complex/nissan.step`
+- `step-examples/complex/rocky_house.step`
+- `step-examples/complex/rotor-201nal.step`
+
+Baseline runner default suite is now `representative` via:
+
+- `npm run -s baseline:beat` (uses `--bench-suite representative`)
+
+### Baseline Run Metadata
+
+- Commit: `c59b8a6`
+- Branch: `beat-occt-import-js`
+- Command:
+  - `npm run -s baseline:beat -- --date 2026-02-11 --skip-ai`
+- Artifacts:
+  - `diagnostics/beat-occt-import-js/2026-02-11/2026-02-11T07-30-04-101Z-c59b8a6/`
+
+### Correctness Gate
+
+- `tests/run-tests.js`: **FAIL**
+  - Cause: `testVisualHoleRendering` timeout (`Waiting failed: 60000ms exceeded`)
+  - Note: all earlier non-visual suites in the same run passed before the timeout.
+
+### Performance A: `tests/benchmark-comprehensive.js` (Fast Set, 8 Models)
+
+| Metric | Value |
+|------|------|
+| Successful | 8 / 8 |
+| Average speedup vs `occt-import-js` | **1.20x faster** |
+| Wins vs `occt-import-js` | **1 / 8** |
+
+### Performance B: `tests/benchmark.js` (Core Synthetic Set)
+
+| Test | Hybrid GPU vs OCCT |
+|------|---------------------|
+| Simple Square (no holes) | **2.14x faster** |
+| Small (4 holes) | **4.91x faster** |
+| Medium (25 holes) | **6.69x faster** |
+| Large (100 holes) | **4.51x faster** |
+| XLarge (400 holes) | **1.08x slower** |
+
+**Average: 3.84x faster than OCCT**  
+**GPU wins: 4/5 benchmarks**
+
+### Comparison vs Previous Published Baseline
+
+Compared to the previous `tests/benchmark.js` snapshot (2026-01-04):
+
+| Metric | 2026-01-04 | 2026-02-11 | Delta |
+|------|-------------|-------------|-------|
+| Average speedup vs OCCT | 8.12x faster | 3.84x faster | -4.28x |
+| Wins vs OCCT | 5/5 | 4/5 | -1 |
+
+For the Beat-OCCT effort, treat the 2026-02-11 run as the fresh baseline reference point.
+
+---
+
+## M1.1 Incremental Tuning (2026-02-11)
+
+### Changes
+
+1. Planar no-hole triangulation switched from direct `earClipping()` to `triangulateFast()` with safe fallback.
+2. Curve sampling defaults reduced (runtime-tunable):
+   - `__EDGE_DEFAULT_SAMPLES__`: `24 -> 16`
+   - `__EDGE_BSPLINE_SAMPLES__`: `32 -> 16`
+   - `__EDGE_ELLIPSE_SAMPLES__`: `32 -> 20`
+   - circle step: `π/16 -> π/12`
+
+### Canary Results (single-run, direction-only)
+
+Command:
+- `npm run -s bench:canary`
+
+Before sampling tune (after planar dispatch):
+
+| Model | Ours (ms) | Ref (ms) | Speed |
+|------|-----------:|---------:|------:|
+| Plate XLarge | 4191.2 | 405.6 | 10.33x slower |
+| Cone | 71.3 | 399.3 | 5.60x faster |
+| Cylinder With Hole | 20.1 | 37.7 | 1.88x faster |
+| BSpline Bowl | 43.2 | 96.7 | 2.24x faster |
+| Conical Surface | 121.6 | 86.4 | 1.41x slower |
+| VM-001 | 481.3 | 386.4 | 1.25x slower |
+
+After sampling tune:
+
+| Model | Ours (ms) | Ref (ms) | Speed | Ours Tris | Ref Tris |
+|------|-----------:|---------:|------:|----------:|---------:|
+| Plate XLarge | 4177.5 | 367.7 | 11.36x slower | 172 | 172 |
+| Cone | 51.1 | 73.1 | 1.43x faster | 1078 | 1841 |
+| Cylinder With Hole | 14.8 | 38.2 | 2.59x faster | 92 | 308 |
+| BSpline Bowl | 49.7 | 69.1 | 1.39x faster | 338 | 116 |
+| Conical Surface | 84.2 | 69.1 | 1.22x slower | 1728 | 1318 |
+| VM-001 | 396.6 | 293.0 | 1.35x slower | 22348 | 3116 |
+
+Aggregate (after sampling tune):
+- Wins vs `occt-import-js`: `3/6`
+- Median speedup: `1.10x` (single-run)
+- Remaining major gap: cold-start `loadStepFile` and triangle inflation on `VM-001`.
+
+### Harness Stability/Prewarm Update
+
+Additional harness changes:
+
+1. Fixed multi-run aggregation bug in `tests/benchmark-comprehensive.js` (it previously returned after first successful run).
+2. Added one-time prewarm phase (default on, `--no-prewarm` to disable) to separate cold-start cost from steady-state comparison.
+
+Command:
+- `npm run -s bench:canary`
+
+Warm-state canary result (prewarm on):
+
+| Model | Ours (ms) | Ref (ms) | Speed | Ours Tris | Ref Tris |
+|------|-----------:|---------:|------:|----------:|---------:|
+| Plate XLarge | 126.9 | 229.0 | 1.80x faster | 172 | 172 |
+| Cone | 70.3 | 139.4 | 1.98x faster | 1078 | 1841 |
+| Cylinder With Hole | 24.1 | 31.3 | 1.30x faster | 92 | 308 |
+| BSpline Bowl | 42.5 | 70.0 | 1.65x faster | 338 | 116 |
+| Conical Surface | 88.8 | 47.2 | 1.88x slower | 1728 | 1318 |
+| VM-001 | 366.5 | 305.4 | 1.20x slower | 22348 | 3116 |
+
+Aggregate:
+- Wins vs `occt-import-js`: `4/6`
+- Speedup median: `1.47x`
+- Ours avg runtime: `119.9ms` (p90 `246.7ms`)
+- Ref avg runtime: `137.0ms` (p90 `267.2ms`)
+
+### Correctness Gate
+
+Command:
+- `npm test`
+
+Result:
+- Non-visual suites passed through curved-surface tests.
+- Runner timed out in visual stage:
+  - `testVisualHoleRendering`: `Waiting failed: 60000ms exceeded`.
+
+---
+
 ## Current Results (2026-01-04)
 
 ### Summary
