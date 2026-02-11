@@ -323,7 +323,7 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
         import { parseStepFile } from '/src/tessellator.ts';
-        import { parseStepWithOCC, parseStepWithOcctImportFull, buildFaceDiffReport } from '/src/occ-test.ts';
+        import { initOC, parseStepWithOCC, parseStepWithOcctImportFull, buildFaceDiffReport } from '/src/occ-test.ts';
         import { getGPUDevice } from '/src/lib.ts';
 
         // State
@@ -744,6 +744,12 @@
 
                 // Start animation loop
                 animate();
+
+                // Warm OpenCascade on page load so first benchmark run is not penalized by init cost
+                log('Prewarming OpenCascade...', 'info');
+                setStatus('Prewarming OpenCascade...', 'loading');
+                await initOC();
+                log('OpenCascade prewarm complete', 'pass');
 
                 // Enable buttons
                 document.getElementById('runBtn').disabled = false;

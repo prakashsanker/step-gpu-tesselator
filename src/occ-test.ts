@@ -6080,6 +6080,56 @@ function getFaceTrimLoopsUV(
     normalizedOuter = simplifyLoop2D(normalizedOuter);
     normalizedHoles = normalizedHoles.map((h) => simplifyLoop2D(h));
 
+    // Perf-mode: apply conservative trim-loop simplification across all curved
+    // surfaces before grid selection/CDT. This is benchmark-oriented and off
+    // unless geometry-only perf mode is enabled.
+    const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+    const enablePerfTrimSimplify = readGlobalBoolean('__PERF_TRIM_SIMPLIFY_LOOPS__', true);
+    if (preferGeometryOnlyLoad && enablePerfTrimSimplify) {
+      const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber('__PERF_TRIM_MAX_AREA_ERR_RATIO__') ?? 0.02);
+      const maxOuterAreaErrorNoHoles = Math.max(
+        maxAreaErrorRatio,
+        readGlobalNumber('__PERF_TRIM_MAX_OUTER_AREA_ERR_RATIO_NO_HOLES__') ?? 0.05
+      );
+      const defaultOuterCap = normalizedHoles.length === 0 ? 96 : 128;
+      const maxOuterPts = Math.max(24, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_OUTER_PTS__') ?? defaultOuterCap));
+      const maxHolePts = Math.max(8, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_HOLE_PTS__') ?? 20));
+      const beforeOuterPts = normalizedOuter.length;
+      const beforeHolePts = normalizedHoles.reduce((sum, h) => sum + h.length, 0);
+
+      const outerAreaErrRatio = normalizedHoles.length === 0 ? maxOuterAreaErrorNoHoles : maxAreaErrorRatio;
+      const simplifiedOuter = simplifyLoopForMeshing(normalizedOuter, maxOuterPts, outerAreaErrRatio);
+      const simplifiedHoles = normalizedHoles
+        .map((hole) => simplifyLoopForMeshing(hole, maxHolePts, maxAreaErrorRatio))
+        .filter((hole) => hole.length >= 3);
+
+      const simplifiedValidation = validateAndSanitizeTrimLoops(simplifiedOuter, simplifiedHoles, {
+        minAreaAbs: 1e-7,
+        maxHoleToOuterRatio: 0.98,
+        failOnHoleOutside: true,
+        failOnHugeHole: true,
+      });
+
+      if (simplifiedValidation.ok) {
+        normalizedOuter = simplifiedValidation.uvOuter;
+        normalizedHoles = simplifiedValidation.uvHoles;
+      } else {
+        curveDebugLog(
+          `[perf-trim-simplify] face ${face.faceIndex} ${face.surfaceType} source=${source}: skipped ` +
+          `(${simplifiedValidation.reason ?? 'unknown'})`
+        );
+      }
+
+      const afterHolePts = normalizedHoles.reduce((sum, h) => sum + h.length, 0);
+      if (beforeOuterPts !== normalizedOuter.length || beforeHolePts !== afterHolePts) {
+        curveDebugLog(
+          `[perf-trim-simplify] face ${face.faceIndex} ${face.surfaceType} source=${source}: ` +
+          `outer ${beforeOuterPts} -> ${normalizedOuter.length}, holes ${beforeHolePts} -> ${afterHolePts} ` +
+          `(count=${normalizedHoles.length})`
+        );
+      }
+    }
+
     // OCCT-inspired stability: keep trim loops geometrically equivalent but bounded in
     // complexity before triangulation. This avoids pathological CDT inputs on cone seams.
     if (face.surfaceType === 'Cone') {

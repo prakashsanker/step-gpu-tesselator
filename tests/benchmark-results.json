@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-02-11T09:31:44.931Z",
+  "timestamp": "2026-02-11T09:38:32.011Z",
   "suite": "representative",
   "suiteDescription": "Real-world performance gate including electronic enclosure",
   "config": {
@@ -31,45 +31,45 @@
       "fileSize": 4990243,
       "success": true,
       "ours": {
-        "avgMs": 10796.325000017881,
-        "p50Ms": 10796.325000017881,
-        "p90Ms": 10796.325000017881,
-        "maxMs": 10796.325000017881,
+        "avgMs": 9875.090000003576,
+        "p50Ms": 9875.090000003576,
+        "p90Ms": 9875.090000003576,
+        "maxMs": 9875.090000003576,
         "runs": [
-          10796.325000017881
+          9875.090000003576
         ],
         "phases": {
-          "loadStepFile": 3597.5999999940395,
-          "loadStepFile_initOC": 0.019999980926513672,
+          "loadStepFile": 3896.1200000047684,
+          "loadStepFile_initOC": 0.02000001072883606,
           "loadStepFile_createDoc": 0,
           "loadStepFile_readFile": 0,
           "loadStepFile_transfer": 0,
           "loadStepFile_getTools": 0,
-          "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 233.4849999845028,
-          "tessellateOCCShape": 6958.7750000059605,
-          "tessellatePlanarFace": 32.60000005364418,
-          "tessellateCurvedFace": 6864.735000371933,
-          "earClipping": 12.815000057220459,
-          "computeNormals": 26.394999504089355,
-          "meshAssembly": 4.485000014305115
+          "loadStepFile_colorParsing": 0.004999995231628418,
+          "extractFacesWithEdges": 415.8299999833107,
+          "tessellateOCCShape": 5555.004999995232,
+          "tessellatePlanarFace": 13.455000221729279,
+          "tessellateCurvedFace": 5506.174999713898,
+          "earClipping": 7.6200001537799835,
+          "computeNormals": 16.150000363588333,
+          "meshAssembly": 3.814999997615814
         },
-        "vertexCount": 54362,
-        "triangleCount": 72577
+        "vertexCount": 45692,
+        "triangleCount": 58745
       },
       "ref": {
-        "avgMs": 4759.079999983311,
-        "p50Ms": 4759.079999983311,
-        "p90Ms": 4759.079999983311,
-        "maxMs": 4759.079999983311,
+        "avgMs": 3961.2750000059605,
+        "p50Ms": 3961.2750000059605,
+        "p90Ms": 3961.2750000059605,
+        "maxMs": 3961.2750000059605,
         "runs": [
-          4759.079999983311
+          3961.2750000059605
         ],
         "vertexCount": 32049,
         "triangleCount": 39148
       },
-      "speedup": 0.4408055518869086,
-      "triangleRatio": 1.8539133544497803,
+      "speedup": 0.4011381162100321,
+      "triangleRatio": 1.500587514049249,
       "warnings": []
     },
     {
@@ -79,45 +79,45 @@
       "fileSize": 336737,
       "success": true,
       "ours": {
-        "avgMs": 225.74500000476837,
-        "p50Ms": 225.74500000476837,
-        "p90Ms": 225.74500000476837,
-        "maxMs": 225.74500000476837,
+        "avgMs": 205.78499999642372,
+        "p50Ms": 205.78499999642372,
+        "p90Ms": 205.78499999642372,
+        "maxMs": 205.78499999642372,
         "runs": [
-          225.74500000476837
+          205.78499999642372
         ],
         "phases": {
-          "loadStepFile": 170.69499999284744,
-          "loadStepFile_initOC": 0.02000001072883606,
+          "loadStepFile": 153.16999998688698,
+          "loadStepFile_initOC": 0.019999980926513672,
           "loadStepFile_createDoc": 0,
           "loadStepFile_readFile": 0,
           "loadStepFile_transfer": 0,
           "loadStepFile_getTools": 0,
           "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 15.91499999165535,
-          "tessellateOCCShape": 38.270000010728836,
-          "tessellatePlanarFace": 2.0750001072883606,
-          "tessellateCurvedFace": 27.400000005960464,
-          "earClipping": 1.5700001418590546,
-          "computeNormals": 3.869999885559082,
-          "meshAssembly": 0.46000000834465027
+          "extractFacesWithEdges": 28.825000017881393,
+          "tessellateOCCShape": 22.75499999523163,
+          "tessellatePlanarFace": 1.4899999797344208,
+          "tessellateCurvedFace": 15.690000116825104,
+          "earClipping": 1.160000056028366,
+          "computeNormals": 3.370000034570694,
+          "meshAssembly": 0.2800000011920929
         },
-        "vertexCount": 4076,
-        "triangleCount": 5016
+        "vertexCount": 2738,
+        "triangleCount": 2873
       },
       "ref": {
-        "avgMs": 303.5400000214577,
-        "p50Ms": 303.5400000214577,
-        "p90Ms": 303.5400000214577,
-        "maxMs": 303.5400000214577,
+        "avgMs": 222.63499999046326,
+        "p50Ms": 222.63499999046326,
+        "p90Ms": 222.63499999046326,
+        "maxMs": 222.63499999046326,
         "runs": [
-          303.5400000214577
+          222.63499999046326
         ],
         "vertexCount": 3328,
         "triangleCount": 3116
       },
-      "speedup": 1.344614498726643,
-      "triangleRatio": 1.6097560975609757,
+      "speedup": 1.0818815754031263,
+      "triangleRatio": 0.92201540436457,
       "warnings": []
     },
     {
@@ -127,44 +127,44 @@
       "fileSize": 43126,
       "success": true,
       "ours": {
-        "avgMs": 16.764999985694885,
-        "p50Ms": 16.764999985694885,
-        "p90Ms": 16.764999985694885,
-        "maxMs": 16.764999985694885,
+        "avgMs": 17.639999985694885,
+        "p50Ms": 17.639999985694885,
+        "p90Ms": 17.639999985694885,
+        "maxMs": 17.639999985694885,
         "runs": [
-          16.764999985694885
+          17.639999985694885
         ],
         "phases": {
-          "loadStepFile": 14.3299999833107,
+          "loadStepFile": 15.234999984502792,
           "loadStepFile_initOC": 0.004999995231628418,
           "loadStepFile_createDoc": 0,
           "loadStepFile_readFile": 0,
           "loadStepFile_transfer": 0,
           "loadStepFile_getTools": 0,
           "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 0.9699999988079071,
-          "tessellateOCCShape": 1.145000010728836,
-          "tessellatePlanarFace": 0.09999999403953552,
-          "tessellateCurvedFace": 0.6550000011920929,
-          "earClipping": 0.04499998688697815,
-          "computeNormals": 0.09999999403953552,
+          "extractFacesWithEdges": 1.0049999952316284,
+          "tessellateOCCShape": 1.0099999904632568,
+          "tessellatePlanarFace": 0.10500004887580872,
+          "tessellateCurvedFace": 0.4749999940395355,
+          "earClipping": 0.05000004172325134,
+          "computeNormals": 0.09499996900558472,
           "meshAssembly": 0.02000001072883606
         },
         "vertexCount": 125,
         "triangleCount": 110
       },
       "ref": {
-        "avgMs": 94.47999998927116,
-        "p50Ms": 94.47999998927116,
-        "p90Ms": 94.47999998927116,
-        "maxMs": 94.47999998927116,
+        "avgMs": 125.47499999403954,
+        "p50Ms": 125.47499999403954,
+        "p90Ms": 125.47499999403954,
+        "maxMs": 125.47499999403954,
         "runs": [
-          94.47999998927116
+          125.47499999403954
         ],
         "vertexCount": 3043,
         "triangleCount": 5750
       },
-      "speedup": 5.635550257673031,
+      "speedup": 7.113095243525691,
       "triangleRatio": 0.019130434782608695,
       "warnings": []
     },
@@ -175,45 +175,45 @@
       "fileSize": 39877,
       "success": true,
       "ours": {
-        "avgMs": 22.544999986886978,
-        "p50Ms": 22.544999986886978,
-        "p90Ms": 22.544999986886978,
-        "maxMs": 22.544999986886978,
+        "avgMs": 21.075000017881393,
+        "p50Ms": 21.075000017881393,
+        "p90Ms": 21.075000017881393,
+        "maxMs": 21.075000017881393,
         "runs": [
-          22.544999986886978
+          21.075000017881393
         ],
         "phases": {
-          "loadStepFile": 17.28499999642372,
-          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile": 18.094999998807907,
+          "loadStepFile_initOC": 0.014999985694885254,
           "loadStepFile_createDoc": 0,
           "loadStepFile_readFile": 0,
           "loadStepFile_transfer": 0,
           "loadStepFile_getTools": 0,
           "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 1.4650000035762787,
-          "tessellateOCCShape": 3.475000023841858,
-          "tessellatePlanarFace": 0.16499990224838257,
-          "tessellateCurvedFace": 2.3050000369548798,
-          "earClipping": 0.07999998331069946,
-          "computeNormals": 0.3400000333786011,
-          "meshAssembly": 0.12000000476837158
+          "extractFacesWithEdges": 1.3050000071525574,
+          "tessellateOCCShape": 1.300000011920929,
+          "tessellatePlanarFace": 0.08999994397163391,
+          "tessellateCurvedFace": 0.675000011920929,
+          "earClipping": 0.03999999165534973,
+          "computeNormals": 0.12999993562698364,
+          "meshAssembly": 0.0350000262260437
         },
-        "vertexCount": 304,
-        "triangleCount": 332
+        "vertexCount": 224,
+        "triangleCount": 204
       },
       "ref": {
-        "avgMs": 93.44499999284744,
-        "p50Ms": 93.44499999284744,
-        "p90Ms": 93.44499999284744,
-        "maxMs": 93.44499999284744,
+        "avgMs": 40.1700000166893,
+        "p50Ms": 40.1700000166893,
+        "p90Ms": 40.1700000166893,
+        "maxMs": 40.1700000166893,
         "runs": [
-          93.44499999284744
+          40.1700000166893
         ],
         "vertexCount": 368,
         "triangleCount": 332
       },
-      "speedup": 4.1448214702682895,
-      "triangleRatio": 1,
+      "speedup": 1.9060498212387413,
+      "triangleRatio": 0.6144578313253012,
       "warnings": []
     },
     {
@@ -223,45 +223,45 @@
       "fileSize": 9390,
       "success": true,
       "ours": {
-        "avgMs": 20.15999999642372,
-        "p50Ms": 20.15999999642372,
-        "p90Ms": 20.15999999642372,
-        "maxMs": 20.15999999642372,
+        "avgMs": 21.939999997615814,
+        "p50Ms": 21.939999997615814,
+        "p90Ms": 21.939999997615814,
+        "maxMs": 21.939999997615814,
         "runs": [
-          20.15999999642372
+          21.939999997615814
         ],
         "phases": {
-          "loadStepFile": 10.639999985694885,
-          "loadStepFile_initOC": 0.015000015497207642,
+          "loadStepFile": 8.450000017881393,
+          "loadStepFile_initOC": 0.005000025033950806,
           "loadStepFile_createDoc": 0,
           "loadStepFile_readFile": 0,
           "loadStepFile_transfer": 0,
           "loadStepFile_getTools": 0,
           "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 0.7400000095367432,
-          "tessellateOCCShape": 7.884999990463257,
-          "tessellatePlanarFace": 0.08500000834465027,
-          "tessellateCurvedFace": 7.180000007152557,
-          "earClipping": 0.04499998688697815,
-          "computeNormals": 0.25,
-          "meshAssembly": 0.04499998688697815
+          "extractFacesWithEdges": 0.6049999892711639,
+          "tessellateOCCShape": 12.574999988079071,
+          "tessellatePlanarFace": 0.5450000166893005,
+          "tessellateCurvedFace": 9.990000009536743,
+          "earClipping": 0.17499998211860657,
+          "computeNormals": 1.155000001192093,
+          "meshAssembly": 0.06000000238418579
         },
-        "vertexCount": 363,
-        "triangleCount": 532
+        "vertexCount": 323,
+        "triangleCount": 468
       },
       "ref": {
-        "avgMs": 32.275000005960464,
-        "p50Ms": 32.275000005960464,
-        "p90Ms": 32.275000005960464,
-        "maxMs": 32.275000005960464,
+        "avgMs": 56.25,
+        "p50Ms": 56.25,
+        "p90Ms": 56.25,
+        "maxMs": 56.25,
         "runs": [
-          32.275000005960464
+          56.25
         ],
         "vertexCount": 1012,
         "triangleCount": 1318
       },
-      "speedup": 1.600942460897117,
-      "triangleRatio": 0.40364188163884673,
+      "speedup": 2.5638103922567272,
+      "triangleRatio": 0.3550834597875569,
       "warnings": []
     },
     {
@@ -271,45 +271,45 @@
       "fileSize": 5434,
       "success": true,
       "ours": {
-        "avgMs": 10.834999978542328,
-        "p50Ms": 10.834999978542328,
-        "p90Ms": 10.834999978542328,
-        "maxMs": 10.834999978542328,
+        "avgMs": 9.929999977350235,
+        "p50Ms": 9.929999977350235,
+        "p90Ms": 9.929999977350235,
+        "maxMs": 9.929999977350235,
         "runs": [
-          10.834999978542328
+          9.929999977350235
         ],
         "phases": {
-          "loadStepFile": 8.819999992847443,
-          "loadStepFile_initOC": 0,
+          "loadStepFile": 6.105000019073486,
+          "loadStepFile_initOC": 0.019999980926513672,
           "loadStepFile_createDoc": 0,
           "loadStepFile_readFile": 0,
           "loadStepFile_transfer": 0,
           "loadStepFile_getTools": 0,
           "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 0.3700000047683716,
-          "tessellateOCCShape": 1.324999988079071,
+          "extractFacesWithEdges": 0.9950000047683716,
+          "tessellateOCCShape": 2.455000013113022,
           "tessellatePlanarFace": 0,
-          "tessellateCurvedFace": 1.1500000059604645,
+          "tessellateCurvedFace": 2,
           "earClipping": 0,
-          "computeNormals": 0.03999999165534973,
-          "meshAssembly": 0.014999985694885254
+          "computeNormals": 0.1900000274181366,
+          "meshAssembly": 0.010000020265579224
         },
-        "vertexCount": 72,
-        "triangleCount": 100
+        "vertexCount": 28,
+        "triangleCount": 24
       },
       "ref": {
-        "avgMs": 34.18000000715256,
-        "p50Ms": 34.18000000715256,
-        "p90Ms": 34.18000000715256,
-        "maxMs": 34.18000000715256,
+        "avgMs": 102.9249999821186,
+        "p50Ms": 102.9249999821186,
+        "p90Ms": 102.9249999821186,
+        "maxMs": 102.9249999821186,
         "runs": [
-          34.18000000715256
+          102.9249999821186
         ],
         "vertexCount": 10,
         "triangleCount": 8
       },
-      "speedup": 3.154591608199608,
-      "triangleRatio": 12.5,
+      "speedup": 10.365055409555355,
+      "triangleRatio": 3,
       "warnings": []
     }
   ]
