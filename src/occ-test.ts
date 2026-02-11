@@ -5839,9 +5839,9 @@ function buildOcctInspiredConeTrimDomainFromPCurves(
   const padV = Math.max(minPad, (vMax - vMin) * padFactor);
 
   const sourcePointCount = alignedWires.reduce((sum, wire) => sum + wire.length, 0);
-  const gridScale = Math.max(0.1, readGlobalNumber('__OCCT_INSPIRED_TRIM_GRID_SCALE__') ?? 1.35);
-  const minGrid = Math.max(8, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID__') ?? 24));
-  const maxGrid = Math.max(minGrid, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID__') ?? 64));
+  const gridScale = Math.max(0.1, readGlobalNumber('__OCCT_INSPIRED_TRIM_GRID_SCALE__') ?? 0.9);
+  const minGrid = Math.max(8, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID__') ?? 14));
+  const maxGrid = Math.max(minGrid, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID__') ?? 32));
   const gridDensity = Math.max(
     minGrid,
     Math.min(maxGrid, Math.ceil(Math.sqrt(sourcePointCount) * gridScale))
@@ -6039,54 +6039,6 @@ function getFaceTrimLoopsUV(
     normalizedOuter = simplifyLoop2D(normalizedOuter);
     normalizedHoles = normalizedHoles.map((h) => simplifyLoop2D(h));
 
-    // General trim complexity guardrail for all trimmed faces.
-    // Cone surfaces keep a stricter/specialized pass below.
-    const simplifyAllTrimLoops = (globalThis as any)?.__TRIM_SIMPLIFY_ALL__ !== false;
-    if (simplifyAllTrimLoops && normalizedOuter.length >= 3) {
-      const maxOuterPts = Math.max(96, Math.floor(readGlobalNumber('__TRIM_MAX_OUTER_PTS__') ?? 384));
-      const maxHolePts = Math.max(24, Math.floor(readGlobalNumber('__TRIM_MAX_HOLE_PTS__') ?? 96));
-      const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber('__TRIM_MAX_AREA_ERR_RATIO__') ?? 0.02);
-      const maxAreaErrorNoHoles = Math.max(
-        maxAreaErrorRatio,
-        readGlobalNumber('__TRIM_MAX_AREA_ERR_RATIO_NO_HOLES__') ?? 0.06
-      );
-
-      const beforeOuterPts = normalizedOuter.length;
-      const beforeHolePts = normalizedHoles.reduce((sum, h) => sum + h.length, 0);
-      const needsSimplification =
-        normalizedOuter.length > maxOuterPts ||
-        normalizedHoles.some((h) => h.length > maxHolePts);
-
-      if (needsSimplification) {
-        const outerAreaErrRatio = normalizedHoles.length === 0 ? maxAreaErrorNoHoles : maxAreaErrorRatio;
-        const simplifiedOuter = simplifyLoopForMeshing(normalizedOuter, maxOuterPts, outerAreaErrRatio);
-        const simplifiedHoles = normalizedHoles
-          .map((hole) => simplifyLoopForMeshing(hole, maxHolePts, maxAreaErrorRatio))
-          .filter((hole) => hole.length >= 3);
-
-        const simplifiedValidation = validateAndSanitizeTrimLoops(simplifiedOuter, simplifiedHoles, {
-          minAreaAbs: 1e-8,
-          maxHoleToOuterRatio: 0.995,
-          failOnHoleOutside: false,
-          failOnHugeHole: false,
-        });
-
-        if (simplifiedValidation.ok) {
-          normalizedOuter = simplifiedValidation.uvOuter;
-          normalizedHoles = simplifiedValidation.uvHoles;
-        }
-      }
-
-      const afterHolePts = normalizedHoles.reduce((sum, h) => sum + h.length, 0);
-      if (beforeOuterPts !== normalizedOuter.length || beforeHolePts !== afterHolePts) {
-        curveDebugLog(
-          `[trim-loop-simplify] face ${face.faceIndex} ${face.surfaceType} source=${source}: ` +
-          `outer ${beforeOuterPts} -> ${normalizedOuter.length}, holes ${beforeHolePts} -> ${afterHolePts} ` +
-          `(count=${normalizedHoles.length})`
-        );
-      }
-    }
-
     // OCCT-inspired stability: keep trim loops geometrically equivalent but bounded in
     // complexity before triangulation. This avoids pathological CDT inputs on cone seams.
     if (face.surfaceType === 'Cone') {
@@ -6220,21 +6172,21 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
   const totalPts = uvHoles.reduce((acc, h) => acc + h.length, uvOuter.length);
   // Keep trim-grid growth sublinear and capped by default. This is a key speed
   // control for complex trims where boundary sampling can be very dense.
-  const trimGridScale = Math.max(0.25, readGlobalNumber('__TRIM_GRID_SCALE__') ?? 1.0);
+  const trimGridScale = Math.max(0.25, readGlobalNumber('__TRIM_GRID_SCALE__') ?? 0.85);
   let base = Math.ceil(Math.sqrt(totalPts) * trimGridScale);
 
-  const minGrid = Math.max(8, Math.floor(readGlobalNumber('__TRIM_MIN_GRID_DENSITY__') ?? 12));
-  const maxGridGlobal = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY__') ?? 40));
-  const maxGridNoHoles = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 24));
-  const maxGridWithHoles = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY_WITH_HOLES__') ?? maxGridGlobal));
+  const minGrid = Math.max(8, Math.floor(readGlobalNumber('__TRIM_MIN_GRID_DENSITY__') ?? 10));
+  const maxGridGlobal = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY__') ?? 32));
+  const maxGridNoHoles = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 20));
+  const maxGridWithHoles = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY_WITH_HOLES__') ?? 24));
   let effectiveMaxGrid = uvHoles.length === 0 ? maxGridNoHoles : maxGridWithHoles;
 
   // OCCT-inspired guardrail: trim mesh density should not explode just because
   // trim loops are densely sampled. Cone seam faces are especially sensitive.
   if (face.surfaceType === 'Cone') {
-    const coneMaxGrid = Math.max(16, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_GRID_DENSITY__') ?? 36));
-    const coneMaxGridNoHoles = Math.max(12, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 16));
-    const outerPointSoftCap = Math.max(128, Math.floor(readGlobalNumber('__CONE_TRIM_OUTER_POINT_SOFT_CAP__') ?? 768));
+    const coneMaxGrid = Math.max(14, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_GRID_DENSITY__') ?? 24));
+    const coneMaxGridNoHoles = Math.max(10, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 14));
+    const outerPointSoftCap = Math.max(128, Math.floor(readGlobalNumber('__CONE_TRIM_OUTER_POINT_SOFT_CAP__') ?? 512));
 
     if (uvOuter.length > outerPointSoftCap || uvHoles.length > 0) {
       effectiveMaxGrid = Math.min(effectiveMaxGrid, coneMaxGrid);
@@ -6245,9 +6197,9 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
   }
 
   // Additional throttle for highly sampled trims to curb triangle inflation.
-  const highComplexPointThreshold = Math.max(256, Math.floor(readGlobalNumber('__TRIM_HIGH_COMPLEXITY_POINT_THRESHOLD__') ?? 900));
+  const highComplexPointThreshold = Math.max(256, Math.floor(readGlobalNumber('__TRIM_HIGH_COMPLEXITY_POINT_THRESHOLD__') ?? 600));
   if (totalPts > highComplexPointThreshold) {
-    const complexityGridCap = Math.max(minGrid, Math.floor(effectiveMaxGrid * 0.85));
+    const complexityGridCap = Math.max(minGrid, Math.floor(effectiveMaxGrid * 0.75));
     effectiveMaxGrid = Math.min(effectiveMaxGrid, complexityGridCap);
   }
 
