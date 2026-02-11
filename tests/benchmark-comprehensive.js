@@ -187,8 +187,17 @@ const BROKEN_CANARY_FILES = new Set([
     'step-examples/complex/nissan.step',
 ]);
 
+const LOAD_SUBPHASE_KEYS = [
+    'loadStepFile_initOC',
+    'loadStepFile_createDoc',
+    'loadStepFile_readFile',
+    'loadStepFile_transfer',
+    'loadStepFile_getTools',
+    'loadStepFile_colorParsing',
+];
 const PHASE_KEYS = [
     'loadStepFile',
+    ...LOAD_SUBPHASE_KEYS,
     'extractFacesWithEdges',
     'tessellateOCCShape',
     'tessellatePlanarFace',
@@ -471,6 +480,28 @@ function summarizePhaseRuns(phaseRuns) {
     return out;
 }
 
+function summarizeLoadBreakdown(phases, oursMs) {
+    if (!phases || !Number.isFinite(phases.loadStepFile) || !Number.isFinite(oursMs) || oursMs <= 0) {
+        return null;
+    }
+
+    const top = LOAD_SUBPHASE_KEYS
+        .map((key) => ({ key, ms: phases[key] || 0 }))
+        .filter((entry) => entry.ms > 0)
+        .sort((a, b) => b.ms - a.ms)
+        .slice(0, 3);
+
+    const topText = top
+        .map((entry) => `${entry.key.replace('loadStepFile_', '')}:${entry.ms.toFixed(1)}ms`)
+        .join(', ');
+
+    return {
+        loadMs: phases.loadStepFile,
+        sharePct: (phases.loadStepFile / oursMs) * 100,
+        topText,
+    };
+}
+
 async function runBenchmark(page, model, config) {
     let step;
     try {
@@ -633,6 +664,17 @@ function printResultRow(result) {
         `PASS  ${result.name} | ours=${ours.toFixed(1)}ms | ref=${ref.toFixed(1)}ms | ${speedLabel} | tris=${result.ours.triangleCount}/${result.ref.triangleCount}`,
         speedColor,
     );
+
+    if (speed < 1) {
+        const load = summarizeLoadBreakdown(result.ours.phases, ours);
+        if (load) {
+            const detail = load.topText ? ` | top: ${load.topText}` : '';
+            log(
+                `      loadStepFile=${load.loadMs.toFixed(1)}ms (${load.sharePct.toFixed(1)}% of ours)${detail}`,
+                'dim',
+            );
+        }
+    }
 }
 
 function printResultsTable(results) {

@@ -2039,6 +2039,11 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   tessellationProfile.loadStepFile_initOC.total += performance.now() - initOCStart;
   tessellationProfile.loadStepFile_initOC.calls++;
 
+  // Perf-mode switches (used by benchmark harness to isolate geometry throughput).
+  const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+  const useXCAFReader = readGlobalBoolean('__ENABLE_XCAF_READER__', !preferGeometryOnlyLoad);
+  const enableStepColorParsing = readGlobalBoolean('__ENABLE_STEP_COLOR_PARSING__', !preferGeometryOnlyLoad);
+
   // Debug APIs logged only when DEBUG_OCC is true
   if (DEBUG_OCC) {
     console.log('[OCC] Available STEPCAFControl_Reader constructors:',
@@ -2049,7 +2054,7 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
 
   // Convert to Uint8Array if string was passed
   let fileData: Uint8Array;
-  let fileContentString: string;
+  let fileContentString: string | null = null;
 
   if (typeof fileContent === 'string') {
     // Legacy string input - convert to Uint8Array
@@ -2059,9 +2064,6 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   } else {
     // Uint8Array input (preferred for large files)
     fileData = fileContent;
-    // Decode to string for STEP color parsing (done lazily later if needed)
-    const decoder = new TextDecoder('utf-8');
-    fileContentString = decoder.decode(fileContent);
   }
 
   // Write file to virtual filesystem using writeFile (handles large files better)
@@ -2074,7 +2076,7 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   let xcafDocHandle: any = null;  // Handle for XCAFPrs_DocumentExplorer
 
   // Try XCAF reader first (supports colors)
-  const hasXCAF = oc.STEPCAFControl_Reader_1 || oc.STEPCAFControl_Reader;
+  const hasXCAF = useXCAFReader && (oc.STEPCAFControl_Reader_1 || oc.STEPCAFControl_Reader);
 
   if (hasXCAF) {
     try {
@@ -2535,32 +2537,8 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   // Clean up
   oc.FS.unlink('/' + fileName);
 
-  // Profile: Color parsing
-  const colorParsingStart = performance.now();
-  logOCC('Parsing colors from STEP text...');
-
-  // Sub-profile: parseStepColors
-  let t0 = performance.now();
-  const colorEntities = parseStepColors(fileContentString);
-  const parseStepColorsTime = performance.now() - t0;
-
-  // FAST PATH: If no color entities found, skip all expensive color extraction
-  if (colorEntities.size === 0) {
-    const colorParsingTotal = performance.now() - colorParsingStart;
-    tessellationProfile.loadStepFile_colorParsing.total += colorParsingTotal;
-    tessellationProfile.loadStepFile_colorParsing.calls++;
-    console.log(`[ColorParsing] No colors in file, skipped in ${colorParsingTotal.toFixed(1)}ms`);
-
-    // Return empty color maps
-    const emptyStepColors = new Map<number, RGBColor>();
-    const emptyFaceIdOrder: number[] = [];
-    const emptyGeometryColorMap = new Map<string, RGBColor>();
-    const emptySolidMatchedColors = new Map<number, RGBColor>();
-    const emptyFaceToSolid = new Map<number, number>();
-    const emptySolidToColor = new Map<number, RGBColor>();
-    const emptyShapeColorMap = new Map<number, RGBColor>();
-
-    // Still need to unwrap tools
+  const buildEmptyColorResult = (): StepLoadResult => {
+    // Still need to unwrap tools before returning.
     let unwrappedColorTool = colorTool;
     let unwrappedShapeTool = shapeTool;
     if (colorTool && typeof colorTool.get === 'function' && !colorTool.IsNull?.()) {
@@ -2575,14 +2553,44 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
       colorTool: unwrappedColorTool,
       shapeTool: unwrappedShapeTool,
       doc,
-      stepColors: emptyStepColors,
-      shapeColorMap: emptyShapeColorMap,
-      faceIdOrder: emptyFaceIdOrder,
-      geometryColorMap: emptyGeometryColorMap,
-      solidMatchedColors: emptySolidMatchedColors,
-      faceToSolid: emptyFaceToSolid,
-      solidToColor: emptySolidToColor,
+      stepColors: new Map<number, RGBColor>(),
+      shapeColorMap: new Map<number, RGBColor>(),
+      faceIdOrder: [],
+      geometryColorMap: new Map<string, RGBColor>(),
+      solidMatchedColors: new Map<number, RGBColor>(),
+      faceToSolid: new Map<number, number>(),
+      solidToColor: new Map<number, RGBColor>(),
     };
+  };
+
+  // Profile: Color parsing
+  const colorParsingStart = performance.now();
+  if (!enableStepColorParsing) {
+    const colorParsingTotal = performance.now() - colorParsingStart;
+    tessellationProfile.loadStepFile_colorParsing.total += colorParsingTotal;
+    tessellationProfile.loadStepFile_colorParsing.calls++;
+    console.log(`[ColorParsing] Disabled by __ENABLE_STEP_COLOR_PARSING__/__PERF_GEOMETRY_ONLY_LOAD__, skipped in ${colorParsingTotal.toFixed(1)}ms`);
+    return buildEmptyColorResult();
+  }
+
+  if (fileContentString === null) {
+    const decoder = new TextDecoder('utf-8');
+    fileContentString = decoder.decode(fileData);
+  }
+  logOCC('Parsing colors from STEP text...');
+
+  // Sub-profile: parseStepColors
+  let t0 = performance.now();
+  const colorEntities = parseStepColors(fileContentString);
+  const parseStepColorsTime = performance.now() - t0;
+
+  // FAST PATH: If no color entities found, skip all expensive color extraction
+  if (colorEntities.size === 0) {
+    const colorParsingTotal = performance.now() - colorParsingStart;
+    tessellationProfile.loadStepFile_colorParsing.total += colorParsingTotal;
+    tessellationProfile.loadStepFile_colorParsing.calls++;
+    console.log(`[ColorParsing] No colors in file, skipped in ${colorParsingTotal.toFixed(1)}ms`);
+    return buildEmptyColorResult();
   }
 
   // Sub-profile: buildFaceColorMap
