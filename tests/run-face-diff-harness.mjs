@@ -95,6 +95,19 @@ async function main() {
   const stepFile = process.argv[2] || DEFAULT_STEP_FILE;
   const faceIds = parseFaceIds(process.argv[3]);
   const outputPath = process.argv[4] || `/tmp/face-diff-report-${Date.now()}.json`;
+  // Oracle mode is opt-in only. Default stays on our TS/GPU path.
+  const enableOcctNativeFaceTessellation = process.env.ENABLE_OCCT_NATIVE_FACE_TESSELLATION === '1';
+  const enableOcctInspiredTrimGraph = process.env.ENABLE_OCCT_INSPIRED_TRIM_GRAPH === '1';
+  const occtInspiredTrimGraphFaceIds = parseFaceIds(process.env.OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS);
+  const nativeLinDeflection = process.env.OCCT_NATIVE_LIN_DEFLECTION
+    ? Number.parseFloat(process.env.OCCT_NATIVE_LIN_DEFLECTION)
+    : undefined;
+  const nativeLinDeflectionRatio = process.env.OCCT_NATIVE_LIN_DEFLECTION_RATIO
+    ? Number.parseFloat(process.env.OCCT_NATIVE_LIN_DEFLECTION_RATIO)
+    : undefined;
+  const nativeAngDeflection = process.env.OCCT_NATIVE_ANG_DEFLECTION
+    ? Number.parseFloat(process.env.OCCT_NATIVE_ANG_DEFLECTION)
+    : undefined;
 
   const absoluteStepPath = join(PROJECT_ROOT, stepFile);
   if (!fs.existsSync(absoluteStepPath)) {
@@ -138,17 +151,48 @@ async function main() {
       timeout: 60000,
     });
 
-    const report = await page.evaluate(async (testPath, targets) => {
+    const report = await page.evaluate(async (testPath, targets, opts) => {
       globalThis.__FACE_DEBUG_MODE__ = 'only';
       globalThis.__FACE_DEBUG_IDS__ = targets;
       globalThis.__ENABLE_CONE_SEAM_SPLIT__ = true;
       globalThis.__CONE_SEAM_SPLIT_FACE_IDS__ = targets;
+      globalThis.__ENABLE_OCCT_INSPIRED_TRIM_GRAPH__ = !!opts.enableOcctInspiredTrimGraph;
+      globalThis.__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__ = opts.occtInspiredTrimGraphFaceIds;
+      globalThis.__ALLOW_OCCT_ORACLE_PATH__ = !!opts.enableOcctNativeFaceTessellation;
+      globalThis.__ENABLE_OCCT_NATIVE_FACE_TESSELLATION__ = !!opts.enableOcctNativeFaceTessellation;
+      globalThis.__OCCT_NATIVE_FACE_IDS__ = targets;
+      if (Number.isFinite(opts.nativeLinDeflection)) {
+        globalThis.__OCCT_NATIVE_LIN_DEFLECTION__ = opts.nativeLinDeflection;
+      }
+      if (Number.isFinite(opts.nativeLinDeflectionRatio)) {
+        globalThis.__OCCT_NATIVE_LIN_DEFLECTION_RATIO__ = opts.nativeLinDeflectionRatio;
+      }
+      if (Number.isFinite(opts.nativeAngDeflection)) {
+        globalThis.__OCCT_NATIVE_ANG_DEFLECTION__ = opts.nativeAngDeflection;
+      }
       return await window.visualValidation.runFaceDiff(testPath, targets);
-    }, stepFile, faceIds);
+    }, stepFile, faceIds, {
+      enableOcctInspiredTrimGraph,
+      occtInspiredTrimGraphFaceIds,
+      enableOcctNativeFaceTessellation,
+      nativeLinDeflection,
+      nativeLinDeflectionRatio,
+      nativeAngDeflection,
+    });
 
     fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
 
     console.log(`Face diff report written: ${outputPath}`);
+    if (enableOcctNativeFaceTessellation) {
+      console.log('[harness] OCCT native face triangulation oracle: ENABLED');
+    } else {
+      console.log('[harness] OCCT native face triangulation oracle: DISABLED (TS/GPU path)');
+    }
+    if (enableOcctInspiredTrimGraph) {
+      console.log(`[harness] OCCT-inspired trim graph path: ENABLED faces=[${occtInspiredTrimGraphFaceIds.join(',')}]`);
+    } else {
+      console.log('[harness] OCCT-inspired trim graph path: DISABLED');
+    }
     for (const row of report.rows) {
       console.log(summarizeFaceRow(row));
     }

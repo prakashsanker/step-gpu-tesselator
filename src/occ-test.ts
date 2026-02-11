@@ -4921,6 +4921,185 @@ function simplifyLoop2D(points: Vec2[], eps: number = 1e-10): Vec2[] {
   return out;
 }
 
+function pointSegmentDistance2D(point: Vec2, a: Vec2, b: Vec2): number {
+  const abU = b[0] - a[0];
+  const abV = b[1] - a[1];
+  const apU = point[0] - a[0];
+  const apV = point[1] - a[1];
+  const abLen2 = abU * abU + abV * abV;
+  if (abLen2 <= 1e-24) {
+    const du = point[0] - a[0];
+    const dv = point[1] - a[1];
+    return Math.sqrt(du * du + dv * dv);
+  }
+  const t = Math.max(0, Math.min(1, (apU * abU + apV * abV) / abLen2));
+  const projU = a[0] + t * abU;
+  const projV = a[1] + t * abV;
+  const du = point[0] - projU;
+  const dv = point[1] - projV;
+  return Math.sqrt(du * du + dv * dv);
+}
+
+function simplifyPolylineRDP(points: Vec2[], tolerance: number): Vec2[] {
+  if (points.length <= 2 || tolerance <= 0) {
+    return points.slice();
+  }
+
+  const keep = new Uint8Array(points.length);
+  keep[0] = 1;
+  keep[points.length - 1] = 1;
+  const stack: Array<[number, number]> = [[0, points.length - 1]];
+
+  while (stack.length > 0) {
+    const [start, end] = stack.pop()!;
+    let maxDist = -1;
+    let maxIdx = -1;
+    for (let i = start + 1; i < end; i++) {
+      const dist = pointSegmentDistance2D(points[i], points[start], points[end]);
+      if (dist > maxDist) {
+        maxDist = dist;
+        maxIdx = i;
+      }
+    }
+    if (maxIdx > start && maxIdx < end && maxDist > tolerance) {
+      keep[maxIdx] = 1;
+      stack.push([start, maxIdx], [maxIdx, end]);
+    }
+  }
+
+  const simplified: Vec2[] = [];
+  for (let i = 0; i < points.length; i++) {
+    if (keep[i]) simplified.push(points[i]);
+  }
+  return simplified;
+}
+
+function loopBounds2D(points: Vec2[]): { minU: number; maxU: number; minV: number; maxV: number } {
+  let minU = Infinity;
+  let maxU = -Infinity;
+  let minV = Infinity;
+  let maxV = -Infinity;
+  for (const [u, v] of points) {
+    minU = Math.min(minU, u);
+    maxU = Math.max(maxU, u);
+    minV = Math.min(minV, v);
+    maxV = Math.max(maxV, v);
+  }
+  return { minU, maxU, minV, maxV };
+}
+
+function simplifyClosedLoopRDP(loopInput: Vec2[], tolerance: number, minPoints: number = 3): Vec2[] {
+  const loop = simplifyLoop2D(loopInput);
+  if (loop.length <= minPoints || tolerance <= 0) {
+    return loop;
+  }
+
+  // Split the closed loop at a stable pivot (farthest point from centroid)
+  // before running open-polyline RDP.
+  const centroid = loopCentroid2D(loop);
+  let pivot = 0;
+  let maxDist2 = -1;
+  for (let i = 0; i < loop.length; i++) {
+    const du = loop[i][0] - centroid[0];
+    const dv = loop[i][1] - centroid[1];
+    const dist2 = du * du + dv * dv;
+    if (dist2 > maxDist2) {
+      maxDist2 = dist2;
+      pivot = i;
+    }
+  }
+
+  const rotated: Vec2[] = [];
+  for (let i = 0; i < loop.length; i++) {
+    rotated.push(loop[(pivot + i) % loop.length]);
+  }
+  rotated.push(rotated[0]);
+
+  const simplifiedOpen = simplifyPolylineRDP(rotated, tolerance);
+  if (simplifiedOpen.length < minPoints + 1) {
+    return loop;
+  }
+
+  const simplifiedClosed = simplifyLoop2D(simplifiedOpen);
+  return simplifiedClosed.length >= minPoints ? simplifiedClosed : loop;
+}
+
+function simplifyLoopForMeshing(loopInput: Vec2[], targetPoints: number, maxAreaErrorRatio: number): Vec2[] {
+  const loop = simplifyLoop2D(loopInput);
+  if (loop.length <= 3 || loop.length <= targetPoints) {
+    return loop;
+  }
+
+  const sourceArea = loopAreaAbs2D(loop);
+  const bounds = loopBounds2D(loop);
+  const diag = Math.hypot(bounds.maxU - bounds.minU, bounds.maxV - bounds.minV);
+  if (!Number.isFinite(diag) || diag <= 1e-12) {
+    return loop;
+  }
+
+  let lo = 0;
+  let hi = diag * 0.5;
+  let best = loop;
+
+  for (let iter = 0; iter < 22; iter++) {
+    const mid = (lo + hi) * 0.5;
+    const candidate = simplifyClosedLoopRDP(loop, mid, 3);
+    if (candidate.length < 3) {
+      hi = mid;
+      continue;
+    }
+    const candidateArea = loopAreaAbs2D(candidate);
+    const areaErrorRatio = sourceArea > 1e-12
+      ? Math.abs(candidateArea - sourceArea) / sourceArea
+      : 0;
+    const areaOk = areaErrorRatio <= maxAreaErrorRatio;
+    if (areaOk) {
+      best = candidate;
+      lo = mid;
+    } else {
+      hi = mid;
+    }
+  }
+
+  if (best.length <= targetPoints) {
+    return best;
+  }
+
+  // Final cap for extreme loops: uniform decimation with area guard.
+  const step = Math.ceil(best.length / targetPoints);
+  const decimated: Vec2[] = [];
+  for (let i = 0; i < best.length; i += step) {
+    decimated.push(best[i]);
+  }
+  const decimatedLoop = simplifyLoop2D(decimated);
+  if (decimatedLoop.length < 3) {
+    return best;
+  }
+  const decimatedArea = loopAreaAbs2D(decimatedLoop);
+  const decimatedAreaErrorRatio = sourceArea > 1e-12
+    ? Math.abs(decimatedArea - sourceArea) / sourceArea
+    : 0;
+  const relaxedAreaErrorRatio = Math.max(maxAreaErrorRatio * 4, 0.12);
+  if (
+    decimatedAreaErrorRatio <= maxAreaErrorRatio ||
+    (loop.length > targetPoints * 4 && decimatedAreaErrorRatio <= relaxedAreaErrorRatio)
+  ) {
+    return decimatedLoop;
+  }
+  if (best.length > targetPoints * 2) {
+    const hardStep = Math.ceil(best.length / targetPoints);
+    const hardDecimated: Vec2[] = [];
+    for (let i = 0; i < best.length; i += hardStep) {
+      hardDecimated.push(best[i]);
+    }
+    const hardLoop = simplifyLoop2D(hardDecimated);
+    if (hardLoop.length >= 3) {
+      return hardLoop;
+    }
+  }
+  return best;
+}
+
 function signedLoopArea2D(points: Vec2[]): number {
   if (points.length < 3) return 0;
   let area = 0;
@@ -5484,10 +5663,27 @@ function loopPerimeterUV(points: Vec2[]): number {
   return perimeter;
 }
 
-function getFaceTrimLoopsUVFromPCurves(
+interface PcurveWireLoopsResult {
+  wires: Vec2[][];
+  wireHashes: number[];
+  outerWireHash: number | null;
+}
+
+interface OcctInspiredConeTrimDomain {
+  uvOuter: Vec2[];
+  gridDensity: number;
+  sourceLoopCount: number;
+  sourcePointCount: number;
+  uMin: number;
+  uMax: number;
+  vMin: number;
+  vMax: number;
+}
+
+function getFaceTrimWireLoopsUVFromPCurves(
   oc: any,
   face: FaceWithEdgesInfo
-): { uvOuter: Vec2[]; uvHoles: Vec2[][] } | null {
+): PcurveWireLoopsResult | null {
   if (!face.occFace || !oc.TopExp_Explorer_2 || !oc.BRepTools_WireExplorer_2 || !oc.TopoDS?.Wire_1 || !oc.TopoDS?.Edge_1) {
     return null;
   }
@@ -5550,6 +5746,107 @@ function getFaceTrimLoopsUVFromPCurves(
   if (wires.length === 0) {
     return null;
   }
+
+  return { wires, wireHashes, outerWireHash };
+}
+
+function buildOcctInspiredConeTrimDomainFromPCurves(
+  oc: any,
+  face: FaceWithEdgesInfo
+): OcctInspiredConeTrimDomain | null {
+  const pcurveLoops = getFaceTrimWireLoopsUVFromPCurves(oc, face);
+  if (!pcurveLoops || pcurveLoops.wires.length === 0) {
+    return null;
+  }
+
+  const period = Math.PI * 2;
+  const unwrappedWires = pcurveLoops.wires
+    .map((wire) => unwrapClosedPeriodicLoopUOnce(wire, period))
+    .filter((wire) => wire.length >= 3);
+
+  if (unwrappedWires.length === 0) {
+    return null;
+  }
+
+  // Align all wires to a shared U band so the domain rectangle is compact/stable.
+  const referenceMeanU = meanLoopU(unwrappedWires[0]);
+  let alignedWires = unwrappedWires.map((wire) => {
+    let aligned = wire;
+    const alignK = Math.round((referenceMeanU - meanLoopU(aligned)) / period);
+    if (alignK !== 0) {
+      aligned = shiftLoopU(aligned, alignK * period);
+    }
+    return aligned;
+  });
+
+  let uMin = Infinity;
+  let uMax = -Infinity;
+  let vMin = Infinity;
+  let vMax = -Infinity;
+  for (const wire of alignedWires) {
+    for (const [u, v] of wire) {
+      uMin = Math.min(uMin, u);
+      uMax = Math.max(uMax, u);
+      vMin = Math.min(vMin, v);
+      vMax = Math.max(vMax, v);
+    }
+  }
+
+  if (!Number.isFinite(uMin) || !Number.isFinite(uMax) || !Number.isFinite(vMin) || !Number.isFinite(vMax)) {
+    return null;
+  }
+  if (uMax - uMin <= 1e-6 || vMax - vMin <= 1e-6) {
+    return null;
+  }
+
+  const shiftK = chooseShiftToRange(uMin, uMax, period, 0, period);
+  if (shiftK !== 0) {
+    const shiftU = shiftK * period;
+    alignedWires = alignedWires.map((wire) => shiftLoopU(wire, shiftU));
+    uMin += shiftU;
+    uMax += shiftU;
+  }
+
+  const padFactor = Math.max(0, readGlobalNumber('__OCCT_INSPIRED_TRIM_DOMAIN_PAD_FACTOR__') ?? 0.03);
+  const minPad = Math.max(1e-6, readGlobalNumber('__OCCT_INSPIRED_TRIM_DOMAIN_PAD_MIN__') ?? 1e-4);
+  const padU = Math.max(minPad, (uMax - uMin) * padFactor);
+  const padV = Math.max(minPad, (vMax - vMin) * padFactor);
+
+  const sourcePointCount = alignedWires.reduce((sum, wire) => sum + wire.length, 0);
+  const gridScale = Math.max(0.1, readGlobalNumber('__OCCT_INSPIRED_TRIM_GRID_SCALE__') ?? 1.35);
+  const minGrid = Math.max(8, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID__') ?? 24));
+  const maxGrid = Math.max(minGrid, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID__') ?? 64));
+  const gridDensity = Math.max(
+    minGrid,
+    Math.min(maxGrid, Math.ceil(Math.sqrt(sourcePointCount) * gridScale))
+  );
+
+  return {
+    uvOuter: [
+      [uMin - padU, vMin - padV],
+      [uMax + padU, vMin - padV],
+      [uMax + padU, vMax + padV],
+      [uMin - padU, vMax + padV],
+    ],
+    gridDensity,
+    sourceLoopCount: alignedWires.length,
+    sourcePointCount,
+    uMin: uMin - padU,
+    uMax: uMax + padU,
+    vMin: vMin - padV,
+    vMax: vMax + padV,
+  };
+}
+
+function getFaceTrimLoopsUVFromPCurves(
+  oc: any,
+  face: FaceWithEdgesInfo
+): { uvOuter: Vec2[]; uvHoles: Vec2[][] } | null {
+  const pcurveLoops = getFaceTrimWireLoopsUVFromPCurves(oc, face);
+  if (!pcurveLoops || pcurveLoops.wires.length === 0) {
+    return null;
+  }
+  const { wires, wireHashes, outerWireHash } = pcurveLoops;
 
   // Cone seam faces are sensitive to wire ordering/hash mismatches.
   // Build loop labels from p-curve geometry directly:
@@ -5715,6 +6012,59 @@ function getFaceTrimLoopsUV(
     // Ensure closed loops for robust polygon tests; duplicate endpoint is removed by simplifyLoop2D.
     normalizedOuter = simplifyLoop2D(normalizedOuter);
     normalizedHoles = normalizedHoles.map((h) => simplifyLoop2D(h));
+
+    // OCCT-inspired stability: keep trim loops geometrically equivalent but bounded in
+    // complexity before triangulation. This avoids pathological CDT inputs on cone seams.
+    if (face.surfaceType === 'Cone') {
+      const maxOuterPts = Math.max(64, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_OUTER_PTS__') ?? 192));
+      const maxHolePts = Math.max(12, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_HOLE_PTS__') ?? 32));
+      const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber('__CONE_TRIM_MAX_AREA_ERR_RATIO__') ?? 0.03);
+      const maxOuterAreaErrorNoHoles = Math.max(
+        maxAreaErrorRatio,
+        readGlobalNumber('__CONE_TRIM_MAX_AREA_ERR_RATIO_NO_HOLES__') ?? 0.08
+      );
+      const beforeOuterPts = normalizedOuter.length;
+      const beforeHolePts = normalizedHoles.reduce((sum, h) => sum + h.length, 0);
+
+      const outerAreaErrRatio = normalizedHoles.length === 0 ? maxOuterAreaErrorNoHoles : maxAreaErrorRatio;
+      const simplifiedOuter = simplifyLoopForMeshing(normalizedOuter, maxOuterPts, outerAreaErrRatio);
+      const simplifiedHoles = normalizedHoles
+        .map((hole) => simplifyLoopForMeshing(hole, maxHolePts, maxAreaErrorRatio))
+        .filter((hole) => hole.length >= 3);
+
+      const simplifiedValidation = validateAndSanitizeTrimLoops(simplifiedOuter, simplifiedHoles, {
+        minAreaAbs: 1e-7,
+        maxHoleToOuterRatio: 0.98,
+        failOnHoleOutside: true,
+        failOnHugeHole: true,
+      });
+
+      if (simplifiedValidation.ok) {
+        normalizedOuter = simplifiedValidation.uvOuter;
+        normalizedHoles = simplifiedValidation.uvHoles;
+      } else if (source === 'pcurve') {
+        console.warn(
+          `[trim-loop-simplify] face ${face.faceIndex} Cone source=${source}: invalid simplified loops ` +
+          `(${simplifiedValidation.reason ?? 'unknown'}), fallback to projection`
+        );
+        return null;
+      } else {
+        console.warn(
+          `[trim-loop-simplify] face ${face.faceIndex} Cone source=${source}: invalid simplified loops ` +
+          `(${simplifiedValidation.reason ?? 'unknown'}), keeping unsimplified projection loops`
+        );
+      }
+
+      const afterHolePts = normalizedHoles.reduce((sum, h) => sum + h.length, 0);
+      if (beforeOuterPts !== normalizedOuter.length || beforeHolePts !== afterHolePts) {
+        curveDebugLog(
+          `[trim-loop-simplify] face ${face.faceIndex} Cone source=${source}: ` +
+          `outer ${beforeOuterPts} -> ${normalizedOuter.length}, holes ${beforeHolePts} -> ${afterHolePts} ` +
+          `(count=${normalizedHoles.length})`
+        );
+      }
+    }
+
     if (normalizedOuter.length < 3) return null;
     return { uvOuter: normalizedOuter, uvHoles: normalizedHoles, uvOuterRawWrapped: rawOuterWrapped };
   };
@@ -5791,11 +6141,202 @@ function getFaceTrimLoopsUV(
   return finalized;
 }
 
-function chooseTrimGridDensity(uvOuter: Vec2[], uvHoles: Vec2[][]): number {
+function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles: Vec2[][]): number {
   const totalPts = uvHoles.reduce((acc, h) => acc + h.length, uvOuter.length);
   // Heuristic: keep grid roughly proportional to boundary complexity.
-  const base = Math.ceil(Math.sqrt(totalPts) * 4);
+  let base = Math.ceil(Math.sqrt(totalPts) * 4);
+
+  // OCCT-inspired guardrail: trim mesh density should not explode just because
+  // trim loops are densely sampled. Cone seam faces are especially sensitive.
+  if (face.surfaceType === 'Cone') {
+    const coneMaxGrid = Math.max(16, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_GRID_DENSITY__') ?? 36));
+    const coneMaxGridNoHoles = Math.max(12, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 16));
+    const outerPointSoftCap = Math.max(128, Math.floor(readGlobalNumber('__CONE_TRIM_OUTER_POINT_SOFT_CAP__') ?? 768));
+
+    if (uvOuter.length > outerPointSoftCap || uvHoles.length > 0) {
+      base = Math.min(base, coneMaxGrid);
+    }
+    if (uvHoles.length === 0) {
+      base = Math.min(base, coneMaxGridNoHoles);
+    }
+  }
+
   return Math.max(16, Math.min(128, base));
+}
+
+function estimateFaceSizeFromLoops(face: FaceWithEdgesInfo): number {
+  const points: Vec3[] = [];
+  for (const edge of face.outerLoop) {
+    points.push([edge.startPoint.x, edge.startPoint.y, edge.startPoint.z]);
+    points.push([edge.endPoint.x, edge.endPoint.y, edge.endPoint.z]);
+  }
+  for (const loop of face.innerLoops) {
+    for (const edge of loop) {
+      points.push([edge.startPoint.x, edge.startPoint.y, edge.startPoint.z]);
+      points.push([edge.endPoint.x, edge.endPoint.y, edge.endPoint.z]);
+    }
+  }
+  if (points.length === 0) return 1.0;
+
+  let minX = Infinity, minY = Infinity, minZ = Infinity;
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+  for (const [x, y, z] of points) {
+    minX = Math.min(minX, x);
+    minY = Math.min(minY, y);
+    minZ = Math.min(minZ, z);
+    maxX = Math.max(maxX, x);
+    maxY = Math.max(maxY, y);
+    maxZ = Math.max(maxZ, z);
+  }
+  const avgSize = ((maxX - minX) + (maxY - minY) + (maxZ - minZ)) / 3;
+  return Number.isFinite(avgSize) && avgSize > 0 ? avgSize : 1.0;
+}
+
+function unwrapPolyTriangulation(rawTriangulation: any): any | null {
+  if (!rawTriangulation) return null;
+  try {
+    if (typeof rawTriangulation.IsNull === 'function' && rawTriangulation.IsNull()) {
+      return null;
+    }
+  } catch {
+    // Ignore IsNull failures and continue with best-effort unwrapping.
+  }
+  if (typeof rawTriangulation.get === 'function') {
+    try {
+      const unwrapped = rawTriangulation.get();
+      if (unwrapped && unwrapped !== rawTriangulation) {
+        return unwrapPolyTriangulation(unwrapped);
+      }
+    } catch {
+      // Ignore get() failures and continue with raw object.
+    }
+  }
+  if (
+    typeof rawTriangulation.NbNodes === 'function' &&
+    typeof rawTriangulation.NbTriangles === 'function' &&
+    typeof rawTriangulation.Node === 'function' &&
+    typeof rawTriangulation.Triangle === 'function'
+  ) {
+    return rawTriangulation;
+  }
+  return null;
+}
+
+async function tessellateFaceFromOcctTriangulation(face: FaceWithEdgesInfo): Promise<{
+  vertices: Vec3[];
+  triangles: number[][];
+} | null> {
+  if (!face.occFace) return null;
+  const oc = await initOC();
+
+  const linDeflectionRatio = readGlobalNumber('__OCCT_NATIVE_LIN_DEFLECTION_RATIO__') ?? 0.001;
+  const explicitLinDeflection = readGlobalNumber('__OCCT_NATIVE_LIN_DEFLECTION__');
+  const angDeflection = readGlobalNumber('__OCCT_NATIVE_ANG_DEFLECTION__') ?? 0.5;
+  const isRelative = readGlobalBoolean('__OCCT_NATIVE_RELATIVE__', false);
+  const isInParallel = readGlobalBoolean('__OCCT_NATIVE_PARALLEL__', false);
+
+  const fallbackFaceSize = estimateFaceSizeFromLoops(face);
+  const linDeflection = explicitLinDeflection ?? Math.max(1e-6, fallbackFaceSize * linDeflectionRatio);
+
+  let location: any = null;
+  const newLocation = () => {
+    if (oc.TopLoc_Location_1) return new oc.TopLoc_Location_1();
+    if (oc.TopLoc_Location) return new oc.TopLoc_Location();
+    return null;
+  };
+  const readTriangulation = () => {
+    location?.delete?.();
+    location = newLocation();
+    if (!oc.BRep_Tool?.Triangulation || !location) {
+      return null;
+    }
+    const rawTri = oc.BRep_Tool.Triangulation(face.occFace, location);
+    return unwrapPolyTriangulation(rawTri);
+  };
+
+  let triangulation = readTriangulation();
+  if (!triangulation || triangulation.NbNodes() === 0 || triangulation.NbTriangles() === 0) {
+    if (oc.BRepMesh_IncrementalMesh_2) {
+      try {
+        const mesher = new oc.BRepMesh_IncrementalMesh_2(
+          face.occFace,
+          linDeflection,
+          isRelative,
+          angDeflection,
+          isInParallel
+        );
+        mesher.delete?.();
+      } catch (meshErr) {
+        console.warn(
+          `[occt-native] face ${face.faceIndex}: BRepMesh_IncrementalMesh_2 failed`,
+          meshErr
+        );
+      }
+    } else if (oc.BRepTools?.Triangulation) {
+      try {
+        oc.BRepTools.Triangulation(face.occFace, linDeflection, false);
+      } catch (meshErr) {
+        console.warn(
+          `[occt-native] face ${face.faceIndex}: BRepTools.Triangulation failed`,
+          meshErr
+        );
+      }
+    }
+    triangulation = readTriangulation();
+  }
+
+  if (!triangulation) {
+    location?.delete?.();
+    return null;
+  }
+
+  const nodeCount = triangulation.NbNodes();
+  const triCount = triangulation.NbTriangles();
+  if (nodeCount <= 0 || triCount <= 0) {
+    location?.delete?.();
+    return null;
+  }
+
+  let locationTransform: any = null;
+  try {
+    if (location && typeof location.IsIdentity === 'function' && !location.IsIdentity()) {
+      locationTransform = location.Transformation?.();
+    }
+  } catch {
+    locationTransform = null;
+  }
+
+  const vertices: Vec3[] = [];
+  for (let i = 1; i <= nodeCount; i++) {
+    const node = triangulation.Node(i);
+    const worldNode =
+      locationTransform && typeof node.Transformed === 'function'
+        ? node.Transformed(locationTransform)
+        : node;
+    vertices.push([worldNode.X(), worldNode.Y(), worldNode.Z()]);
+    if (worldNode !== node) {
+      worldNode.delete?.();
+    }
+  }
+
+  const triangles: number[][] = [];
+  for (let i = 1; i <= triCount; i++) {
+    const tri = triangulation.Triangle(i);
+    const v0 = tri.Value(1);
+    const v1 = tri.Value(2);
+    const v2 = tri.Value(3);
+    if (
+      Number.isInteger(v0) && Number.isInteger(v1) && Number.isInteger(v2) &&
+      v0 > 0 && v1 > 0 && v2 > 0 &&
+      v0 <= nodeCount && v1 <= nodeCount && v2 <= nodeCount
+    ) {
+      triangles.push([v0 - 1, v1 - 1, v2 - 1]);
+    }
+  }
+
+  locationTransform?.delete?.();
+  location?.delete?.();
+  return triangles.length > 0 ? { vertices, triangles } : null;
 }
 
 /**
@@ -5810,6 +6351,11 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   const PERIODIC_PROOF_FACE_IDS = readFaceIdsFromGlobal('__PERIODIC_PROOF_FACE_IDS__', []);
   const enableConeSeamSplit = readGlobalBoolean('__ENABLE_CONE_SEAM_SPLIT__', false);
   const coneSeamSplitFaceIds = readFaceIdsFromGlobal('__CONE_SEAM_SPLIT_FACE_IDS__', [63, 64, 65, 66]);
+  const enableOcctInspiredTrimGraph = readGlobalBoolean('__ENABLE_OCCT_INSPIRED_TRIM_GRAPH__', false);
+  const occtInspiredTrimGraphFaceIds = readFaceIdsFromGlobal('__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__', [63, 64, 65, 66]);
+  const enableOcctNativeFaceTessellation = readGlobalBoolean('__ENABLE_OCCT_NATIVE_FACE_TESSELLATION__', false);
+  const allowOcctOraclePath = readGlobalBoolean('__ALLOW_OCCT_ORACLE_PATH__', false);
+  const occtNativeFaceIds = readFaceIdsFromGlobal('__OCCT_NATIVE_FACE_IDS__', [63, 64, 65, 66]);
   const shouldRunPeriodicProof = PERIODIC_PROOF_FACE_IDS.has(face.faceIndex);
   const isKnownLidFace = STRICT_CLASSIFIER_FACE_IDS.has(face.faceIndex);
   // Runtime debug controls (set in browser console):
@@ -5834,6 +6380,20 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   const SLIVER_EPS = readGlobalNumber('__SLIVER_EPS__') ?? 0.005;
   const SLIVER_DEBUG_MODE = readDebugModeFromGlobal('__SLIVER_DEBUG_MODE__', 'off');
 
+  if (allowOcctOraclePath && enableOcctNativeFaceTessellation && occtNativeFaceIds.has(face.faceIndex)) {
+    const occtNativeMesh = await tessellateFaceFromOcctTriangulation(face);
+    if (occtNativeMesh && occtNativeMesh.triangles.length > 0) {
+      console.log(
+        `[occt-native] face ${face.faceIndex} ${face.surfaceType}: using OCC triangulation ` +
+        `(${occtNativeMesh.vertices.length} verts, ${occtNativeMesh.triangles.length} tris)`
+      );
+      return occtNativeMesh;
+    }
+    console.warn(
+      `[occt-native] face ${face.faceIndex} ${face.surfaceType}: no native triangulation, falling back`
+    );
+  }
+
   if (!face.surfaceParams) {
     console.warn(`[Tessellate] No surface params for ${face.surfaceType} face ${face.faceIndex}`);
     return { vertices: [], triangles: [] };
@@ -5847,6 +6407,107 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   // The previous approach tessellated the whole (u,v) bounds rectangle, which drops trim details.
   try {
     const oc = await initOC();
+
+    const shouldTryOcctInspiredTrimGraph =
+      face.surfaceType === 'Cone' &&
+      enableOcctInspiredTrimGraph &&
+      occtInspiredTrimGraphFaceIds.has(face.faceIndex);
+    if (
+      shouldTryOcctInspiredTrimGraph &&
+      face.occFace &&
+      params.radius !== undefined &&
+      params.semiAngle !== undefined &&
+      params.placement
+    ) {
+      const domain = buildOcctInspiredConeTrimDomainFromPCurves(oc, face);
+      if (!domain) {
+        console.warn(
+          `[occt-inspired-trim] face ${face.faceIndex} ${face.surfaceType}: ` +
+          `domain build failed, falling back`
+        );
+      } else if (oc?.BRepTopAdaptor_FClass2d && oc?.gp_Pnt2d_3 && oc?.TopAbs_State) {
+        let occBuildClassifier: any | undefined;
+        try {
+          occBuildClassifier = new oc.BRepTopAdaptor_FClass2d(face.occFace, 1e-7);
+          const maxOutSamples = Math.max(
+            0,
+            Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_OUT_SAMPLES__') ?? 1)
+          );
+          const classifyInside = (u: number, v: number): boolean => {
+            const uvPoint = new oc.gp_Pnt2d_3(u, v);
+            try {
+              const state = occBuildClassifier.Perform(uvPoint, true);
+              return !topAbsStateEquals(state, oc.TopAbs_State.TopAbs_OUT);
+            } catch {
+              return true;
+            } finally {
+              uvPoint.delete?.();
+            }
+          };
+          const buildOptions: TrimmedSurfaceBuildOptions = {
+            uvInsideTest: classifyInside,
+            keepTriangle: (samples) => {
+              let outCount = 0;
+              for (const [u, v] of samples) {
+                if (!classifyInside(u, v)) {
+                  outCount++;
+                  if (outCount > maxOutSamples) {
+                    return false;
+                  }
+                }
+              }
+              return true;
+            },
+            allowPartialCellTriangles: false,
+            logLabel: `occt-inspired-face-${face.faceIndex}`,
+          };
+          const coneSurface = {
+            type: 'CONICAL_SURFACE' as const,
+            placement: params.placement,
+            radius: params.radius,
+            semiAngle: params.semiAngle,
+          };
+          const mesh = await tessellateTrimmedSurface(
+            coneSurface,
+            domain.uvOuter,
+            domain.gridDensity,
+            [],
+            undefined,
+            buildOptions
+          );
+          if (mesh.indices.length > 0) {
+            console.log(
+              `[occt-inspired-trim] face ${face.faceIndex} ${face.surfaceType}: ` +
+              `domain U=[${domain.uMin.toFixed(3)}, ${domain.uMax.toFixed(3)}] ` +
+              `V=[${domain.vMin.toFixed(3)}, ${domain.vMax.toFixed(3)}], ` +
+              `loops=${domain.sourceLoopCount}, loopPts=${domain.sourcePointCount}, ` +
+              `grid=${domain.gridDensity}, verts=${mesh.positions.length / 3}, tris=${mesh.indices.length / 3}`
+            );
+            tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
+            tessellationProfile.tessellateCurvedFace.calls++;
+            return tessellatedMeshToVerticesAndTriangles(mesh);
+          }
+          console.warn(
+            `[occt-inspired-trim] face ${face.faceIndex} ${face.surfaceType}: ` +
+            `produced empty mesh, falling back`
+          );
+        } catch (e) {
+          console.warn(
+            `[occt-inspired-trim] face ${face.faceIndex} ${face.surfaceType}: ` +
+            `build failed, falling back`,
+            e
+          );
+        } finally {
+          occBuildClassifier?.delete?.();
+        }
+      } else {
+        console.warn(
+          `[occt-inspired-trim] face ${face.faceIndex} ${face.surfaceType}: ` +
+          `OCC classifier unavailable, falling back`
+        );
+      }
+    }
+
     const loops = getFaceTrimLoopsUV(oc, face);
     if (loops) {
       let coneCrossesSeam = false;
@@ -6346,7 +7007,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
       }
 
       if (surface) {
-        const gridDensity = chooseTrimGridDensity(loops.uvOuter, loops.uvHoles);
+        const gridDensity = chooseTrimGridDensity(face, loops.uvOuter, loops.uvHoles);
 
         // For cylinders, compute 3D bounding box from boundary edges to filter
         // grid points whose 3D positions fall outside the intended region.
@@ -6453,8 +7114,32 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
               loops.uvHoles
             );
             if (splitResult.ok && splitResult.leftPatch && splitResult.rightPatch && splitResult.uSplit != null) {
-              const leftPatch = splitResult.leftPatch;
-              const rightPatch = splitResult.rightPatch;
+              const simplifyConePatch = (patch: { uvOuter: Vec2[]; uvHoles: Vec2[][] }) => {
+                const maxOuterPts = Math.max(64, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_OUTER_PTS__') ?? 192));
+                const maxHolePts = Math.max(12, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_HOLE_PTS__') ?? 32));
+                const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber('__CONE_TRIM_MAX_AREA_ERR_RATIO__') ?? 0.03);
+                const maxOuterAreaErrorNoHoles = Math.max(
+                  maxAreaErrorRatio,
+                  readGlobalNumber('__CONE_TRIM_MAX_AREA_ERR_RATIO_NO_HOLES__') ?? 0.08
+                );
+                const outerAreaErrRatio = patch.uvHoles.length === 0 ? maxOuterAreaErrorNoHoles : maxAreaErrorRatio;
+                const simplifiedOuter = simplifyLoopForMeshing(patch.uvOuter, maxOuterPts, outerAreaErrRatio);
+                const simplifiedHoles = patch.uvHoles
+                  .map((hole) => simplifyLoopForMeshing(hole, maxHolePts, maxAreaErrorRatio))
+                  .filter((hole) => hole.length >= 3);
+                const validation = validateAndSanitizeTrimLoops(simplifiedOuter, simplifiedHoles, {
+                  minAreaAbs: 1e-7,
+                  maxHoleToOuterRatio: 0.98,
+                  failOnHoleOutside: true,
+                  failOnHugeHole: true,
+                });
+                if (validation.ok) {
+                  return { uvOuter: validation.uvOuter, uvHoles: validation.uvHoles };
+                }
+                return patch;
+              };
+              const leftPatch = simplifyConePatch(splitResult.leftPatch);
+              const rightPatch = simplifyConePatch(splitResult.rightPatch);
               const patchMeshes: TessellatedMeshLike[] = [];
               patchMeshes.push(
                 await tessellateTrimmedSurface(
@@ -6667,6 +7352,8 @@ async function tessellateOCCShape(
 ): Promise<Mesh> {
   const shapeStart = performance.now();
   console.log(`[Tessellate] Starting tessellation of ${faces.length} faces...`);
+  const FACE_DEBUG_IDS = readFaceIdsFromGlobal('__FACE_DEBUG_IDS__', [14, 63, 64, 65, 66, 994]);
+  const FACE_DEBUG_MODE = readDebugModeFromGlobal('__FACE_DEBUG_MODE__', 'off');
 
   const allVertices: Vec3[] = [];
   const allNormals: Vec3[] = [];
@@ -6712,6 +7399,22 @@ async function tessellateOCCShape(
         skippedCount++;
         processedCount++;
         continue;
+      }
+      const isFaceDebugTarget = FACE_DEBUG_IDS.has(face.faceIndex);
+      if (FACE_DEBUG_MODE === 'skip' && isFaceDebugTarget) {
+        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'face-debug-skip');
+        skippedCount++;
+        processedCount++;
+        continue;
+      }
+      if (FACE_DEBUG_MODE === 'only' && !isFaceDebugTarget) {
+        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'face-debug-only');
+        skippedCount++;
+        processedCount++;
+        continue;
+      }
+      if (FACE_DEBUG_MODE === 'only' && isFaceDebugTarget) {
+        console.warn(`[FACE DEBUG] keep-only face=${face.faceIndex} type=${face.surfaceType}`);
       }
 
       // Progress logging
