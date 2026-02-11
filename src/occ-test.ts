@@ -32,6 +32,9 @@ export const tessellationProfile = {
   loadStepFile_readFile: { total: 0, calls: 0 },
   loadStepFile_transfer: { total: 0, calls: 0 },
   loadStepFile_getTools: { total: 0, calls: 0 },
+  loadStepFile_oneShape: { total: 0, calls: 0 },
+  loadStepFile_fsWrite: { total: 0, calls: 0 },
+  loadStepFile_fsCleanup: { total: 0, calls: 0 },
   loadStepFile_colorParsing: { total: 0, calls: 0 },
   extractFacesWithEdges: { total: 0, calls: 0 },
   // Tessellation phases
@@ -106,8 +109,12 @@ function logOCC(...args: unknown[]): void {
   }
 }
 
+function curveDebugEnabled(): boolean {
+  return (globalThis as any)?.__CURVE_VERBOSE_LOGS__ === true;
+}
+
 function curveDebugLog(...args: unknown[]): void {
-  if ((globalThis as any)?.__CURVE_VERBOSE_LOGS__ === true) {
+  if (curveDebugEnabled()) {
     console.log(...args);
   }
 }
@@ -131,6 +138,138 @@ interface RGBColor {
 }
 
 let oc: OpenCascadeInstance | null = null;
+let perfBasicStepReader: any | null = null;
+let perfBasicStepReaderOc: OpenCascadeInstance | null = null;
+const PERF_STEP_TEMP_FILE_PATH = '/__perf_geometry_input.step';
+
+function createBasicStepReader(ocInst: OpenCascadeInstance): any {
+  if (ocInst.STEPControl_Reader_1) {
+    return new ocInst.STEPControl_Reader_1();
+  }
+  if (ocInst.STEPControl_Reader) {
+    return new ocInst.STEPControl_Reader();
+  }
+  throw new Error('STEPControl_Reader not found');
+}
+
+function getBasicStepReader(ocInst: OpenCascadeInstance, reuseReader: boolean): any {
+  if (!reuseReader) {
+    return createBasicStepReader(ocInst);
+  }
+
+  if (perfBasicStepReader && perfBasicStepReaderOc === ocInst) {
+    return perfBasicStepReader;
+  }
+
+  perfBasicStepReader = createBasicStepReader(ocInst);
+  perfBasicStepReaderOc = ocInst;
+  return perfBasicStepReader;
+}
+
+function isStepReadDone(ocInst: OpenCascadeInstance, readResult: any): boolean {
+  return readResult === ocInst.IFSelect_ReturnStatus?.IFSelect_RetDone ||
+         readResult === 0 ||
+         (typeof readResult === 'object' && (readResult.value === 0 || readResult.value === 1)) ||
+         readResult === 1;
+}
+
+function makeEmptyStepLoadResult(shape: any, colorTool: any = null, shapeTool: any = null, doc: any = null): StepLoadResult {
+  return {
+    shape,
+    colorTool,
+    shapeTool,
+    doc,
+    stepColors: new Map<number, RGBColor>(),
+    shapeColorMap: new Map<number, RGBColor>(),
+    faceIdOrder: [],
+    geometryColorMap: new Map<string, RGBColor>(),
+    solidMatchedColors: new Map<number, RGBColor>(),
+    faceToSolid: new Map<number, number>(),
+    solidToColor: new Map<number, RGBColor>(),
+  };
+}
+
+function cleanupStepFsPath(ocInst: OpenCascadeInstance, path: string): void {
+  const cleanupStart = performance.now();
+  try {
+    ocInst.FS.unlink(path);
+  } catch (cleanupErr) {
+    logOCC(`[loadStepFile] FS.unlink failed for ${path}:`, cleanupErr);
+  }
+  tessellationProfile.loadStepFile_fsCleanup.total += performance.now() - cleanupStart;
+  tessellationProfile.loadStepFile_fsCleanup.calls++;
+}
+
+function transferReaderRoots(
+  ocInst: OpenCascadeInstance,
+  reader: any,
+  preferSingleRootTransfer: boolean
+): void {
+  const transferStart = performance.now();
+  let transferDone = false;
+
+  if (preferSingleRootTransfer && typeof reader.NbRootsForTransfer === 'function' && typeof reader.TransferRoot === 'function') {
+    try {
+      const roots = reader.NbRootsForTransfer();
+      if (Number.isFinite(roots) && roots === 1) {
+        try {
+          reader.TransferRoot(1);
+          transferDone = true;
+        } catch (e1) {
+          try {
+            reader.TransferRoot(0);
+            transferDone = true;
+          } catch (e2) {
+            reader.TransferRoot();
+            transferDone = true;
+          }
+        }
+      }
+    } catch {
+      // Fall through to generic path.
+    }
+  }
+
+  if (!transferDone) {
+    if (reader.TransferRoots) {
+      try {
+        reader.TransferRoots();
+        transferDone = true;
+      } catch {
+        if (ocInst.Message_ProgressRange_1) {
+          try {
+            reader.TransferRoots(new ocInst.Message_ProgressRange_1());
+            transferDone = true;
+          } catch {
+            // Fall through.
+          }
+        } else if (ocInst.Message_ProgressRange) {
+          try {
+            reader.TransferRoots(new ocInst.Message_ProgressRange());
+            transferDone = true;
+          } catch {
+            // Fall through.
+          }
+        }
+      }
+    }
+  }
+
+  if (!transferDone && reader.TransferRoot) {
+    try {
+      reader.TransferRoot(1);
+    } catch {
+      try {
+        reader.TransferRoot(0);
+      } catch {
+        reader.TransferRoot();
+      }
+    }
+  }
+
+  tessellationProfile.loadStepFile_transfer.total += performance.now() - transferStart;
+  tessellationProfile.loadStepFile_transfer.calls++;
+}
 
 async function initOC(): Promise<OpenCascadeInstance> {
   if (oc) return oc;
@@ -1903,7 +2042,7 @@ function buildOCCSolidFaceCounts(oc: any, shape: any): {
   solidMap: Map<number, { faceCount: number; faceHashCodes: number[] }>;
   faceToSolid: Map<number, number>;
 } {
-  const enableLoadDiagnostics = readGlobalBoolean('__ENABLE_LOAD_DIAGNOSTICS__', false);
+  const enableLoadDiagnostics = loadDiagnosticsEnabled();
   const solidMap = new Map<number, { faceCount: number; faceHashCodes: number[] }>();
   const faceToSolid = new Map<number, number>(); // face hash code → solid index
 
@@ -1965,7 +2104,7 @@ function matchSolidsAndBuildColorMap(
   stepSolidMap: Map<number, { color: RGBColor; faceCount: number; faceIds: number[] }>,
   occSolidMap: Map<number, { faceCount: number; faceHashCodes: number[] }>
 ): { faceColorMap: Map<number, RGBColor>; solidToColor: Map<number, RGBColor> } {
-  const enableLoadDiagnostics = readGlobalBoolean('__ENABLE_LOAD_DIAGNOSTICS__', false);
+  const enableLoadDiagnostics = loadDiagnosticsEnabled();
   const faceColorMap = new Map<number, RGBColor>();
   const solidToColor = new Map<number, RGBColor>(); // OCC solid index -> color
 
@@ -2044,6 +2183,69 @@ function matchSolidsAndBuildColorMap(
  * Load a STEP file and return the TopoDS_Shape with color information
  * Accepts either Uint8Array (for large files) or string
  */
+async function loadStepFileGeometryOnlyFast(
+  ocInst: OpenCascadeInstance,
+  fileData: Uint8Array,
+  fileName: string
+): Promise<StepLoadResult> {
+  const reuseReader = readGlobalBoolean('__LOAD_REUSE_STEP_READER__', true);
+  const useStableTempPath = readGlobalBoolean('__LOAD_REUSE_TEMP_PATH__', true);
+  const skipCleanup = readGlobalBoolean('__LOAD_SKIP_FS_CLEANUP__', useStableTempPath);
+  const preferSingleRootTransfer = readGlobalBoolean('__LOAD_PREFER_SINGLE_ROOT_TRANSFER__', true);
+
+  const tempFilePath = useStableTempPath ? PERF_STEP_TEMP_FILE_PATH : `/${fileName}`;
+
+  const fsWriteStart = performance.now();
+  ocInst.FS.writeFile(tempFilePath, fileData);
+  tessellationProfile.loadStepFile_fsWrite.total += performance.now() - fsWriteStart;
+  tessellationProfile.loadStepFile_fsWrite.calls++;
+
+  const readShapeWithReader = (reader: any): any => {
+    const readFileStart = performance.now();
+    const readResult = reader.ReadFile(tempFilePath);
+    tessellationProfile.loadStepFile_readFile.total += performance.now() - readFileStart;
+    tessellationProfile.loadStepFile_readFile.calls++;
+
+    if (!isStepReadDone(ocInst, readResult)) {
+      throw new Error(`Failed to read STEP file: ${typeof readResult === 'object' ? JSON.stringify(readResult) : readResult}`);
+    }
+
+    transferReaderRoots(ocInst, reader, preferSingleRootTransfer);
+
+    const oneShapeStart = performance.now();
+    const shape = reader.OneShape();
+    tessellationProfile.loadStepFile_oneShape.total += performance.now() - oneShapeStart;
+    tessellationProfile.loadStepFile_oneShape.calls++;
+    return shape;
+  };
+
+  let shape: any = null;
+  try {
+    shape = readShapeWithReader(getBasicStepReader(ocInst, reuseReader));
+  } catch (readerErr) {
+    // A reused reader can end up in a bad state. Retry once with a fresh reader.
+    perfBasicStepReader = null;
+    perfBasicStepReaderOc = null;
+    const freshReader = getBasicStepReader(ocInst, false);
+    shape = readShapeWithReader(freshReader);
+    if (reuseReader) {
+      perfBasicStepReader = freshReader;
+      perfBasicStepReaderOc = ocInst;
+    }
+    logOCC('[loadStepFileFast] Retried with fresh STEP reader after failure:', readerErr);
+  } finally {
+    if (!skipCleanup) {
+      cleanupStepFsPath(ocInst, tempFilePath);
+    }
+  }
+
+  if (!shape || shape.IsNull?.()) {
+    throw new Error('Geometry-only load returned null shape');
+  }
+
+  return makeEmptyStepLoadResult(shape);
+}
+
 async function loadStepFile(fileContent: Uint8Array | string, fileName: string): Promise<StepLoadResult> {
   // Profile: initOC
   const initOCStart = performance.now();
@@ -2057,7 +2259,7 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   const enableStepColorParsing = readGlobalBoolean('__ENABLE_STEP_COLOR_PARSING__', !preferGeometryOnlyLoad);
   // Expensive load-time diagnostics are opt-in. Keep disabled by default so
   // perf runs and normal interactive loads avoid heavy introspection/log spam.
-  const enableLoadDiagnostics = readGlobalBoolean('__ENABLE_LOAD_DIAGNOSTICS__', false);
+  const enableLoadDiagnostics = loadDiagnosticsEnabled();
 
   // Debug APIs logged only when DEBUG_OCC is true
   if (DEBUG_OCC) {
@@ -2081,8 +2283,24 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
     fileData = fileContent;
   }
 
+  if (preferGeometryOnlyLoad && !useXCAFReader && !enableStepColorParsing) {
+    try {
+      return await loadStepFileGeometryOnlyFast(oc, fileData, fileName);
+    } catch (fastErr) {
+      if (enableLoadDiagnostics) {
+        console.warn('[loadStepFileFast] Falling back to default loader:', fastErr);
+      }
+    }
+  }
+
+  const tempFilePath = '/' + fileName;
+  const cleanupTempFile = () => cleanupStepFsPath(oc, tempFilePath);
+
   // Write file to virtual filesystem using writeFile (handles large files better)
-  oc.FS.writeFile('/' + fileName, fileData);
+  const fsWriteStart = performance.now();
+  oc.FS.writeFile(tempFilePath, fileData);
+  tessellationProfile.loadStepFile_fsWrite.total += performance.now() - fsWriteStart;
+  tessellationProfile.loadStepFile_fsWrite.calls++;
 
   let shape: any = null;
   let colorTool: any = null;
@@ -2145,7 +2363,7 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
 
       // Profile: ReadFile
       const readFileStart = performance.now();
-      const readResult = cafReader.ReadFile('/' + fileName);
+      const readResult = cafReader.ReadFile(tempFilePath);
       tessellationProfile.loadStepFile_readFile.total += performance.now() - readFileStart;
       tessellationProfile.loadStepFile_readFile.calls++;
       logOCC('[XCAF] ReadFile result:', readResult?.value);
@@ -2345,10 +2563,12 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
             labelsLength = labels.Length();
           }
         } catch (labelErr) {
-          console.log('[ColorDiag] TDF_LabelSequence not available:', labelErr);
-          // List what TDF APIs ARE available
-          const tdfApis = Object.keys(oc).filter(k => k.startsWith('TDF_')).slice(0, 20);
-          console.log('[ColorDiag] Available TDF APIs:', tdfApis.join(', '));
+          if (enableLoadDiagnostics) {
+            console.log('[ColorDiag] TDF_LabelSequence not available:', labelErr);
+            // List what TDF APIs ARE available
+            const tdfApis = Object.keys(oc).filter(k => k.startsWith('TDF_')).slice(0, 20);
+            console.log('[ColorDiag] Available TDF APIs:', tdfApis.join(', '));
+          }
         }
 
         // Alternative: try to get shape directly from reader
@@ -2369,7 +2589,10 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
             try {
               const innerReader = cafReader.Reader();
               if (innerReader && innerReader.OneShape) {
+                const oneShapeStart = performance.now();
                 shape = innerReader.OneShape();
+                tessellationProfile.loadStepFile_oneShape.total += performance.now() - oneShapeStart;
+                tessellationProfile.loadStepFile_oneShape.calls++;
                 if (enableLoadDiagnostics) {
                   const isNull = shape?.IsNull?.() ?? true;
                   const shapeType = shape?.ShapeType?.() ?? 'unknown';
@@ -2400,73 +2623,75 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
         logOCC('Free shapes count:', labelsLength);
 
         if (labelsLength > 0 && labels) {
-          // DIAGNOSTIC: Try to extract colors from labels
-          console.log('[ColorDiag] Trying to extract colors from', labels.Length(), 'free shapes...');
+          if (enableLoadDiagnostics) {
+            // DIAGNOSTIC: Try to extract colors from labels
+            console.log('[ColorDiag] Trying to extract colors from', labels.Length(), 'free shapes...');
 
-          // Get the actual colorTool (unwrap if needed)
-          let actualColorTool = colorTool;
-          if (typeof colorTool?.get === 'function' && !colorTool.IsNull?.()) {
-            try {
-              actualColorTool = colorTool.get();
-            } catch (e) {
-              console.log('[ColorDiag] Could not unwrap colorTool');
-            }
-          }
-
-          // Try different color extraction approaches on the first label
-          const firstLabel = labels.Value(1);
-          const firstShape = shapeTool.GetShape(firstLabel);
-
-          // Systematically test all GetColor variants on both label and shape
-          if (actualColorTool) {
-            const color = new oc.Quantity_Color_1();
-            const methodNames = ['GetColor_1', 'GetColor_2', 'GetColor_4', 'GetColor_5', 'GetColor_6', 'GetColor_7', 'GetColor_8'];
-
-            console.log('[ColorDiag] Testing GetColor methods on first shape/label...');
-
-            // Test each method with shape (colorType 1 = Surface)
-            for (const methodName of methodNames) {
-              if (typeof actualColorTool[methodName] === 'function') {
-                try {
-                  const result = actualColorTool[methodName](firstShape, 1, color);
-                  if (result) {
-                    console.log(`[ColorDiag] ${methodName}(shape, 1, color) = TRUE! RGB(${color.Red().toFixed(2)}, ${color.Green().toFixed(2)}, ${color.Blue().toFixed(2)})`);
-                  }
-                } catch (e) {
-                  // Method signature didn't match - that's OK
-                }
+            // Get the actual colorTool (unwrap if needed)
+            let actualColorTool = colorTool;
+            if (typeof colorTool?.get === 'function' && !colorTool.IsNull?.()) {
+              try {
+                actualColorTool = colorTool.get();
+              } catch (e) {
+                console.log('[ColorDiag] Could not unwrap colorTool');
               }
             }
 
-            // Test each method with label (colorType 1 = Surface)
-            for (const methodName of methodNames) {
-              if (typeof actualColorTool[methodName] === 'function') {
-                try {
-                  const result = actualColorTool[methodName](firstLabel, 1, color);
-                  if (result) {
-                    console.log(`[ColorDiag] ${methodName}(label, 1, color) = TRUE! RGB(${color.Red().toFixed(2)}, ${color.Green().toFixed(2)}, ${color.Blue().toFixed(2)})`);
+            // Try different color extraction approaches on the first label
+            const firstLabel = labels.Value(1);
+            const firstShape = shapeTool.GetShape(firstLabel);
+
+            // Systematically test all GetColor variants on both label and shape
+            if (actualColorTool) {
+              const color = new oc.Quantity_Color_1();
+              const methodNames = ['GetColor_1', 'GetColor_2', 'GetColor_4', 'GetColor_5', 'GetColor_6', 'GetColor_7', 'GetColor_8'];
+
+              console.log('[ColorDiag] Testing GetColor methods on first shape/label...');
+
+              // Test each method with shape (colorType 1 = Surface)
+              for (const methodName of methodNames) {
+                if (typeof actualColorTool[methodName] === 'function') {
+                  try {
+                    const result = actualColorTool[methodName](firstShape, 1, color);
+                    if (result) {
+                      console.log(`[ColorDiag] ${methodName}(shape, 1, color) = TRUE! RGB(${color.Red().toFixed(2)}, ${color.Green().toFixed(2)}, ${color.Blue().toFixed(2)})`);
+                    }
+                  } catch (e) {
+                    // Method signature didn't match - that's OK
                   }
-                } catch (e) {
-                  // Method signature didn't match - that's OK
                 }
               }
-            }
 
-            // Try IsSet variants
-            const isSetMethods = ['IsSet_1', 'IsSet_2'];
-            for (const methodName of isSetMethods) {
-              if (typeof actualColorTool[methodName] === 'function') {
-                try {
-                  const result = actualColorTool[methodName](firstLabel, 1);
-                  console.log(`[ColorDiag] ${methodName}(label, 1) = ${result}`);
-                } catch (e) {
-                  // Signature didn't match
+              // Test each method with label (colorType 1 = Surface)
+              for (const methodName of methodNames) {
+                if (typeof actualColorTool[methodName] === 'function') {
+                  try {
+                    const result = actualColorTool[methodName](firstLabel, 1, color);
+                    if (result) {
+                      console.log(`[ColorDiag] ${methodName}(label, 1, color) = TRUE! RGB(${color.Red().toFixed(2)}, ${color.Green().toFixed(2)}, ${color.Blue().toFixed(2)})`);
+                    }
+                  } catch (e) {
+                    // Method signature didn't match - that's OK
+                  }
                 }
-                try {
-                  const result = actualColorTool[methodName](firstShape, 1);
-                  console.log(`[ColorDiag] ${methodName}(shape, 1) = ${result}`);
-                } catch (e) {
-                  // Signature didn't match
+              }
+
+              // Try IsSet variants
+              const isSetMethods = ['IsSet_1', 'IsSet_2'];
+              for (const methodName of isSetMethods) {
+                if (typeof actualColorTool[methodName] === 'function') {
+                  try {
+                    const result = actualColorTool[methodName](firstLabel, 1);
+                    console.log(`[ColorDiag] ${methodName}(label, 1) = ${result}`);
+                  } catch (e) {
+                    // Signature didn't match
+                  }
+                  try {
+                    const result = actualColorTool[methodName](firstShape, 1);
+                    console.log(`[ColorDiag] ${methodName}(shape, 1) = ${result}`);
+                  } catch (e) {
+                    // Signature didn't match
+                  }
                 }
               }
             }
@@ -2495,46 +2720,27 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   // Fallback to basic reader if XCAF failed
   if (!shape || (shape.IsNull && shape.IsNull())) {
     logOCC('Using basic STEPControl_Reader (no color support)...');
+    const reader = createBasicStepReader(oc);
 
-    let reader;
-    if (oc.STEPControl_Reader_1) {
-      reader = new oc.STEPControl_Reader_1();
-    } else if (oc.STEPControl_Reader) {
-      reader = new oc.STEPControl_Reader();
-    } else {
-      throw new Error('STEPControl_Reader not found');
-    }
-
-    const readResult = reader.ReadFile('/' + fileName);
+    const fallbackReadStart = performance.now();
+    const readResult = reader.ReadFile(tempFilePath);
+    tessellationProfile.loadStepFile_readFile.total += performance.now() - fallbackReadStart;
+    tessellationProfile.loadStepFile_readFile.calls++;
     logOCC('ReadFile result:', readResult);
 
-    // IFSelect_RetDone is typically 0 in OpenCascade
-    // ReadFile returns an object with .value in emscripten bindings
-    const isDone = readResult === oc.IFSelect_ReturnStatus?.IFSelect_RetDone ||
-                   readResult === 0 ||
-                   (typeof readResult === 'object' && (readResult.value === 0 || readResult.value === 1));
-    if (!isDone) {
-      oc.FS.unlink('/' + fileName);
+    if (!isStepReadDone(oc, readResult)) {
+      cleanupTempFile();
       const resultValue = typeof readResult === 'object' ? JSON.stringify(readResult) : readResult;
       throw new Error(`Failed to read STEP file: ${resultValue}`);
     }
 
     logOCC('Transferring roots...');
-    if (reader.TransferRoots) {
-      try {
-        reader.TransferRoots();
-      } catch (e) {
-        if (oc.Message_ProgressRange_1) {
-          reader.TransferRoots(new oc.Message_ProgressRange_1());
-        } else if (oc.Message_ProgressRange) {
-          reader.TransferRoots(new oc.Message_ProgressRange());
-        }
-      }
-    } else if (reader.TransferRoot) {
-      reader.TransferRoot();
-    }
+    transferReaderRoots(oc, reader, false);
 
+    const fallbackOneShapeStart = performance.now();
     shape = reader.OneShape();
+    tessellationProfile.loadStepFile_oneShape.total += performance.now() - fallbackOneShapeStart;
+    tessellationProfile.loadStepFile_oneShape.calls++;
   }
 
   // Debug shape info only when DEBUG_OCC is true
@@ -2562,7 +2768,7 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   }
 
   // Clean up
-  oc.FS.unlink('/' + fileName);
+  cleanupTempFile();
 
   const buildEmptyColorResult = (): StepLoadResult => {
     // Still need to unwrap tools before returning.
@@ -4499,6 +4705,14 @@ function readGlobalBoolean(key: string, fallback: boolean): boolean {
   return typeof raw === 'boolean' ? raw : fallback;
 }
 
+function loadDiagnosticsEnabled(): boolean {
+  // Perf geometry-only mode should never pay for diagnostic branches.
+  if (readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false)) {
+    return false;
+  }
+  return readGlobalBoolean('__ENABLE_LOAD_DIAGNOSTICS__', false);
+}
+
 function readDebugModeFromGlobal(key: string, fallback: DebugMode): DebugMode {
   const raw = readGlobalString(key)?.trim().toLowerCase();
   if (raw === 'off' || raw === 'skip' || raw === 'only') {
@@ -6075,6 +6289,7 @@ function getFaceTrimLoopsUV(
   face: FaceWithEdgesInfo
 ): TrimLoopsUV | null {
   if (!face.occSurface) return null;
+  const curveVerboseLogs = curveDebugEnabled();
 
   const isUPeriodic = ['Cylinder', 'Sphere', 'Cone', 'Torus'].includes(face.surfaceType);
   const isVPeriodic = face.surfaceType === 'Torus';
@@ -6089,23 +6304,25 @@ function getFaceTrimLoopsUV(
     let normalizedHoles = uvHoles;
     const shouldNormalizePeriodicTrimLoops = face.surfaceType === 'Cone' || face.surfaceType === 'Torus';
     if (shouldNormalizePeriodicTrimLoops && normalizedOuter.length >= 3) {
-      const beforeUBounds = getLoopComponentBounds(normalizedOuter, 0);
-      const beforeVBounds = getLoopComponentBounds(normalizedOuter, 1);
+      const beforeUBounds = curveVerboseLogs ? getLoopComponentBounds(normalizedOuter, 0) : null;
+      const beforeVBounds = curveVerboseLogs ? getLoopComponentBounds(normalizedOuter, 1) : null;
       const normalized = normalizePeriodicTrimLoops(normalizedOuter, normalizedHoles, {
         periodicU: isUPeriodic,
         periodicV: isVPeriodic,
       });
       normalizedOuter = normalized.uvOuter;
       normalizedHoles = normalized.uvHoles;
-      const afterUBounds = getLoopComponentBounds(normalizedOuter, 0);
-      const afterVBounds = getLoopComponentBounds(normalizedOuter, 1);
-      curveDebugLog(
-        `[trim-loop-normalize] face ${face.faceIndex} ${face.surfaceType} source=${source}: ` +
-        `U [${beforeUBounds.min.toFixed(3)}, ${beforeUBounds.max.toFixed(3)}] -> ` +
-        `[${afterUBounds.min.toFixed(3)}, ${afterUBounds.max.toFixed(3)}], ` +
-        `V [${beforeVBounds.min.toFixed(3)}, ${beforeVBounds.max.toFixed(3)}] -> ` +
-        `[${afterVBounds.min.toFixed(3)}, ${afterVBounds.max.toFixed(3)}]`
-      );
+      if (curveVerboseLogs && beforeUBounds && beforeVBounds) {
+        const afterUBounds = getLoopComponentBounds(normalizedOuter, 0);
+        const afterVBounds = getLoopComponentBounds(normalizedOuter, 1);
+        curveDebugLog(
+          `[trim-loop-normalize] face ${face.faceIndex} ${face.surfaceType} source=${source}: ` +
+          `U [${beforeUBounds.min.toFixed(3)}, ${beforeUBounds.max.toFixed(3)}] -> ` +
+          `[${afterUBounds.min.toFixed(3)}, ${afterUBounds.max.toFixed(3)}], ` +
+          `V [${beforeVBounds.min.toFixed(3)}, ${beforeVBounds.max.toFixed(3)}] -> ` +
+          `[${afterVBounds.min.toFixed(3)}, ${afterVBounds.max.toFixed(3)}]`
+        );
+      }
     }
 
     // Ensure closed loops for robust polygon tests; duplicate endpoint is removed by simplifyLoop2D.
@@ -6118,14 +6335,14 @@ function getFaceTrimLoopsUV(
     const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
     const enablePerfTrimSimplify = readGlobalBoolean('__PERF_TRIM_SIMPLIFY_LOOPS__', true);
     if (preferGeometryOnlyLoad && enablePerfTrimSimplify) {
-      const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber('__PERF_TRIM_MAX_AREA_ERR_RATIO__') ?? 0.02);
+      const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber('__PERF_TRIM_MAX_AREA_ERR_RATIO__') ?? 0.03);
       const maxOuterAreaErrorNoHoles = Math.max(
         maxAreaErrorRatio,
-        readGlobalNumber('__PERF_TRIM_MAX_OUTER_AREA_ERR_RATIO_NO_HOLES__') ?? 0.05
+        readGlobalNumber('__PERF_TRIM_MAX_OUTER_AREA_ERR_RATIO_NO_HOLES__') ?? 0.06
       );
-      const defaultOuterCap = normalizedHoles.length === 0 ? 96 : 128;
+      const defaultOuterCap = normalizedHoles.length === 0 ? 88 : 112;
       const maxOuterPts = Math.max(24, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_OUTER_PTS__') ?? defaultOuterCap));
-      const maxHolePts = Math.max(8, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_HOLE_PTS__') ?? 20));
+      const maxHolePts = Math.max(8, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_HOLE_PTS__') ?? 16));
       const beforeOuterPts = normalizedOuter.length;
       const beforeHolePts = normalizedHoles.reduce((sum, h) => sum + h.length, 0);
 
@@ -6236,7 +6453,7 @@ function getFaceTrimLoopsUV(
   }
 
   // Debug: show outer3d for cone and torus
-  if (face.surfaceType === 'Torus' || face.surfaceType === 'Cone') {
+  if (curveVerboseLogs && (face.surfaceType === 'Torus' || face.surfaceType === 'Cone')) {
     curveDebugLog(`[getFaceTrimLoopsUV] ${face.surfaceType} outer3d has ${outer3d.length} points`);
     if (outer3d.length > 0) {
       curveDebugLog(`[getFaceTrimLoopsUV] First 5 points: ${outer3d.slice(0, 5).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)})`).join(', ')}`);
@@ -6250,7 +6467,7 @@ function getFaceTrimLoopsUV(
   const uvOuter = projectPointsToUV(oc, sa, outer3d, { wrapU: isUPeriodic, wrapV: isVPeriodic });
 
   // Debug: show uvOuter for cone and torus
-  if (face.surfaceType === 'Torus' || face.surfaceType === 'Cone') {
+  if (curveVerboseLogs && (face.surfaceType === 'Torus' || face.surfaceType === 'Cone')) {
     curveDebugLog(`[getFaceTrimLoopsUV] ${face.surfaceType} uvOuter has ${uvOuter.length} points after projection`);
     if (uvOuter.length > 0) {
       curveDebugLog(`[getFaceTrimLoopsUV] UV First 10: ${uvOuter.slice(0, 10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
@@ -6261,7 +6478,7 @@ function getFaceTrimLoopsUV(
     }
   }
   // Debug: log inner loop edge info for cylinders
-  if (face.surfaceType === 'Cylinder' && face.innerLoops.length > 0) {
+  if (curveVerboseLogs && face.surfaceType === 'Cylinder' && face.innerLoops.length > 0) {
     curveDebugLog(`[getFaceTrimLoopsUV] Cylinder has ${face.innerLoops.length} inner loops`);
     face.innerLoops.forEach((loop, loopIdx) => {
       curveDebugLog(`[getFaceTrimLoopsUV] Inner loop ${loopIdx}: ${loop.length} edges`);
@@ -6274,7 +6491,7 @@ function getFaceTrimLoopsUV(
   const uvHoles = face.innerLoops
     .map((loop, loopIdx) => {
       const poly3d = occEdgesToPolygon(loop, undefined, { lineSubdivideStep });
-      if (face.surfaceType === 'Cylinder') {
+      if (curveVerboseLogs && face.surfaceType === 'Cylinder') {
         curveDebugLog(`[getFaceTrimLoopsUV] Inner loop ${loopIdx} -> 3D polygon: ${poly3d.length} points`);
         if (poly3d.length > 0) {
           curveDebugLog(`  First 5 3D: ${poly3d.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)},${p[2].toFixed(2)})`).join(' ')}`);
@@ -6354,9 +6571,9 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
   const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
   if (preferGeometryOnlyLoad) {
     const perfMinGrid = Math.max(4, Math.floor(readGlobalNumber('__PERF_TRIM_MIN_GRID_DENSITY__') ?? 4));
-    const perfGridScaleMult = Math.max(0.4, readGlobalNumber('__PERF_TRIM_GRID_SCALE_MULT__') ?? 0.65);
-    const perfNoHolesMax = Math.max(perfMinGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 8));
-    const perfWithHolesMax = Math.max(perfMinGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_WITH_HOLES__') ?? 12));
+    const perfGridScaleMult = Math.max(0.35, readGlobalNumber('__PERF_TRIM_GRID_SCALE_MULT__') ?? 0.6);
+    const perfNoHolesMax = Math.max(perfMinGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 7));
+    const perfWithHolesMax = Math.max(perfMinGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_WITH_HOLES__') ?? 10));
 
     effectiveMinGrid = Math.min(effectiveMinGrid, perfMinGrid);
     base = Math.ceil(base * perfGridScaleMult);
@@ -6372,11 +6589,11 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
       const perfScale = Math.sqrt(perfHighComplexPts / totalPts);
       const perfHighNoHolesMax = Math.max(
         perfMinGrid,
-        Math.floor(readGlobalNumber('__PERF_TRIM_HIGH_COMPLEXITY_NO_HOLES_MAX_GRID__') ?? 6)
+        Math.floor(readGlobalNumber('__PERF_TRIM_HIGH_COMPLEXITY_NO_HOLES_MAX_GRID__') ?? 5)
       );
       const perfHighWithHolesMax = Math.max(
         perfMinGrid,
-        Math.floor(readGlobalNumber('__PERF_TRIM_HIGH_COMPLEXITY_WITH_HOLES_MAX_GRID__') ?? 10)
+        Math.floor(readGlobalNumber('__PERF_TRIM_HIGH_COMPLEXITY_WITH_HOLES_MAX_GRID__') ?? 8)
       );
       base = Math.max(effectiveMinGrid, Math.ceil(base * perfScale));
       effectiveMaxGrid = Math.min(
@@ -6591,6 +6808,15 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   triangles: number[][];
 }> {
   const faceStart = performance.now();
+  const curveVerboseLogs = curveDebugEnabled();
+  const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+  const perfCurvedSegmentScale = preferGeometryOnlyLoad
+    ? Math.max(0.25, readGlobalNumber('__PERF_CURVED_SEGMENT_SCALE__') ?? 0.6)
+    : 1.0;
+  const scaleSegments = (base: number, minSegments: number): number => {
+    if (!preferGeometryOnlyLoad) return base;
+    return Math.max(minSegments, Math.round(base * perfCurvedSegmentScale));
+  };
   const STRICT_CLASSIFIER_FACE_IDS = readFaceIdsFromGlobal('__STRICT_CLASSIFIER_FACE_IDS__', [14, 63, 64, 65, 66, 994]);
   const PERIODIC_PROOF_FACE_IDS = readFaceIdsFromGlobal('__PERIODIC_PROOF_FACE_IDS__', []);
   // Default-on for the OCCT-inspired cone path. Face filters remain opt-in:
@@ -6802,8 +7028,10 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         const fullPeriodSpanThreshold = (2 * Math.PI) - fullPeriodTolerance;
         const centerU = (uMin + uMax) / 2;
         const centerV = (vMin + vMax) / 2;
-        curveDebugLog(`[tessellateCurvedFace] UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
-        curveDebugLog(`[tessellateCurvedFace] UV center: (${centerU.toFixed(3)}, ${centerV.toFixed(3)}), spans: uSpan=${uSpan.toFixed(3)}, vSpan=${vSpan.toFixed(3)}`);
+        if (curveVerboseLogs) {
+          curveDebugLog(`[tessellateCurvedFace] UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+          curveDebugLog(`[tessellateCurvedFace] UV center: (${centerU.toFixed(3)}, ${centerV.toFixed(3)}), spans: uSpan=${uSpan.toFixed(3)}, vSpan=${vSpan.toFixed(3)}`);
+        }
         const isSliver = Math.abs(uSpan) < SLIVER_EPS || Math.abs(vSpan) < SLIVER_EPS;
         if (SLIVER_DEBUG_MODE === 'skip' && isSliver) {
           console.warn(
@@ -7083,7 +7311,6 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
               `[tessellateCurvedFace] Cylinder unwrapped boundary: U=[${shiftedBounds.uMin.toFixed(3)}, ${shiftedBounds.uMax.toFixed(3)}], ` +
               `shiftK=${outerShiftK}, meanU=${outerMidU.toFixed(3)}, V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`
             );
-
             if (loops.uvHoles.length > 0) {
               loops.uvHoles = loops.uvHoles.map((hole, h) => {
                 let alignedHole = unwrapPeriodicLoopU(hole, period);
@@ -7180,12 +7407,16 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
 
         const gridDensity = chooseTrimGridDensity(face, loops.uvOuter, loops.uvHoles);
 
-        // For cylinders, compute 3D bounding box from boundary edges to filter
-        // grid points whose 3D positions fall outside the intended region.
-        // This is essential for horizontal cylinders where UV spans full circle
-        // but we only want a portion of the surface (e.g., upper half of a hole).
+        // For selected cylinder trims, compute a 3D bbox from boundary edges and
+        // use it to reject grid points whose evaluated 3D position is outside the
+        // intended region. This path is expensive, so keep it for known seam-
+        // sensitive/degenerate periodic cases only (plus an explicit override).
         let bbox3d: { xMin: number; xMax: number; yMin: number; yMax: number; zMin: number; zMax: number } | undefined;
-        if (face.surfaceType === 'Cylinder') {
+        const forceCylinderBbox3d = readGlobalBoolean('__FORCE_CYLINDER_BBOX3D__', false);
+        const shouldUseCylinderBbox3d =
+          face.surfaceType === 'Cylinder' &&
+          (forceCylinderBbox3d || cylinderCrossesSeam || degeneratePeriodicTrim);
+        if (shouldUseCylinderBbox3d) {
           const outer3d = occEdgesToPolygon(face.outerLoop);
           if (outer3d.length > 0) {
             const xs = outer3d.map(p => p[0]);
@@ -7201,6 +7432,11 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             curveDebugLog(`  Y: [${bbox3d.yMin.toFixed(2)}, ${bbox3d.yMax.toFixed(2)}]`);
             curveDebugLog(`  Z: [${bbox3d.zMin.toFixed(2)}, ${bbox3d.zMax.toFixed(2)}]`);
           }
+        } else if (face.surfaceType === 'Cylinder' && curveDebugEnabled()) {
+          curveDebugLog(
+            `[tessellateCurvedFace] Face ${face.faceIndex}: skipped cylinder 3D bbox ` +
+            `(force=${forceCylinderBbox3d}, crossesSeam=${cylinderCrossesSeam}, degenerate=${degeneratePeriodicTrim})`
+          );
         }
 
         let occBuildClassifier: any | undefined;
@@ -7503,11 +7739,13 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   const { uMin, uMax, vMin, vMax } = face.uvBounds;
 
   if (face.surfaceType === 'Cylinder' && params.radius !== undefined && params.placement) {
+    const uSegments = scaleSegments(64, 24);
+    const vSegments = scaleSegments(4, 2);
     const mesh = await tessellateCylinder(
       { type: 'CYLINDRICAL_SURFACE', placement: params.placement, radius: params.radius },
       uMin, uMax,
       vMin, vMax,
-      64, 4
+      uSegments, vSegments
     );
     tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
     tessellationProfile.tessellateCurvedFace.calls++;
@@ -7515,11 +7753,13 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   }
 
   if (face.surfaceType === 'Sphere' && params.radius !== undefined && params.placement) {
+    const uSegments = scaleSegments(64, 24);
+    const vSegments = scaleSegments(32, 12);
     const mesh = await tessellateSphere(
       { type: 'SPHERICAL_SURFACE', placement: params.placement, radius: params.radius },
       uMin, uMax,
       vMin, vMax,
-      64, 32
+      uSegments, vSegments
     );
     tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
     tessellationProfile.tessellateCurvedFace.calls++;
@@ -7529,12 +7769,16 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   if (face.surfaceType === 'Cone' && params.radius !== undefined && params.semiAngle !== undefined && params.placement) {
     // Compute height samples proportional to the height range for smooth tessellation
     const heightRange = Math.abs(vMax - vMin);
-    const numHeightSamples = Math.max(16, Math.ceil(heightRange * 8));
+    const baseHeightSamples = Math.max(16, Math.ceil(heightRange * 8));
+    const numHeightSamples = preferGeometryOnlyLoad
+      ? Math.max(8, Math.round(baseHeightSamples * perfCurvedSegmentScale))
+      : baseHeightSamples;
+    const angularSegments = scaleSegments(64, 24);
     const mesh = await tessellateCone(
       { type: 'CONICAL_SURFACE', placement: params.placement, radius: params.radius, semiAngle: params.semiAngle },
       uMin, uMax,
       vMin, vMax,
-      64,
+      angularSegments,
       numHeightSamples
     );
     tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
@@ -7543,11 +7787,13 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   }
 
   if (face.surfaceType === 'Torus' && params.majorRadius !== undefined && params.minorRadius !== undefined && params.placement) {
+    const uSegments = scaleSegments(64, 24);
+    const vSegments = scaleSegments(32, 12);
     const mesh = await tessellateTorus(
       { type: 'TOROIDAL_SURFACE', placement: params.placement, majorRadius: params.majorRadius, minorRadius: params.minorRadius },
       uMin, uMax,
       vMin, vMax,
-      64, 32
+      uSegments, vSegments
     );
     tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
     tessellationProfile.tessellateCurvedFace.calls++;
@@ -7556,9 +7802,11 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
 
   if (face.surfaceType === 'BSplineSurface' && params.bspline) {
     const { controlPoints, uDegree, vDegree, uKnots, vKnots, weights } = params.bspline;
+    const uSegments = scaleSegments(32, 12);
+    const vSegments = scaleSegments(32, 12);
     const mesh = await tessellateBSplineSurface(
       { type: 'B_SPLINE_SURFACE', controlPoints, uDegree, vDegree, uKnots, vKnots, weights },
-      32, 32
+      uSegments, vSegments
     );
     tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
     tessellationProfile.tessellateCurvedFace.calls++;

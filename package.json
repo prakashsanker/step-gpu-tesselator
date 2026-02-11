@@ -13,7 +13,8 @@
     "bench:micro": "node tests/benchmark.js",
     "bench:canary": "node tests/benchmark-comprehensive.js --suite canary",
     "bench:representative": "node tests/benchmark-comprehensive.js --suite representative",
-    "bench:full": "node tests/benchmark-comprehensive.js --suite full"
+    "bench:full": "node tests/benchmark-comprehensive.js --suite full",
+    "bench:load": "node tests/benchmark-load-path.js --suite representative"
   },
   "devDependencies": {
     "@types/earcut": "^3.0.0",

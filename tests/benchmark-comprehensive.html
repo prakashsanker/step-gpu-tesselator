@@ -52,9 +52,15 @@
                     const prevPerfGeometryOnly = globalThis.__PERF_GEOMETRY_ONLY_LOAD__;
                     const prevEnableXCAF = globalThis.__ENABLE_XCAF_READER__;
                     const prevEnableStepColorParsing = globalThis.__ENABLE_STEP_COLOR_PARSING__;
+                    const prevEnableLoadDiagnostics = globalThis.__ENABLE_LOAD_DIAGNOSTICS__;
+                    const prevCurveVerbose = globalThis.__CURVE_VERBOSE_LOGS__;
+                    const prevTessVerbose = globalThis.__TESSELLATION_VERBOSE_LOGS__;
                     globalThis.__PERF_GEOMETRY_ONLY_LOAD__ = true;
                     globalThis.__ENABLE_XCAF_READER__ = false;
                     globalThis.__ENABLE_STEP_COLOR_PARSING__ = false;
+                    globalThis.__ENABLE_LOAD_DIAGNOSTICS__ = false;
+                    globalThis.__CURVE_VERBOSE_LOGS__ = false;
+                    globalThis.__TESSELLATION_VERBOSE_LOGS__ = false;
 
                     let mesh;
                     try {
@@ -74,6 +80,21 @@
                             delete globalThis.__ENABLE_STEP_COLOR_PARSING__;
                         } else {
                             globalThis.__ENABLE_STEP_COLOR_PARSING__ = prevEnableStepColorParsing;
+                        }
+                        if (prevEnableLoadDiagnostics === undefined) {
+                            delete globalThis.__ENABLE_LOAD_DIAGNOSTICS__;
+                        } else {
+                            globalThis.__ENABLE_LOAD_DIAGNOSTICS__ = prevEnableLoadDiagnostics;
+                        }
+                        if (prevCurveVerbose === undefined) {
+                            delete globalThis.__CURVE_VERBOSE_LOGS__;
+                        } else {
+                            globalThis.__CURVE_VERBOSE_LOGS__ = prevCurveVerbose;
+                        }
+                        if (prevTessVerbose === undefined) {
+                            delete globalThis.__TESSELLATION_VERBOSE_LOGS__;
+                        } else {
+                            globalThis.__TESSELLATION_VERBOSE_LOGS__ = prevTessVerbose;
                         }
                     }
 
@@ -98,6 +119,9 @@
                             loadStepFile_readFile: profile.loadStepFile_readFile.total,
                             loadStepFile_transfer: profile.loadStepFile_transfer.total,
                             loadStepFile_getTools: profile.loadStepFile_getTools.total,
+                            loadStepFile_oneShape: profile.loadStepFile_oneShape.total,
+                            loadStepFile_fsWrite: profile.loadStepFile_fsWrite.total,
+                            loadStepFile_fsCleanup: profile.loadStepFile_fsCleanup.total,
                             loadStepFile_colorParsing: profile.loadStepFile_colorParsing.total,
                             extractFacesWithEdges: profile.extractFacesWithEdges.total,
                             // Tessellation phases
