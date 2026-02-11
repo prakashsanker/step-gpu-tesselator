@@ -1903,6 +1903,7 @@ function buildOCCSolidFaceCounts(oc: any, shape: any): {
   solidMap: Map<number, { faceCount: number; faceHashCodes: number[] }>;
   faceToSolid: Map<number, number>;
 } {
+  const enableLoadDiagnostics = readGlobalBoolean('__ENABLE_LOAD_DIAGNOSTICS__', false);
   const solidMap = new Map<number, { faceCount: number; faceHashCodes: number[] }>();
   const faceToSolid = new Map<number, number>(); // face hash code → solid index
 
@@ -1939,12 +1940,16 @@ function buildOCCSolidFaceCounts(oc: any, shape: any): {
       solidExplorer.Next();
     }
 
-    console.log(`[OCC_Solids] Found ${solidMap.size} solids, ${faceToSolid.size} face→solid mappings`);
-    for (const [idx, data] of solidMap) {
-      console.log(`[OCC_Solids] Solid ${idx}: ${data.faceCount} faces`);
+    if (enableLoadDiagnostics) {
+      console.log(`[OCC_Solids] Found ${solidMap.size} solids, ${faceToSolid.size} face→solid mappings`);
+      for (const [idx, data] of solidMap) {
+        console.log(`[OCC_Solids] Solid ${idx}: ${data.faceCount} faces`);
+      }
     }
   } catch (e) {
-    console.log('[OCC_Solids] Error iterating solids:', e);
+    if (enableLoadDiagnostics) {
+      console.log('[OCC_Solids] Error iterating solids:', e);
+    }
   }
 
   return { solidMap, faceToSolid };
@@ -1960,6 +1965,7 @@ function matchSolidsAndBuildColorMap(
   stepSolidMap: Map<number, { color: RGBColor; faceCount: number; faceIds: number[] }>,
   occSolidMap: Map<number, { faceCount: number; faceHashCodes: number[] }>
 ): { faceColorMap: Map<number, RGBColor>; solidToColor: Map<number, RGBColor> } {
+  const enableLoadDiagnostics = readGlobalBoolean('__ENABLE_LOAD_DIAGNOSTICS__', false);
   const faceColorMap = new Map<number, RGBColor>();
   const solidToColor = new Map<number, RGBColor>(); // OCC solid index -> color
 
@@ -2004,7 +2010,9 @@ function matchSolidsAndBuildColorMap(
       }
       matchedSolids++;
 
-      console.log(`[SolidMatch] Matched STEP #${stepSolids[0].solidId} to OCC solid ${occSolidIdx} (${faceCount} faces) -> RGB(${color.r.toFixed(2)}, ${color.g.toFixed(2)}, ${color.b.toFixed(2)})`);
+      if (enableLoadDiagnostics) {
+        console.log(`[SolidMatch] Matched STEP #${stepSolids[0].solidId} to OCC solid ${occSolidIdx} (${faceCount} faces) -> RGB(${color.r.toFixed(2)}, ${color.g.toFixed(2)}, ${color.b.toFixed(2)})`);
+      }
     } else if (stepSolids.length > 0 && occSolids.length > 0) {
       // Multiple solids with same face count - try to match by order (imperfect but better than nothing)
       const minCount = Math.min(stepSolids.length, occSolids.length);
@@ -2020,11 +2028,15 @@ function matchSolidsAndBuildColorMap(
         }
         matchedSolids++;
       }
-      console.log(`[SolidMatch] Matched ${minCount} solids with ${faceCount} faces each (ambiguous)`);
+      if (enableLoadDiagnostics) {
+        console.log(`[SolidMatch] Matched ${minCount} solids with ${faceCount} faces each (ambiguous)`);
+      }
     }
   }
 
-  console.log(`[SolidMatch] Total: ${matchedSolids} solids matched, ${matchedFaces} faces colored`);
+  if (enableLoadDiagnostics) {
+    console.log(`[SolidMatch] Total: ${matchedSolids} solids matched, ${matchedFaces} faces colored`);
+  }
   return { faceColorMap, solidToColor };
 }
 
@@ -2043,6 +2055,9 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
   const useXCAFReader = readGlobalBoolean('__ENABLE_XCAF_READER__', !preferGeometryOnlyLoad);
   const enableStepColorParsing = readGlobalBoolean('__ENABLE_STEP_COLOR_PARSING__', !preferGeometryOnlyLoad);
+  // Expensive load-time diagnostics are opt-in. Keep disabled by default so
+  // perf runs and normal interactive loads avoid heavy introspection/log spam.
+  const enableLoadDiagnostics = readGlobalBoolean('__ENABLE_LOAD_DIAGNOSTICS__', false);
 
   // Debug APIs logged only when DEBUG_OCC is true
   if (DEBUG_OCC) {
@@ -2120,7 +2135,9 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
       }
       if (cafReader.SetMatMode) {
         cafReader.SetMatMode(true);
-        console.log('[XCAF] SetMatMode(true) - materials');
+        if (enableLoadDiagnostics) {
+          console.log('[XCAF] SetMatMode(true) - materials');
+        }
       }
       if (cafReader.SetGDTMode) {
         cafReader.SetGDTMode(true);
@@ -2336,12 +2353,16 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
 
         // Alternative: try to get shape directly from reader
         if (labelsLength === 0 && cafReader) {
-          console.log('[ColorDiag] Trying alternative shape extraction...');
+          if (enableLoadDiagnostics) {
+            console.log('[ColorDiag] Trying alternative shape extraction...');
+          }
 
           // Check what methods the reader has
-          const readerMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(cafReader) || {})
-            .filter(k => typeof cafReader[k] === 'function');
-          console.log('[ColorDiag] cafReader methods:', readerMethods.slice(0, 20).join(', '));
+          if (enableLoadDiagnostics) {
+            const readerMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(cafReader) || {})
+              .filter(k => typeof cafReader[k] === 'function');
+            console.log('[ColorDiag] cafReader methods:', readerMethods.slice(0, 20).join(', '));
+          }
 
           // Try Reader().OneShape() pattern
           if (cafReader.Reader && typeof cafReader.Reader === 'function') {
@@ -2349,13 +2370,17 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
               const innerReader = cafReader.Reader();
               if (innerReader && innerReader.OneShape) {
                 shape = innerReader.OneShape();
-                const isNull = shape?.IsNull?.() ?? true;
-                const shapeType = shape?.ShapeType?.() ?? 'unknown';
-                console.log('[ColorDiag] Got shape from cafReader.Reader().OneShape()',
-                  'IsNull:', isNull, 'ShapeType:', shapeType);
+                if (enableLoadDiagnostics) {
+                  const isNull = shape?.IsNull?.() ?? true;
+                  const shapeType = shape?.ShapeType?.() ?? 'unknown';
+                  console.log('[ColorDiag] Got shape from cafReader.Reader().OneShape()',
+                    'IsNull:', isNull, 'ShapeType:', shapeType);
+                }
               }
             } catch (e) {
-              console.log('[ColorDiag] cafReader.Reader().OneShape() failed:', e);
+              if (enableLoadDiagnostics) {
+                console.log('[ColorDiag] cafReader.Reader().OneShape() failed:', e);
+              }
             }
           }
 
@@ -2363,7 +2388,9 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
           if ((!shape || shape.IsNull?.()) && cafReader.NbRootsForTransfer) {
             try {
               const numRoots = cafReader.NbRootsForTransfer();
-              console.log('[ColorDiag] NbRootsForTransfer:', numRoots);
+              if (enableLoadDiagnostics) {
+                console.log('[ColorDiag] NbRootsForTransfer:', numRoots);
+              }
             } catch (e) {
               // Not available
             }
@@ -2569,7 +2596,9 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
     const colorParsingTotal = performance.now() - colorParsingStart;
     tessellationProfile.loadStepFile_colorParsing.total += colorParsingTotal;
     tessellationProfile.loadStepFile_colorParsing.calls++;
-    console.log(`[ColorParsing] Disabled by __ENABLE_STEP_COLOR_PARSING__/__PERF_GEOMETRY_ONLY_LOAD__, skipped in ${colorParsingTotal.toFixed(1)}ms`);
+    if (enableLoadDiagnostics) {
+      console.log(`[ColorParsing] Disabled by __ENABLE_STEP_COLOR_PARSING__/__PERF_GEOMETRY_ONLY_LOAD__, skipped in ${colorParsingTotal.toFixed(1)}ms`);
+    }
     return buildEmptyColorResult();
   }
 
@@ -2589,7 +2618,9 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
     const colorParsingTotal = performance.now() - colorParsingStart;
     tessellationProfile.loadStepFile_colorParsing.total += colorParsingTotal;
     tessellationProfile.loadStepFile_colorParsing.calls++;
-    console.log(`[ColorParsing] No colors in file, skipped in ${colorParsingTotal.toFixed(1)}ms`);
+    if (enableLoadDiagnostics) {
+      console.log(`[ColorParsing] No colors in file, skipped in ${colorParsingTotal.toFixed(1)}ms`);
+    }
     return buildEmptyColorResult();
   }
 
@@ -2639,7 +2670,9 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   tessellationProfile.loadStepFile_colorParsing.calls++;
 
   // Log color parsing breakdown (always, for now)
-  console.log(`[ColorParsing] Breakdown: parseStepColors=${parseStepColorsTime.toFixed(1)}ms, buildFaceColorMap=${buildFaceColorMapTime.toFixed(1)}ms, extractFaceIdOrder=${extractFaceIdOrderTime.toFixed(1)}ms, buildGeometryColorMap=${buildGeometryColorMapTime.toFixed(1)}ms, buildSolidColorMap=${buildSolidColorMapTime.toFixed(1)}ms, buildOCCSolidFaceCounts=${buildOCCSolidFaceCountsTime.toFixed(1)}ms, matchSolids=${matchSolidsTime.toFixed(1)}ms, buildShapeColorMap=${buildShapeColorMapTime.toFixed(1)}ms, total=${colorParsingTotal.toFixed(1)}ms`);
+  if (enableLoadDiagnostics) {
+    console.log(`[ColorParsing] Breakdown: parseStepColors=${parseStepColorsTime.toFixed(1)}ms, buildFaceColorMap=${buildFaceColorMapTime.toFixed(1)}ms, extractFaceIdOrder=${extractFaceIdOrderTime.toFixed(1)}ms, buildGeometryColorMap=${buildGeometryColorMapTime.toFixed(1)}ms, buildSolidColorMap=${buildSolidColorMapTime.toFixed(1)}ms, buildOCCSolidFaceCounts=${buildOCCSolidFaceCountsTime.toFixed(1)}ms, matchSolids=${matchSolidsTime.toFixed(1)}ms, buildShapeColorMap=${buildShapeColorMapTime.toFixed(1)}ms, total=${colorParsingTotal.toFixed(1)}ms`);
+  }
 
   // IMPORTANT: Unwrap colorTool and shapeTool handles before returning
   // The tools from XCAFDoc_DocumentTool are Handles - getFaceColor needs the actual tool
@@ -6181,7 +6214,9 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
   // Keep trim-grid growth sublinear and capped by default. This is a key speed
   // control for complex trims where boundary sampling can be very dense.
   const trimGridScale = Math.max(0.25, readGlobalNumber('__TRIM_GRID_SCALE__') ?? 0.85);
+  const trimDensityBias = Math.max(0.5, readGlobalNumber('__TRIM_DENSITY_BIAS__') ?? 1.0);
   let base = Math.ceil(Math.sqrt(totalPts) * trimGridScale);
+  base = Math.ceil(base * trimDensityBias);
 
   const minGrid = Math.max(8, Math.floor(readGlobalNumber('__TRIM_MIN_GRID_DENSITY__') ?? 10));
   const maxGridGlobal = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY__') ?? 32));
@@ -6209,6 +6244,17 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
   if (totalPts > highComplexPointThreshold) {
     const complexityGridCap = Math.max(minGrid, Math.floor(effectiveMaxGrid * 0.75));
     effectiveMaxGrid = Math.min(effectiveMaxGrid, complexityGridCap);
+  }
+
+  // Perf benchmark mode: tighten trim density budgets so complex no-hole curved
+  // faces do not dominate runtime via over-sampled grids.
+  const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+  if (preferGeometryOnlyLoad) {
+    const perfGridScaleMult = Math.max(0.5, readGlobalNumber('__PERF_TRIM_GRID_SCALE_MULT__') ?? 0.85);
+    const perfNoHolesMax = Math.max(minGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 14));
+    const perfWithHolesMax = Math.max(minGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_WITH_HOLES__') ?? 18));
+    base = Math.ceil(base * perfGridScaleMult);
+    effectiveMaxGrid = Math.min(effectiveMaxGrid, uvHoles.length === 0 ? perfNoHolesMax : perfWithHolesMax);
   }
 
   return Math.max(minGrid, Math.min(effectiveMaxGrid, base));
