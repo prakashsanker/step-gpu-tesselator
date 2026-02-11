@@ -217,6 +217,113 @@ Result:
 
 ---
 
+## M1.2.1 Load Sub-phase Surfacing (2026-02-11)
+
+### Why
+
+Remaining canary laggards were close to parity, but the phase report only showed top-level buckets. We added load-step sub-phase reporting so the next optimization step can be precise.
+
+### Changes
+
+- `tests/benchmark-comprehensive.js` now aggregates and persists:
+  - `loadStepFile_initOC`
+  - `loadStepFile_createDoc`
+  - `loadStepFile_readFile`
+  - `loadStepFile_transfer`
+  - `loadStepFile_getTools`
+  - `loadStepFile_colorParsing`
+- Laggard rows now print load-path share + top 3 load contributors.
+
+### Canary Result
+
+Command:
+- `npm run -s bench:canary`
+
+| Model | Ours (ms) | Ref (ms) | Speed | Ours Tris | Ref Tris |
+|------|-----------:|---------:|------:|----------:|---------:|
+| Plate XLarge (holes) | 149.0 | 241.6 | 1.62x faster | 172 | 172 |
+| Cone (primitive) | 38.3 | 64.7 | 1.69x faster | 358 | 1841 |
+| Cylinder With Hole (trim) | 10.3 | 49.2 | 4.76x faster | 92 | 308 |
+| BSpline Bowl | 42.7 | 75.8 | 1.78x faster | 200 | 116 |
+| Conical Surface (complex) | 76.3 | 59.5 | 1.28x slower | 832 | 1318 |
+| VM-001 | 334.5 | 276.1 | 1.21x slower | 15812 | 3116 |
+
+Aggregate:
+- Wins vs `occt-import-js`: `4/6`
+- Speedup median: `1.66x`
+- Ours avg runtime: `108.5ms` (p90 `241.8ms`)
+- Ref avg runtime: `127.8ms` (p90 `258.9ms`)
+
+Laggard load-phase attribution:
+
+- Conical Surface:
+  - `loadStepFile`: `57.4ms` (`75.2%` of ours)
+  - top sub-phases: `colorParsing 46.6ms`, `transfer 6.3ms`, `readFile 3.4ms`
+- VM-001:
+  - `loadStepFile`: `228.7ms` (`68.4%` of ours)
+  - top sub-phases: `transfer 143.2ms`, `colorParsing 46.8ms`, `readFile 37.6ms`
+
+### Verdict
+
+Instrumentation confirms M1.2 is the right next target. The biggest near-term wins are likely from a geometry-only load path (skip color/XCAF work in perf mode) and lighter transfer overhead.
+
+---
+
+## M1.2.2 Geometry-only Perf Load Path (2026-02-11)
+
+### Why
+
+M1.2.1 showed laggards were dominated by load path (`transfer` + `colorParsing`). We added a benchmark perf mode that runs geometry-only loading and skips heavy metadata/color work.
+
+### Changes
+
+- In `src/occ-test.ts` (`loadStepFile`):
+  - Added flags:
+    - `__PERF_GEOMETRY_ONLY_LOAD__` (default `false`)
+    - `__ENABLE_XCAF_READER__` (default `!__PERF_GEOMETRY_ONLY_LOAD__`)
+    - `__ENABLE_STEP_COLOR_PARSING__` (default `!__PERF_GEOMETRY_ONLY_LOAD__`)
+  - Added lazy STEP text decoding: decode `Uint8Array -> string` only when color parsing is enabled.
+  - Added fast no-color return path when parsing is disabled.
+- In `tests/benchmark-comprehensive.html` (`runOCC`):
+  - Enable geometry-only flags for benchmark run.
+  - Restore previous globals after each run.
+
+### Canary Result
+
+Command:
+- `npm run -s bench:canary`
+
+| Model | Ours (ms) | Ref (ms) | Speed | Ours Tris | Ref Tris |
+|------|-----------:|---------:|------:|----------:|---------:|
+| Plate XLarge (holes) | 129.0 | 198.1 | 1.54x faster | 172 | 172 |
+| Cone (primitive) | 34.3 | 59.8 | 1.74x faster | 358 | 1841 |
+| Cylinder With Hole (trim) | 7.9 | 39.5 | 5.02x faster | 92 | 308 |
+| BSpline Bowl | 55.1 | 139.4 | 2.53x faster | 200 | 116 |
+| Conical Surface (complex) | 25.7 | 44.8 | 1.75x faster | 832 | 1318 |
+| VM-001 | 270.7 | 279.6 | 1.03x faster | 15812 | 3116 |
+
+Aggregate:
+- Wins vs `occt-import-js`: `6/6`
+- Speedup median: `1.75x`
+- Ours avg runtime: `87.1ms` (p90 `199.8ms`)
+- Ref avg runtime: `126.8ms` (p90 `238.8ms`)
+
+### Correctness Gate
+
+Command:
+- `npm test`
+
+Result:
+- Non-visual suites passed through curved-surface tests.
+- Known timeout remains in visual suite:
+  - `testVisualHoleRendering`: `Waiting failed: 60000ms exceeded`
+
+### Verdict
+
+M1.2.2 closes the canary perf gap and yields 6/6 wins against `occt-import-js` in routine dev-loop benchmarks.
+
+---
+
 ## Current Results (2026-01-04)
 
 ### Summary

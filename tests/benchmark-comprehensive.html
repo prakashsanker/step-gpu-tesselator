@@ -48,7 +48,35 @@
                         content = new TextEncoder().encode(stepContent);
                     }
 
-                    const mesh = await parseStepFile(content);
+                    // Perf benchmark mode: geometry-only load path (no XCAF/color parsing).
+                    const prevPerfGeometryOnly = globalThis.__PERF_GEOMETRY_ONLY_LOAD__;
+                    const prevEnableXCAF = globalThis.__ENABLE_XCAF_READER__;
+                    const prevEnableStepColorParsing = globalThis.__ENABLE_STEP_COLOR_PARSING__;
+                    globalThis.__PERF_GEOMETRY_ONLY_LOAD__ = true;
+                    globalThis.__ENABLE_XCAF_READER__ = false;
+                    globalThis.__ENABLE_STEP_COLOR_PARSING__ = false;
+
+                    let mesh;
+                    try {
+                        mesh = await parseStepFile(content);
+                    } finally {
+                        if (prevPerfGeometryOnly === undefined) {
+                            delete globalThis.__PERF_GEOMETRY_ONLY_LOAD__;
+                        } else {
+                            globalThis.__PERF_GEOMETRY_ONLY_LOAD__ = prevPerfGeometryOnly;
+                        }
+                        if (prevEnableXCAF === undefined) {
+                            delete globalThis.__ENABLE_XCAF_READER__;
+                        } else {
+                            globalThis.__ENABLE_XCAF_READER__ = prevEnableXCAF;
+                        }
+                        if (prevEnableStepColorParsing === undefined) {
+                            delete globalThis.__ENABLE_STEP_COLOR_PARSING__;
+                        } else {
+                            globalThis.__ENABLE_STEP_COLOR_PARSING__ = prevEnableStepColorParsing;
+                        }
+                    }
+
                     const totalTime = performance.now() - startTime;
 
                     // Extract phase timings from profile

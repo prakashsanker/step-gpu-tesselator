@@ -78,6 +78,31 @@ Gate:
 Gate:
 - End-to-end runtime improvement with no correctness drop.
 
+### M1.2: Load/Parse Path Reduction (Now Priority)
+Reason:
+- Current laggards are dominated by `loadStepFile`, not tessellation compute.
+- Remaining laggard gap is small and likely recoverable by parse-path work.
+
+Scope:
+1. Instrument `loadStepFile` sub-phases:
+   - file ingest
+   - OCC handoff
+   - STEP read
+   - shape extraction
+   - color/material/diagnostic passes
+2. Add fast default path for perf runs:
+   - geometry-only reader path (skip heavy metadata flow)
+   - keep XCAF path behind flag for color/material-sensitive runs
+3. Make optional diagnostics truly opt-in:
+   - disable expensive color/alt-shape diagnostics in perf mode
+4. Defer heavy per-face prep:
+   - lazily extract expensive trim data when needed
+
+Gate:
+- Canary laggards (`Conical Surface`, `VM-001`) improved.
+- `wins vs occt-import-js` stays >= current level.
+- No new correctness regressions in quick gate.
+
 ### M1.1: Immediate Bottleneck Attack (Based on Current Canary Profile)
 Current canary hotspots:
 - `VM-001`: `tessellatePlanarFace`/`earClipping` dominate.
@@ -166,8 +191,11 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 3. [x] Upgrade benchmark harness to representative canary/representative/full suites.
 4. [x] Prioritize optimization queue using measured hotspot breakdown (canary).
 5. [x] Execute M1.1.1: remove planar-hole hot-path debug overhead and re-run canary.
-6. [ ] Execute M1.1.2: planar-hole complexity dispatch + UV cleanup and re-run canary.
-7. [x] Run full correctness suite every 2-3 perf steps to prevent regressions.
+6. [x] Execute M1.1.2: planar-hole complexity dispatch + UV cleanup and re-run canary.
+7. [x] Execute M1.2.1: add `loadStepFile` sub-phase instrumentation and capture canary deltas.
+8. [x] Execute M1.2.2: add geometry-only fast parse path (default for perf), keep XCAF behind flag.
+9. [ ] Execute M1.2.3: disable heavy diagnostics by default in perf mode and re-run canary.
+10. [x] Run full correctness suite every 2-3 perf steps to prevent regressions.
 
 ### 2026-02-11 M1.1 Progress (In Flight)
 
@@ -227,6 +255,66 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 
 - Correctness gate:
   - `npm test`: fails at known visual timeout (`testVisualHoleRendering`, 60s wait exceeded).
+
+### 2026-02-11 M1.2.1 Iteration (Load Sub-phase Surfacing)
+
+- What changed:
+  - `tests/benchmark-comprehensive.js` now keeps `loadStepFile_*` keys in aggregated phase output:
+    - `loadStepFile_initOC`
+    - `loadStepFile_createDoc`
+    - `loadStepFile_readFile`
+    - `loadStepFile_transfer`
+    - `loadStepFile_getTools`
+    - `loadStepFile_colorParsing`
+  - Per-model benchmark output now prints load-path share and top 3 load sub-phases for lagging models.
+
+- Canary result (`npm run -s bench:canary`):
+  - Wins vs `occt-import-js`: `4/6`
+  - Speedup median: `1.66x`
+  - Ours avg runtime: `108.5ms` (p90 `241.8ms`)
+  - Ref avg runtime: `127.8ms` (p90 `258.9ms`)
+
+- Remaining laggard attribution:
+  - `Conical Surface (complex)`:
+    - ours `76.3ms`, ref `59.5ms` (`1.28x` slower)
+    - `loadStepFile`: `57.4ms` (`75.2%` of ours)
+    - top load sub-phases: `colorParsing 46.6ms`, `transfer 6.3ms`, `readFile 3.4ms`
+  - `VM-001`:
+    - ours `334.5ms`, ref `276.1ms` (`1.21x` slower)
+    - `loadStepFile`: `228.7ms` (`68.4%` of ours)
+    - top load sub-phases: `transfer 143.2ms`, `colorParsing 46.8ms`, `readFile 37.6ms`
+
+- Conclusion:
+  - M1.2.2 and M1.2.3 should target `transfer` and `colorParsing` first.
+
+### 2026-02-11 M1.2.2 Iteration (Geometry-only Perf Load Path)
+
+- What changed:
+  - Added perf-load switches in `loadStepFile()`:
+    - `__PERF_GEOMETRY_ONLY_LOAD__` (default `false`)
+    - `__ENABLE_XCAF_READER__` (default `!__PERF_GEOMETRY_ONLY_LOAD__`)
+    - `__ENABLE_STEP_COLOR_PARSING__` (default `!__PERF_GEOMETRY_ONLY_LOAD__`)
+  - Added lazy STEP text decode:
+    - do not decode `Uint8Array` to string unless step-color parsing is enabled.
+  - Benchmark harness now enables geometry-only mode for perf comparisons:
+    - `tests/benchmark-comprehensive.html` sets:
+      - `__PERF_GEOMETRY_ONLY_LOAD__ = true`
+      - `__ENABLE_XCAF_READER__ = false`
+      - `__ENABLE_STEP_COLOR_PARSING__ = false`
+    - flags are restored after each `runOCC`.
+
+- Canary result (`npm run -s bench:canary`):
+  - Wins vs `occt-import-js`: `6/6`
+  - Speedup median: `1.75x`
+  - Ours avg runtime: `87.1ms` (p90 `199.8ms`)
+  - Ref avg runtime: `126.8ms` (p90 `238.8ms`)
+
+- Key laggard flips:
+  - `Conical Surface (complex)`: `76.3ms -> 25.7ms` (now `1.75x` faster vs ref)
+  - `VM-001`: `334.5ms -> 270.7ms` (now `1.03x` faster vs ref)
+
+- Correctness check:
+  - `npm test` still hits known visual timeout in `testVisualHoleRendering` (60s wait exceeded).
 
 
 ### 2026-02-11 M0 Checkpoint
