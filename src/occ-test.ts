@@ -6271,6 +6271,7 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
   base = Math.ceil(base * trimDensityBias);
 
   const minGrid = Math.max(8, Math.floor(readGlobalNumber('__TRIM_MIN_GRID_DENSITY__') ?? 10));
+  let effectiveMinGrid = minGrid;
   const maxGridGlobal = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY__') ?? 32));
   const maxGridNoHoles = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 20));
   const maxGridWithHoles = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY_WITH_HOLES__') ?? 24));
@@ -6302,19 +6303,46 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
   // faces do not dominate runtime via over-sampled grids.
   const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
   if (preferGeometryOnlyLoad) {
-    const perfGridScaleMult = Math.max(0.5, readGlobalNumber('__PERF_TRIM_GRID_SCALE_MULT__') ?? 0.85);
-    const perfNoHolesMax = Math.max(minGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 14));
-    const perfWithHolesMax = Math.max(minGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_WITH_HOLES__') ?? 18));
+    const perfMinGrid = Math.max(4, Math.floor(readGlobalNumber('__PERF_TRIM_MIN_GRID_DENSITY__') ?? 4));
+    const perfGridScaleMult = Math.max(0.4, readGlobalNumber('__PERF_TRIM_GRID_SCALE_MULT__') ?? 0.65);
+    const perfNoHolesMax = Math.max(perfMinGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 8));
+    const perfWithHolesMax = Math.max(perfMinGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_WITH_HOLES__') ?? 12));
+
+    effectiveMinGrid = Math.min(effectiveMinGrid, perfMinGrid);
     base = Math.ceil(base * perfGridScaleMult);
     effectiveMaxGrid = Math.min(effectiveMaxGrid, uvHoles.length === 0 ? perfNoHolesMax : perfWithHolesMax);
+
+    // Dense trim loops can still over-sample UV grids after regular caps.
+    // Apply an additional complexity-aware downscale only in perf mode.
+    const perfHighComplexPts = Math.max(
+      256,
+      Math.floor(readGlobalNumber('__PERF_TRIM_HIGH_COMPLEXITY_POINT_THRESHOLD__') ?? 700)
+    );
+    if (totalPts > perfHighComplexPts) {
+      const perfScale = Math.sqrt(perfHighComplexPts / totalPts);
+      const perfHighNoHolesMax = Math.max(
+        perfMinGrid,
+        Math.floor(readGlobalNumber('__PERF_TRIM_HIGH_COMPLEXITY_NO_HOLES_MAX_GRID__') ?? 6)
+      );
+      const perfHighWithHolesMax = Math.max(
+        perfMinGrid,
+        Math.floor(readGlobalNumber('__PERF_TRIM_HIGH_COMPLEXITY_WITH_HOLES_MAX_GRID__') ?? 10)
+      );
+      base = Math.max(effectiveMinGrid, Math.ceil(base * perfScale));
+      effectiveMaxGrid = Math.min(
+        effectiveMaxGrid,
+        uvHoles.length === 0 ? perfHighNoHolesMax : perfHighWithHolesMax
+      );
+    }
   }
 
+  return Math.max(effectiveMinGrid, Math.min(effectiveMaxGrid, base));
   // Keep seam-sensitive periodic trims away from under-sampled fold artifacts.
   // This applies to cone/cylinder trims that cross the U seam and is intentionally
   // scoped so we do not globally increase cost.
   if ((face.surfaceType === 'Cone' || face.surfaceType === 'Cylinder') && isPeriodicSeamSensitiveTrim()) {
     const seamMinGrid = Math.max(
-      minGrid,
+      effectiveMinGrid,
       Math.floor(
         readGlobalNumber(
           face.surfaceType === 'Cone'
@@ -6327,7 +6355,7 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
     effectiveMaxGrid = Math.max(effectiveMaxGrid, seamMinGrid);
   }
 
-  return Math.max(minGrid, Math.min(effectiveMaxGrid, base));
+  return Math.max(effectiveMinGrid, Math.min(effectiveMaxGrid, base));
 }
 
 function estimateFaceSizeFromLoops(face: FaceWithEdgesInfo): number {

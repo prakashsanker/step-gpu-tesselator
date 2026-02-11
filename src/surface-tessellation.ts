@@ -690,6 +690,13 @@ export async function tessellateTrimmedSurface(
 
     // Tolerance for including points near the boundary
     const boundaryTolerance = Math.max(du, dv) * 0.5;
+    const preferGeometryOnlyLoad = (globalThis as any)?.__PERF_GEOMETRY_ONLY_LOAD__ === true;
+    const perfDisableNearBoundaryDefault = true;
+    const perfDisableNearBoundaryRaw = (globalThis as any)?.__PERF_TRIM_DISABLE_NEAR_BOUNDARY__;
+    const perfDisableNearBoundary = perfDisableNearBoundaryRaw == null
+        ? perfDisableNearBoundaryDefault
+        : perfDisableNearBoundaryRaw === true;
+    const skipNearBoundaryChecks = preferGeometryOnlyLoad && uvHoles.length === 0 && perfDisableNearBoundary;
 
     // 3D bbox tolerance - keep tight to avoid protrusions
     // For horizontal cylinders, even 0.5 tolerance can create visible artifacts
@@ -718,7 +725,9 @@ export async function tessellateTrimmedSurface(
                 : isPointInPolygon([u, v], continuousBoundary);
             const nearBoundary = useCustomUvInside
                 ? false
-                : isNearBoundary([u, v], continuousBoundary, boundaryTolerance);
+                : (skipNearBoundaryChecks
+                    ? false
+                    : isNearBoundary([u, v], continuousBoundary, boundaryTolerance));
             const insideHole = useCustomUvInside
                 ? false
                 : continuousHoles.some(hole => isPointInPolygon([u, v], hole));
