@@ -193,6 +193,41 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
   - `npm test` re-run attempted after perf changes.
   - Result: runner reached visual stage then timed out at `testVisualHoleRendering` (`Waiting failed: 60000ms exceeded`).
 
+### 2026-02-11 M1.1.2 Iteration (Trim Complexity + Rollback)
+
+- What changed:
+  - Removed the global trim-loop simplification pass added in this branch iteration (kept cone-specific simplification only).
+  - Tuned default trim density caps to reduce triangle inflation:
+    - `__TRIM_GRID_SCALE__`: `1.0 -> 0.85`
+    - `__TRIM_MIN_GRID_DENSITY__`: `12 -> 10`
+    - `__TRIM_MAX_GRID_DENSITY__`: `40 -> 32`
+    - `__TRIM_MAX_GRID_DENSITY_NO_HOLES__`: `24 -> 20`
+    - `__TRIM_MAX_GRID_DENSITY_WITH_HOLES__`: `40 -> 24`
+    - `__CONE_TRIM_MAX_GRID_DENSITY__`: `36 -> 24`
+    - `__CONE_TRIM_MAX_GRID_DENSITY_NO_HOLES__`: `16 -> 14`
+    - `__TRIM_HIGH_COMPLEXITY_POINT_THRESHOLD__`: `900 -> 600`
+    - high-complexity cap factor: `0.85 -> 0.75`
+  - Tuned OCCT-inspired cone-domain defaults:
+    - `__OCCT_INSPIRED_TRIM_GRID_SCALE__`: `1.35 -> 0.9`
+    - `__OCCT_INSPIRED_TRIM_MIN_GRID__`: `24 -> 14`
+    - `__OCCT_INSPIRED_TRIM_MAX_GRID__`: `64 -> 32`
+
+- Canary result after rollback+tuning (`npm run -s bench:canary`):
+  - Wins vs `occt-import-js`: `4/6`
+  - Speedup median: `1.77x`
+  - Ours avg runtime: `122.4ms` (p90 `267.6ms`)
+  - Ref avg runtime: `151.9ms` (p90 `311.3ms`)
+  - Remaining laggards:
+    - `Conical Surface (complex)`: `91.0ms` vs `62.0ms` (`1.47x` slower)
+    - `VM-001`: `372.3ms` vs `365.3ms` (`1.02x` slower, near parity)
+
+- Triangle trend:
+  - `Conical Surface`: `832` vs ref `1318` (no longer inflated).
+  - `VM-001`: `15812` vs ref `3116` (still inflated, but lower than prior run in this branch).
+
+- Correctness gate:
+  - `npm test`: fails at known visual timeout (`testVisualHoleRendering`, 60s wait exceeded).
+
 
 ### 2026-02-11 M0 Checkpoint
 

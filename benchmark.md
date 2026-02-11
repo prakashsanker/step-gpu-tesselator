@@ -163,6 +163,60 @@ Result:
 
 ---
 
+## M1.1.2 Trim Density Tuning + Rollback (2026-02-11)
+
+### Why
+
+The initial M1.1.2 experiment introduced a global trim-loop simplification pass that caused instability on cone-heavy cases. We rolled that back and kept cone-specific simplification only, then tuned default trim-density caps to reduce triangle inflation and runtime.
+
+### Changes
+
+- Removed global trim-loop simplification pass in `getFaceTrimLoopsUV()` (kept cone-only simplification).
+- Lowered default trim grid knobs:
+  - `__TRIM_GRID_SCALE__`: `1.0 -> 0.85`
+  - `__TRIM_MIN_GRID_DENSITY__`: `12 -> 10`
+  - `__TRIM_MAX_GRID_DENSITY__`: `40 -> 32`
+  - `__TRIM_MAX_GRID_DENSITY_NO_HOLES__`: `24 -> 20`
+  - `__TRIM_MAX_GRID_DENSITY_WITH_HOLES__`: `40 -> 24`
+  - `__CONE_TRIM_MAX_GRID_DENSITY__`: `36 -> 24`
+  - `__CONE_TRIM_MAX_GRID_DENSITY_NO_HOLES__`: `16 -> 14`
+  - `__TRIM_HIGH_COMPLEXITY_POINT_THRESHOLD__`: `900 -> 600`
+- Lowered OCCT-inspired cone trim-domain defaults:
+  - `__OCCT_INSPIRED_TRIM_GRID_SCALE__`: `1.35 -> 0.9`
+  - `__OCCT_INSPIRED_TRIM_MIN_GRID__`: `24 -> 14`
+  - `__OCCT_INSPIRED_TRIM_MAX_GRID__`: `64 -> 32`
+
+### Canary Result
+
+Command:
+- `npm run -s bench:canary`
+
+| Model | Ours (ms) | Ref (ms) | Speed | Ours Tris | Ref Tris |
+|------|-----------:|---------:|------:|----------:|---------:|
+| Plate XLarge | 162.8 | 257.3 | 1.58x faster | 172 | 172 |
+| Cone | 54.6 | 107.3 | 1.97x faster | 358 | 1841 |
+| Cylinder With Hole | 11.5 | 34.9 | 3.04x faster | 92 | 308 |
+| BSpline Bowl | 42.4 | 84.7 | 2.00x faster | 200 | 116 |
+| Conical Surface | 91.0 | 62.0 | 1.47x slower | 832 | 1318 |
+| VM-001 | 372.3 | 365.3 | 1.02x slower | 15812 | 3116 |
+
+Aggregate:
+- Wins vs `occt-import-js`: `4/6`
+- Speedup median: `1.77x`
+- Ours avg runtime: `122.4ms` (p90 `267.6ms`)
+- Ref avg runtime: `151.9ms` (p90 `311.3ms`)
+
+### Correctness Gate
+
+Command:
+- `npm test`
+
+Result:
+- Non-visual suites pass.
+- Visual stage still times out at `testVisualHoleRendering` (`Waiting failed: 60000ms exceeded`).
+
+---
+
 ## Current Results (2026-01-04)
 
 ### Summary
