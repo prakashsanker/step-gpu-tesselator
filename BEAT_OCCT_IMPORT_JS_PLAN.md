@@ -198,6 +198,7 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 10. [x] Run full correctness suite every 2-3 perf steps to prevent regressions.
 11. [x] Execute M1.3.1: gate cylinder 3D bbox filtering to seam-sensitive trims and re-run canary/representative.
 12. [x] Execute M2.1: reduce CDT constraint-recovery cost (edge bbox fast-reject + robust cavity boundary ordering) and re-run canary + representative spot-check.
+13. [x] Execute M1.2.4: use `STEPControl_Reader.ReadStream` in perf geometry-only path with safe fallback to `ReadFile`.
 
 ### 2026-02-11 M1.1 Progress (In Flight)
 
@@ -406,6 +407,40 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
   - M2.1 reduced CDT hot-loop overhead and stabilized cone/trim canary performance.
   - Electronic Enclosure remains dominated by load path (`transfer` + `readFile`) plus residual curved/trim triangle inflation.
   - Next steps stay unchanged: continue M2/M3 while parallelizing load-path reductions.
+
+
+### 2026-02-11 M1.2.4 Iteration (ReadStream Fast Path + ReadFile Fallback)
+
+- What changed (`src/occ-test.ts`):
+  - Added `createIfStream(...)` helper for `IFStream` / `IFStream_1` constructor variants.
+  - Updated geometry-only fast load path (`loadStepFileGeometryOnlyFast`) to:
+    - prefer `reader.ReadStream(...)` when available,
+    - fall back automatically to existing `reader.ReadFile(...)` path when stream read is unavailable/fails,
+    - only write/unlink MEMFS temp files when file-based fallback is actually used.
+  - Added runtime flag:
+    - `__LOAD_USE_READ_STREAM__` (default `true`).
+
+- Canary result (`npm run -s bench:canary`):
+  - Wins vs `occt-import-js`: `4/6`
+  - Speedup median: `1.92x`
+  - Ours avg runtime: `89.5ms` (p90 `202.1ms`)
+  - Ref avg runtime: `115.1ms` (p90 `198.9ms`)
+  - Near-parity laggards:
+    - `Plate XLarge`: ours `176.3ms`, ref `174.0ms` (`1.01x` slower)
+    - `VM-001`: ours `227.8ms`, ref `223.8ms` (`1.02x` slower)
+
+- Representative result (`npm run -s bench:representative`):
+  - Wins vs `occt-import-js`: `4/6`
+  - Speedup median: `3.01x`
+  - Ours avg runtime: `1574.7ms` (p90 `4687.7ms`)
+  - Ref avg runtime: `624.9ms` (p90 `1741.6ms`)
+  - `Electronic Enclosure`:
+    - ours `9180.5ms`, ref `3292.5ms` (`2.79x` slower)
+    - `loadStepFile`: `3153.3ms` (`34.3%` of ours)
+    - top load sub-phases: `transfer 2149.9ms`, `readFile 1002.4ms`, `fsWrite 1.4ms`
+
+- Correctness gate:
+  - `npm test`: still fails at known visual timeout (`testVisualHoleRendering`, 60s wait exceeded).
 
 
 ### 2026-02-11 M0 Checkpoint

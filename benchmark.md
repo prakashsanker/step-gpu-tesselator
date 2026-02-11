@@ -610,3 +610,53 @@ Representative spot-check (`Electronic Enclosure`):
 
 - `improved` for M2 canary path and trim-related hot-loop cost.
 - Still not enough to close Electronic Enclosure; remaining gap is mostly load-path plus residual triangle inflation.
+
+---
+
+## M1.2.4 ReadStream Load Path (2026-02-11)
+
+### Change Summary
+
+Added a stream-first fast loader in `src/occ-test.ts` for perf geometry-only runs:
+
+- New helper: `createIfStream(...)` for constructor variants.
+- `loadStepFileGeometryOnlyFast(...)` now:
+  - uses `reader.ReadStream(...)` when available,
+  - falls back to `reader.ReadFile(...)` automatically,
+  - only writes/cleans temp MEMFS files when fallback path is used.
+- New flag: `__LOAD_USE_READ_STREAM__` (default `true`).
+
+### Commands
+
+```bash
+npm run -s bench:canary
+npm run -s bench:representative
+npm test
+```
+
+### Results
+
+Canary:
+- wins vs `occt-import-js`: `4/6`
+- speedup median: `1.92x`
+- ours avg: `89.5ms` (p90 `202.1ms`)
+- ref avg: `115.1ms` (p90 `198.9ms`)
+- near parity laggards:
+  - `Plate XLarge`: ours `176.3ms`, ref `174.0ms` (`1.01x` slower)
+  - `VM-001`: ours `227.8ms`, ref `223.8ms` (`1.02x` slower)
+
+Representative:
+- wins vs `occt-import-js`: `4/6`
+- speedup median: `3.01x`
+- ours avg: `1574.7ms` (p90 `4687.7ms`)
+- ref avg: `624.9ms` (p90 `1741.6ms`)
+- `Electronic Enclosure`: ours `9180.5ms`, ref `3292.5ms` (`2.79x` slower)
+  - `loadStepFile`: `3153.3ms` (`34.3%` of ours)
+  - top load sub-phases: `transfer 2149.9ms`, `readFile 1002.4ms`, `fsWrite 1.4ms`
+
+Correctness:
+- `npm test`: still fails at known visual timeout (`testVisualHoleRendering`, 60s).
+
+### Verdict
+
+Read-stream loading reduces load overhead on the heavy enclosure path versus earlier branch checkpoints, but `Electronic Enclosure` remains the dominant gap. Next priority remains reducing `transfer` + `readFile` cost and continuing M2/M3 tessellation reductions.

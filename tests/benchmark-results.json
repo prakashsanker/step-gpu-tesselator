@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-02-11T10:56:57.937Z",
+  "timestamp": "2026-02-11T13:07:29.527Z",
   "suite": "representative",
   "suiteDescription": "Real-world performance gate including electronic enclosure",
   "config": {
     "benchmarkRuns": 1,
     "warmupRuns": 0,
     "timeoutMs": 360000,
-    "modelCount": 1,
+    "modelCount": 6,
     "prewarm": true
   },
   "excluded": [
@@ -25,54 +25,309 @@
   ],
   "results": [
     {
+      "name": "Electronic Enclosure",
+      "path": "step-examples/Electronic Enclousre.STEP",
+      "category": "enclosure",
+      "fileSize": 4990243,
+      "success": true,
+      "ours": {
+        "avgMs": 9180.490000009537,
+        "p50Ms": 9180.490000009537,
+        "p90Ms": 9180.490000009537,
+        "maxMs": 9180.490000009537,
+        "runs": [
+          9180.490000009537
+        ],
+        "phases": {
+          "loadStepFile": 3153.314999997616,
+          "loadStepFile_initOC": 0.025000005960464478,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1002.4150000214577,
+          "loadStepFile_transfer": 2149.9249999821186,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.09999999403953552,
+          "loadStepFile_fsWrite": 1.3700000047683716,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 193.80000001192093,
+          "tessellateOCCShape": 5827.439999997616,
+          "tessellatePlanarFace": 41.734999895095825,
+          "tessellateCurvedFace": 5736.604999750853,
+          "earClipping": 12.975000143051147,
+          "computeNormals": 22.340000182390213,
+          "meshAssembly": 2.9650000035762787
+        },
+        "vertexCount": 42745,
+        "triangleCount": 54239
+      },
+      "ref": {
+        "avgMs": 3292.5049999952316,
+        "p50Ms": 3292.5049999952316,
+        "p90Ms": 3292.5049999952316,
+        "maxMs": 3292.5049999952316,
+        "runs": [
+          3292.5049999952316
+        ],
+        "vertexCount": 32049,
+        "triangleCount": 39148
+      },
+      "speedup": 0.35864153220490536,
+      "triangleRatio": 1.3854858485746397,
+      "warnings": []
+    },
+    {
       "name": "VM-001",
       "path": "step-examples/VM-001.STEP",
       "category": "industry",
       "fileSize": 336737,
       "success": true,
       "ours": {
-        "avgMs": 787.375,
-        "p50Ms": 787.375,
-        "p90Ms": 787.375,
-        "maxMs": 787.375,
+        "avgMs": 194.94999998807907,
+        "p50Ms": 194.94999998807907,
+        "p90Ms": 194.94999998807907,
+        "maxMs": 194.94999998807907,
         "runs": [
-          787.375
+          194.94999998807907
         ],
         "phases": {
-          "loadStepFile": 385.794999986887,
-          "loadStepFile_initOC": 0.25,
+          "loadStepFile": 170.92500001192093,
+          "loadStepFile_initOC": 0.005000025033950806,
           "loadStepFile_createDoc": 0,
-          "loadStepFile_readFile": 127.52500000596046,
-          "loadStepFile_transfer": 252.87000000476837,
+          "loadStepFile_readFile": 87.69999998807907,
+          "loadStepFile_transfer": 82.30499997735023,
           "loadStepFile_getTools": 0,
-          "loadStepFile_oneShape": 0.14000001549720764,
-          "loadStepFile_fsWrite": 2.634999990463257,
+          "loadStepFile_oneShape": 0.030000001192092896,
+          "loadStepFile_fsWrite": 0.12000000476837158,
           "loadStepFile_fsCleanup": 0,
           "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 65.53500002622604,
-          "tessellateOCCShape": 328.81999999284744,
-          "tessellatePlanarFace": 9.555000066757202,
-          "tessellateCurvedFace": 280.379999935627,
-          "earClipping": 7.735000103712082,
-          "computeNormals": 6.349999725818634,
-          "meshAssembly": 0.375
+          "extractFacesWithEdges": 10.090000003576279,
+          "tessellateOCCShape": 13.359999984502792,
+          "tessellatePlanarFace": 1.2449999749660492,
+          "tessellateCurvedFace": 9.599999785423279,
+          "earClipping": 0.9699999988079071,
+          "computeNormals": 1.245000183582306,
+          "meshAssembly": 0.19499999284744263
         },
         "vertexCount": 2654,
         "triangleCount": 2740
       },
       "ref": {
-        "avgMs": 1548.7700000107288,
-        "p50Ms": 1548.7700000107288,
-        "p90Ms": 1548.7700000107288,
-        "maxMs": 1548.7700000107288,
+        "avgMs": 190.66500002145767,
+        "p50Ms": 190.66500002145767,
+        "p90Ms": 190.66500002145767,
+        "maxMs": 190.66500002145767,
         "runs": [
-          1548.7700000107288
+          190.66500002145767
         ],
         "vertexCount": 3328,
         "triangleCount": 3116
       },
-      "speedup": 1.967004286408292,
+      "speedup": 0.9780200052993926,
       "triangleRatio": 0.8793324775353016,
+      "warnings": []
+    },
+    {
+      "name": "VM-002",
+      "path": "step-examples/VM-002.STEP",
+      "category": "industry",
+      "fileSize": 43126,
+      "success": true,
+      "ours": {
+        "avgMs": 25.25,
+        "p50Ms": 25.25,
+        "p90Ms": 25.25,
+        "maxMs": 25.25,
+        "runs": [
+          25.25
+        ],
+        "phases": {
+          "loadStepFile": 22.94999998807907,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 11.485000014305115,
+          "loadStepFile_transfer": 10.974999994039536,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.03999999165534973,
+          "loadStepFile_fsWrite": 0.06999999284744263,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 1.125,
+          "tessellateOCCShape": 0.8149999976158142,
+          "tessellatePlanarFace": 0.10499995946884155,
+          "tessellateCurvedFace": 0.3700000047683716,
+          "earClipping": 0.04499998688697815,
+          "computeNormals": 0.07499998807907104,
+          "meshAssembly": 0.025000005960464478
+        },
+        "vertexCount": 116,
+        "triangleCount": 96
+      },
+      "ref": {
+        "avgMs": 99.16999998688698,
+        "p50Ms": 99.16999998688698,
+        "p90Ms": 99.16999998688698,
+        "maxMs": 99.16999998688698,
+        "runs": [
+          99.16999998688698
+        ],
+        "vertexCount": 3043,
+        "triangleCount": 5750
+      },
+      "speedup": 3.9275247519559198,
+      "triangleRatio": 0.016695652173913042,
+      "warnings": []
+    },
+    {
+      "name": "Raw Material",
+      "path": "step-examples/complex/raw-material.step",
+      "category": "complex",
+      "fileSize": 39877,
+      "success": true,
+      "ours": {
+        "avgMs": 22.674999982118607,
+        "p50Ms": 22.674999982118607,
+        "p90Ms": 22.674999982118607,
+        "maxMs": 22.674999982118607,
+        "runs": [
+          22.674999982118607
+        ],
+        "phases": {
+          "loadStepFile": 18.96500000357628,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 9.354999989271164,
+          "loadStepFile_transfer": 9.110000014305115,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.019999980926513672,
+          "loadStepFile_fsWrite": 0.06499999761581421,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 1.7049999833106995,
+          "tessellateOCCShape": 1.7150000035762787,
+          "tessellatePlanarFace": 0.12000012397766113,
+          "tessellateCurvedFace": 0.9599999487400055,
+          "earClipping": 0.060000091791152954,
+          "computeNormals": 0.20499995350837708,
+          "meshAssembly": 0.034999996423721313
+        },
+        "vertexCount": 224,
+        "triangleCount": 204
+      },
+      "ref": {
+        "avgMs": 95.31500002741814,
+        "p50Ms": 95.31500002741814,
+        "p90Ms": 95.31500002741814,
+        "maxMs": 95.31500002741814,
+        "runs": [
+          95.31500002741814
+        ],
+        "vertexCount": 368,
+        "triangleCount": 332
+      },
+      "speedup": 4.203528119187787,
+      "triangleRatio": 0.6144578313253012,
+      "warnings": []
+    },
+    {
+      "name": "Conical Surface (complex)",
+      "path": "step-examples/complex/conical-surface.step",
+      "category": "complex",
+      "fileSize": 9390,
+      "success": true,
+      "ours": {
+        "avgMs": 16.860000014305115,
+        "p50Ms": 16.860000014305115,
+        "p90Ms": 16.860000014305115,
+        "maxMs": 16.860000014305115,
+        "runs": [
+          16.860000014305115
+        ],
+        "phases": {
+          "loadStepFile": 9.375,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 5.049999982118607,
+          "loadStepFile_transfer": 3.9349999725818634,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.019999980926513672,
+          "loadStepFile_fsWrite": 0.09999999403953552,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.675000011920929,
+          "tessellateOCCShape": 6.259999990463257,
+          "tessellatePlanarFace": 0.07500001788139343,
+          "tessellateCurvedFace": 5.629999965429306,
+          "earClipping": 0.04500001668930054,
+          "computeNormals": 0.23500001430511475,
+          "meshAssembly": 0.09000000357627869
+        },
+        "vertexCount": 323,
+        "triangleCount": 468
+      },
+      "ref": {
+        "avgMs": 35.375,
+        "p50Ms": 35.375,
+        "p90Ms": 35.375,
+        "maxMs": 35.375,
+        "runs": [
+          35.375
+        ],
+        "vertexCount": 1012,
+        "triangleCount": 1318
+      },
+      "speedup": 2.098161326808159,
+      "triangleRatio": 0.3550834597875569,
+      "warnings": []
+    },
+    {
+      "name": "Pipe With Porthole (trim)",
+      "path": "step-examples/c6-trimmed/pipe-with-porthole.step",
+      "category": "trimmed",
+      "fileSize": 5434,
+      "success": true,
+      "ours": {
+        "avgMs": 7.7049999833106995,
+        "p50Ms": 7.7049999833106995,
+        "p90Ms": 7.7049999833106995,
+        "maxMs": 7.7049999833106995,
+        "runs": [
+          7.7049999833106995
+        ],
+        "phases": {
+          "loadStepFile": 6.004999995231628,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 3.344999998807907,
+          "loadStepFile_transfer": 2.2549999952316284,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.025000005960464478,
+          "loadStepFile_fsWrite": 0.07000002264976501,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.32499998807907104,
+          "tessellateOCCShape": 1.0799999833106995,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.8949999809265137,
+          "earClipping": 0,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 28,
+        "triangleCount": 24
+      },
+      "ref": {
+        "avgMs": 36.30500000715256,
+        "p50Ms": 36.30500000715256,
+        "p90Ms": 36.30500000715256,
+        "maxMs": 36.30500000715256,
+        "runs": [
+          36.30500000715256
+        ],
+        "vertexCount": 10,
+        "triangleCount": 8
+      },
+      "speedup": 4.71187541671518,
+      "triangleRatio": 3,
       "warnings": []
     }
   ]

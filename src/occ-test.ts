@@ -200,15 +200,33 @@ function cleanupStepFsPath(ocInst: OpenCascadeInstance, path: string): void {
   tessellationProfile.loadStepFile_fsCleanup.calls++;
 }
 
+function createIfStream(ocInst: OpenCascadeInstance, fileData: Uint8Array): any | null {
+  const ctorNames = ['IFStream_1', 'IFStream'];
+  for (const ctorName of ctorNames) {
+    const ctor = (ocInst as any)?.[ctorName];
+    if (typeof ctor !== 'function') continue;
+    try {
+      return new ctor(fileData);
+    } catch {
+      // Try next candidate constructor.
+    }
+  }
+  return null;
+}
+
 function transferReaderRoots(
   ocInst: OpenCascadeInstance,
   reader: any,
-  preferSingleRootTransfer: boolean
+  preferSingleRootTransfer: boolean,
+  transferMode: 'auto' | 'roots' | 'single' = 'auto'
 ): void {
   const transferStart = performance.now();
   let transferDone = false;
 
-  if (preferSingleRootTransfer && typeof reader.NbRootsForTransfer === 'function' && typeof reader.TransferRoot === 'function') {
+  const shouldTrySingleRootFirst = transferMode === 'single' || (transferMode === 'auto' && preferSingleRootTransfer);
+  const shouldTryTransferRoots = transferMode !== 'single';
+
+  if (shouldTrySingleRootFirst && typeof reader.NbRootsForTransfer === 'function' && typeof reader.TransferRoot === 'function') {
     try {
       const roots = reader.NbRootsForTransfer();
       if (Number.isFinite(roots) && roots === 1) {
@@ -230,7 +248,7 @@ function transferReaderRoots(
     }
   }
 
-  if (!transferDone) {
+  if (!transferDone && shouldTryTransferRoots) {
     if (reader.TransferRoots) {
       try {
         reader.TransferRoots();
@@ -2188,21 +2206,51 @@ async function loadStepFileGeometryOnlyFast(
   fileData: Uint8Array,
   fileName: string
 ): Promise<StepLoadResult> {
+  const enableLoadDiagnostics = loadDiagnosticsEnabled();
   const reuseReader = readGlobalBoolean('__LOAD_REUSE_STEP_READER__', true);
   const useStableTempPath = readGlobalBoolean('__LOAD_REUSE_TEMP_PATH__', true);
   const skipCleanup = readGlobalBoolean('__LOAD_SKIP_FS_CLEANUP__', useStableTempPath);
   const preferSingleRootTransfer = readGlobalBoolean('__LOAD_PREFER_SINGLE_ROOT_TRANSFER__', true);
+  const useReadStream = readGlobalBoolean('__LOAD_USE_READ_STREAM__', true);
+  const transferModeRaw = readGlobalString('__LOAD_TRANSFER_MODE__')?.toLowerCase();
+  const transferMode: 'auto' | 'roots' | 'single' =
+    transferModeRaw === 'roots' || transferModeRaw === 'single' ? transferModeRaw : 'auto';
 
   const tempFilePath = useStableTempPath ? PERF_STEP_TEMP_FILE_PATH : `/${fileName}`;
+  let wroteTempFile = false;
 
-  const fsWriteStart = performance.now();
-  ocInst.FS.writeFile(tempFilePath, fileData);
-  tessellationProfile.loadStepFile_fsWrite.total += performance.now() - fsWriteStart;
-  tessellationProfile.loadStepFile_fsWrite.calls++;
+  const ensureTempFile = (): void => {
+    if (wroteTempFile) return;
+    const fsWriteStart = performance.now();
+    ocInst.FS.writeFile(tempFilePath, fileData);
+    tessellationProfile.loadStepFile_fsWrite.total += performance.now() - fsWriteStart;
+    tessellationProfile.loadStepFile_fsWrite.calls++;
+    wroteTempFile = true;
+  };
 
   const readShapeWithReader = (reader: any): any => {
+    let readResult: any = null;
+    let usedReadStream = false;
     const readFileStart = performance.now();
-    const readResult = reader.ReadFile(tempFilePath);
+    if (useReadStream && typeof reader.ReadStream === 'function') {
+      const stream = createIfStream(ocInst, fileData);
+      if (stream) {
+        try {
+          readResult = reader.ReadStream(stream);
+          usedReadStream = true;
+        } catch (streamErr) {
+          if (enableLoadDiagnostics) {
+            console.warn('[loadStepFileFast] ReadStream failed, falling back to ReadFile:', streamErr);
+          }
+        }
+      }
+    }
+
+    if (!usedReadStream || !isStepReadDone(ocInst, readResult)) {
+      ensureTempFile();
+      readResult = reader.ReadFile(tempFilePath);
+    }
+
     tessellationProfile.loadStepFile_readFile.total += performance.now() - readFileStart;
     tessellationProfile.loadStepFile_readFile.calls++;
 
@@ -2210,7 +2258,7 @@ async function loadStepFileGeometryOnlyFast(
       throw new Error(`Failed to read STEP file: ${typeof readResult === 'object' ? JSON.stringify(readResult) : readResult}`);
     }
 
-    transferReaderRoots(ocInst, reader, preferSingleRootTransfer);
+    transferReaderRoots(ocInst, reader, preferSingleRootTransfer, transferMode);
 
     const oneShapeStart = performance.now();
     const shape = reader.OneShape();
@@ -2234,7 +2282,7 @@ async function loadStepFileGeometryOnlyFast(
     }
     logOCC('[loadStepFileFast] Retried with fresh STEP reader after failure:', readerErr);
   } finally {
-    if (!skipCleanup) {
+    if (wroteTempFile && !skipCleanup) {
       cleanupStepFsPath(ocInst, tempFilePath);
     }
   }
@@ -2735,7 +2783,7 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
     }
 
     logOCC('Transferring roots...');
-    transferReaderRoots(oc, reader, false);
+    transferReaderRoots(oc, reader, false, 'roots');
 
     const fallbackOneShapeStart = performance.now();
     shape = reader.OneShape();

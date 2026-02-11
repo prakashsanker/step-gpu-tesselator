@@ -29,6 +29,7 @@ function parseArgs(argv) {
     host: '127.0.0.1',
     port: 5175,
     prewarm: true,
+    transferMode: 'auto',
   };
 
   for (let i = 0; i < argv.length; i++) {
@@ -41,10 +42,17 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg === '--no-prewarm') {
       out.prewarm = false;
+    } else if (arg === '--transfer-mode') {
+      out.transferMode = (argv[i + 1] || '').toLowerCase();
+      i += 1;
     } else if (arg === '--help' || arg === '-h') {
-      console.log('Usage: node tests/benchmark-load-path.js [--suite canary|representative] [--timeout-ms N] [--no-prewarm]');
+      console.log('Usage: node tests/benchmark-load-path.js [--suite canary|representative] [--timeout-ms N] [--transfer-mode auto|roots|single] [--no-prewarm]');
       process.exit(0);
     }
+  }
+
+  if (!['auto', 'roots', 'single'].includes(out.transferMode)) {
+    throw new Error(`Unknown transfer mode: ${out.transferMode}`);
   }
 
   if (!SUITES[out.suite]) {
@@ -103,7 +111,7 @@ async function run() {
   const cfg = parseArgs(args);
   const models = SUITES[cfg.suite];
 
-  console.log(`Load-path benchmark suite=${cfg.suite}, models=${models.length}`);
+  console.log(`Load-path benchmark suite=${cfg.suite}, models=${models.length}, transferMode=${cfg.transferMode}`);
 
   let vite = null;
   let browser = null;
@@ -132,6 +140,9 @@ async function run() {
       timeout: cfg.timeoutMs,
     });
     await page.waitForFunction(() => window.benchmarkReady === true, { timeout: cfg.timeoutMs });
+    await page.evaluate((transferMode) => {
+      globalThis.__LOAD_TRANSFER_MODE__ = transferMode;
+    }, cfg.transferMode);
 
     if (cfg.prewarm) {
       const warm = loadStepFile('step-examples/benchmark/simple-square.step');
@@ -231,6 +242,7 @@ async function run() {
       suite: cfg.suite,
       timeoutMs: cfg.timeoutMs,
       prewarm: cfg.prewarm,
+      transferMode: cfg.transferMode,
       results,
     };
 
