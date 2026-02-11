@@ -328,3 +328,74 @@ Priority issues to fix:
 2. **Fix pipe-with-porthole and quarter-cylinder-hole** — render but don't match reference
 3. **Investigate remaining 3 failures** — as1-tc-214, ap224_995277945, ap224_995288709
 4. **Fix errors** — nissan (parse), rocky_house/rotor-201nal (timeout)
+
+---
+
+## AI Visual Run (2026-02-11, Cone Path Default-On)
+
+### Setup
+
+- Cone seam-split + OCCT-inspired trim-graph path enabled by default in commit `c3e2b83`.
+- AI grader key loaded from `~/yeet-coder-env/server.env`.
+
+### Commands Run
+
+```bash
+# Initial full run (stalled after file 108)
+set -a; source ~/yeet-coder-env/server.env; set +a
+node tests/run-visual-tests-ai.js > /tmp/ai-visual-2026-02-11.log 2>&1
+
+# Resume remaining files 109-120 with per-file timeout guard
+FILE=<step-file> TIMEOUT_MS=480000 node /tmp/run-one-visual-guard.mjs
+```
+
+### User-Requested Skip Policy
+
+These were explicitly skipped from any re-run attempts due known cost/instability:
+
+- `step-examples/complex/nissan.step`
+- `step-examples/complex/rocky_house.step`
+- `step-examples/complex/rotor-201nal.step`
+
+### Merged Results (Initial 1-108 + Resumed 109-120)
+
+- Total files: **120**
+- Passed: **86**
+- Failed: **18**
+- Errors: **16**
+- Raw pass rate: **71.7%**
+- Pass rate on evaluated files only (excluding errors): **82.7%** (`86 / (86 + 18)`)
+
+### Comparison vs Last Recorded Checkpoint
+
+Compared against **Post-Manual-2 (2026-02-05)**.
+
+| Metric | Post-Manual-2 (2026-02-05) | Current (2026-02-11) | Delta |
+|--------|------------------------------|----------------------|-------|
+| Passed | 110 | 86 | **-24** |
+| Failed | 5 | 18 | **+13** |
+| Errors | 3 | 16 | **+13** |
+| Pass Rate | 92.4% | 71.7% | **-20.7%** |
+
+### New Error Files (16)
+
+- `step-examples/c2-holes/2.2-projection/tilted-triangle-no-plane.step`
+- `step-examples/c3-curves/rotor.step`
+- `step-examples/complex/nissan.step`
+- `step-examples/complex/raw-material.step`
+- `step-examples/complex/rocky_house_car.step`
+- `step-examples/complex/rocky_house_roof.step`
+- `step-examples/complex/rocky_house_sofa.step`
+- `step-examples/complex/rocky_house_table.step`
+- `step-examples/complex/rocky_house_terrain.step`
+- `step-examples/complex/rocky_house.step`
+- `step-examples/complex/rotor-201nal.step`
+- `step-examples/external/steptools-ap214/as1-ac-214.stp`
+- `step-examples/external/steptools-ap214/as1-ec-214.stp`
+- `step-examples/external/steptools-ap214/as1-md-214.stp`
+- `step-examples/external/steptools-ap214/as1-ug-214.stp`
+- `step-examples/external/steptools-ap214/f1-db-214.stp`
+
+### Note
+
+This run is dominated by harness/runtime failures (timeouts and reference failures), so the raw delta is not a clean geometric-quality regression signal by itself.
