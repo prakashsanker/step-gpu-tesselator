@@ -4,65 +4,168 @@
  * Compares our pipeline (OpenCascade.js + GPU tessellation) against occt-import-js
  *
  * Usage:
- *   node tests/benchmark-comprehensive.js           # Run fast benchmarks only
- *   node tests/benchmark-comprehensive.js --all     # Run all benchmarks including complex
- *   node tests/benchmark-comprehensive.js --complex-only  # Run only complex models
+ *   node tests/benchmark-comprehensive.js                 # Run canary suite
+ *   node tests/benchmark-comprehensive.js --suite canary  # Run canary suite
+ *   node tests/benchmark-comprehensive.js --filter bowl   # Filter by name/path substring
+ *   node tests/benchmark-comprehensive.js --max-files 20  # Limit files for quick checks
  */
 
 import puppeteer from 'puppeteer';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import fs from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = join(__dirname, '..');
 
-// Parse command line arguments
-const args = process.argv.slice(2);
-const runAll = args.includes('--all');
-const complexOnly = args.includes('--complex-only');
+function parseArgs(argv) {
+    const parsed = {
+        suite: 'canary',
+        filter: '',
+        maxFiles: null,
+        warmupRuns: 0,
+        benchmarkRuns: 1,
+        timeoutMs: 300000,
+    };
+
+    for (let i = 0; i < argv.length; i++) {
+        const arg = argv[i];
+        if (arg === '--suite' && i + 1 < argv.length) {
+            parsed.suite = argv[++i];
+        } else if (arg === '--filter' && i + 1 < argv.length) {
+            parsed.filter = argv[++i].toLowerCase();
+        } else if (arg === '--max-files' && i + 1 < argv.length) {
+            parsed.maxFiles = Math.max(1, Number(argv[++i]) || 0) || null;
+        } else if (arg === '--warmup' && i + 1 < argv.length) {
+            parsed.warmupRuns = Math.max(0, Number(argv[++i]) || 0);
+        } else if (arg === '--runs' && i + 1 < argv.length) {
+            parsed.benchmarkRuns = Math.max(1, Number(argv[++i]) || 1);
+        } else if (arg === '--timeout' && i + 1 < argv.length) {
+            parsed.timeoutMs = Math.max(30000, Number(argv[++i]) || 300000);
+        } else if (arg === '--help' || arg === '-h') {
+            console.log(`Usage:
+  node tests/benchmark-comprehensive.js [options]
+
+Options:
+  --suite canary          Canary suite (all non-real-world test STEP/STP files)
+  --filter PATTERN        Substring filter on path/name
+  --max-files N           Limit number of files after filtering
+  --warmup N              Warmup runs per file (default: 0)
+  --runs N                Benchmark runs per file (default: 1)
+  --timeout MS            Per-file timeout in ms (default: 300000)
+`);
+            process.exit(0);
+        }
+    }
+
+    return parsed;
+}
+
+const args = parseArgs(process.argv.slice(2));
 
 // Configuration
 const CONFIG = {
     vitePort: 5175,
-    timeout: 300000, // 5 minutes for complex models
+    timeout: args.timeoutMs,
     headless: true,
-    warmupRuns: 1,
-    benchmarkRuns: 3,
+    warmupRuns: args.warmupRuns,
+    benchmarkRuns: args.benchmarkRuns,
 };
 
-// Benchmark files
-const FAST_BENCHMARKS = [
-    { name: 'Simple Square', path: 'step-examples/benchmark/simple-square.step', category: 'simple' },
-    { name: 'Small Plate (4 holes)', path: 'step-examples/benchmark/plate-small-2x2.step', category: 'holes' },
-    { name: 'Medium Plate (25 holes)', path: 'step-examples/benchmark/plate-medium-5x5.step', category: 'holes' },
-    { name: 'Unit Box', path: 'step-examples/c4-multiface/unit-box.step', category: 'multiface' },
-    { name: 'Tetrahedron', path: 'step-examples/c4-multiface/tetrahedron.step', category: 'multiface' },
-    { name: 'Cylinder', path: 'step-examples/c4-surfaces/cylinder.step', category: 'curved' },
-    { name: 'Sphere', path: 'step-examples/c4-surfaces/sphere.step', category: 'curved' },
-    { name: 'Torus', path: 'step-examples/c4-surfaces/torus.step', category: 'curved' },
+const REAL_WORLD_PATH_PATTERNS = [
+    /^step-examples\/Electronic Enclousre\.STEP$/i,
+    /^step-examples\/VM-\d+\.STEP$/i,
+    /^step-examples\/external\//i,
 ];
+const EXCLUDED_BASENAME_PATTERNS = [
+    /rocky_house/i,
+    /rotor/i,
+];
+const BROKEN_CANARY_FILES = new Set([
+    'step-examples/c2-holes/2.2-projection/tilted-triangle-no-plane.step',
+    'step-examples/complex/air.step',
+    'step-examples/complex/nissan.step',
+]);
 
-const COMPLEX_BENCHMARKS = [
-    { name: 'Large Plate (100 holes)', path: 'step-examples/benchmark/plate-large-10x10.step', category: 'holes' },
-    { name: 'XLarge Plate (400 holes)', path: 'step-examples/benchmark/plate-xlarge-20x20.step', category: 'holes' },
-    { name: 'XXLarge Plate (900 holes)', path: 'step-examples/benchmark/plate-xxlarge-30x30.step', category: 'holes' },
-    // Valid complex models
-    { name: 'Rotor (141K tris)', path: 'step-examples/complex/rotor-201nal.step', category: 'complex' },
-    { name: 'Raw Material', path: 'step-examples/complex/raw-material.step', category: 'complex' },
-    { name: 'Cube', path: 'step-examples/complex/cube.step', category: 'complex' },
-    { name: 'Conical Surface', path: 'step-examples/complex/conical-surface.step', category: 'complex' },
-    { name: 'VM-002', path: 'step-examples/VM-002.STEP', category: 'industry' },
-    { name: 'VM-001', path: 'step-examples/VM-001.STEP', category: 'industry' },
-    // BSpline surfaces (untested category)
-    { name: 'BSpline Bowl', path: 'step-examples/c5-bspline/bspline-bowl.step', category: 'bspline' },
-    { name: 'BSpline Dome', path: 'step-examples/c5-bspline/bspline-dome.step', category: 'bspline' },
-    // Trimmed surfaces (untested category)
-    { name: 'Cylinder with Hole', path: 'step-examples/c6-trimmed/cylinder-with-hole.step', category: 'trimmed' },
-    { name: 'Pipe with Porthole', path: 'step-examples/c6-trimmed/pipe-with-porthole.step', category: 'trimmed' },
-    // NOTE: rocky_house_*.step and air.step are INVALID (unresolved references/truncated)
-];
+function walkStepFiles(relativeDir) {
+    const root = join(PROJECT_ROOT, relativeDir);
+    const out = [];
+
+    const recurse = (absDir, relDir) => {
+        const entries = fs.readdirSync(absDir, { withFileTypes: true });
+        for (const entry of entries) {
+            const absPath = join(absDir, entry.name);
+            const relPath = `${relDir}/${entry.name}`;
+            if (entry.isDirectory()) {
+                recurse(absPath, relPath);
+                continue;
+            }
+            if (!entry.isFile()) continue;
+            if (!/\.(step|stp)$/i.test(entry.name)) continue;
+            out.push(relPath);
+        }
+    };
+
+    recurse(root, relativeDir);
+    return out.sort();
+}
+
+function categorizePath(relativePath) {
+    const parts = relativePath.split('/');
+    return parts.length >= 2 ? parts[1] : 'misc';
+}
+
+function shouldExcludeCanary(relativePath) {
+    for (const pattern of REAL_WORLD_PATH_PATTERNS) {
+        if (pattern.test(relativePath)) return 'real-world';
+    }
+    if (BROKEN_CANARY_FILES.has(relativePath)) {
+        return 'known-broken';
+    }
+    const fileName = basename(relativePath);
+    for (const pattern of EXCLUDED_BASENAME_PATTERNS) {
+        if (pattern.test(fileName)) return 'requested-exclusion';
+    }
+    return null;
+}
+
+function percentile(values, pct) {
+    if (!values.length) return null;
+    const sorted = [...values].sort((a, b) => a - b);
+    const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil((pct / 100) * sorted.length) - 1));
+    return sorted[index];
+}
+
+function buildCanaryBenchmarks() {
+    const allStepFiles = walkStepFiles('step-examples');
+    const excluded = [];
+    let selected = [];
+
+    for (const relativePath of allStepFiles) {
+        const excludedReason = shouldExcludeCanary(relativePath);
+        if (excludedReason) {
+            excluded.push({ path: relativePath, reason: excludedReason });
+            continue;
+        }
+        selected.push(relativePath);
+    }
+
+    if (args.filter) {
+        selected = selected.filter((path) => path.toLowerCase().includes(args.filter));
+    }
+    if (args.maxFiles != null) {
+        selected = selected.slice(0, args.maxFiles);
+    }
+
+    const models = selected.map((path) => ({
+        name: path.replace('step-examples/', ''),
+        path,
+        category: categorizePath(path),
+    }));
+
+    return { models, excluded };
+}
 
 // Colors for terminal output
 const colors = {
@@ -278,13 +381,28 @@ function printResultsTable(results) {
     // Summary statistics
     const successResults = results.filter(r => r.success);
     if (successResults.length > 0) {
+        const speedups = successResults.map((r) => r.speedup);
+        const oursTimes = successResults.map((r) => r.occ.avgTime);
+        const refTimes = successResults.map((r) => r.occtImport.avgTime);
         const avgSpeedup = successResults.reduce((a, r) => a + r.speedup, 0) / successResults.length;
+        const medianSpeedup = percentile(speedups, 50);
+        const p90Speedup = percentile(speedups, 90);
+        const oursMedian = percentile(oursTimes, 50);
+        const oursP90 = percentile(oursTimes, 90);
+        const refMedian = percentile(refTimes, 50);
+        const refP90 = percentile(refTimes, 90);
         const fasterCount = successResults.filter(r => r.speedup >= 1).length;
+        const failedCount = results.length - successResults.length;
 
         log('SUMMARY:', 'bold');
         log(`  Total benchmarks: ${results.length}`, 'cyan');
         log(`  Successful: ${successResults.length}`, 'cyan');
+        log(`  Failed: ${failedCount}`, failedCount === 0 ? 'green' : 'red');
+        log(`  Speedup median: ${medianSpeedup.toFixed(2)}x`, medianSpeedup >= 1 ? 'green' : 'red');
+        log(`  Speedup p90: ${p90Speedup.toFixed(2)}x`, p90Speedup >= 1 ? 'green' : 'red');
         log(`  Average speedup: ${avgSpeedup.toFixed(2)}x`, avgSpeedup >= 1 ? 'green' : 'red');
+        log(`  Ours median/p90: ${oursMedian.toFixed(1)}ms / ${oursP90.toFixed(1)}ms`, 'cyan');
+        log(`  Ref median/p90: ${refMedian.toFixed(1)}ms / ${refP90.toFixed(1)}ms`, 'cyan');
         log(`  Faster than occt-import-js: ${fasterCount}/${successResults.length}`, 'cyan');
     }
 }
@@ -296,7 +414,10 @@ function saveResultsJson(results) {
     const outputPath = join(PROJECT_ROOT, 'tests', 'benchmark-results.json');
     const output = {
         timestamp: new Date().toISOString(),
+        suite: args.suite,
         config: CONFIG,
+        filter: args.filter || null,
+        maxFiles: args.maxFiles,
         results: results,
     };
     fs.writeFileSync(outputPath, JSON.stringify(output, null, 2));
@@ -312,17 +433,29 @@ async function main() {
     log('  OCC Tessellator Comprehensive Benchmark', 'blue');
     log('='.repeat(60) + '\n', 'blue');
 
-    // Determine which benchmarks to run
-    let benchmarks = [];
-    if (complexOnly) {
-        benchmarks = COMPLEX_BENCHMARKS;
-        log('Running COMPLEX benchmarks only', 'yellow');
-    } else if (runAll) {
-        benchmarks = [...FAST_BENCHMARKS, ...COMPLEX_BENCHMARKS];
-        log('Running ALL benchmarks (fast + complex)', 'yellow');
-    } else {
-        benchmarks = FAST_BENCHMARKS;
-        log('Running FAST benchmarks only (use --all for complex models)', 'yellow');
+    if (args.suite !== 'canary') {
+        throw new Error(`Unsupported suite "${args.suite}". This runner currently supports only --suite canary.`);
+    }
+    const { models: benchmarks, excluded } = buildCanaryBenchmarks();
+    log('Running CANARY benchmark suite (all non-real-world STEP test files)', 'yellow');
+    if (excluded.length > 0) {
+        const reasonCounts = excluded.reduce((acc, e) => {
+            acc[e.reason] = (acc[e.reason] || 0) + 1;
+            return acc;
+        }, {});
+        const reasonSummary = Object.entries(reasonCounts)
+            .map(([reason, count]) => `${reason}=${count}`)
+            .join(', ');
+        log(`Excluded files: ${excluded.length} (${reasonSummary})`, 'dim');
+    }
+    if (args.filter) {
+        log(`Filter: "${args.filter}"`, 'dim');
+    }
+    if (args.maxFiles != null) {
+        log(`Max files: ${args.maxFiles}`, 'dim');
+    }
+    if (benchmarks.length === 0) {
+        throw new Error('No benchmark files selected after exclusions/filters');
     }
 
     log(`Total benchmarks: ${benchmarks.length}\n`, 'cyan');
