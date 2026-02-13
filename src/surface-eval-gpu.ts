@@ -169,6 +169,132 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 }
 `;
 
+const SURFACE_EVAL_GRID_SHADER = /* wgsl */ `
+struct DispatchParams {
+    vertexCount: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+}
+
+struct GridJob {
+    gridU: u32,
+    gridV: u32,
+    startVertex: u32,
+    surfaceIndex: u32,
+    uMin: f32,
+    vMin: f32,
+    du: f32,
+    dv: f32,
+}
+
+struct SurfaceParams {
+    surfaceType: u32,
+    _pad0: u32,
+    _pad1: u32,
+    _pad2: u32,
+    location: vec4f,
+    axis: vec4f,
+    refDir: vec4f,
+    yDir: vec4f,
+    scalar0: f32,
+    scalar1: f32,
+    _pad3: f32,
+    _pad4: f32,
+}
+
+@group(0) @binding(0) var<storage, read> surfaces: array<SurfaceParams>;
+@group(0) @binding(1) var<storage, read> jobs: array<GridJob>;
+@group(0) @binding(2) var<storage, read> vertexJobIndex: array<u32>;
+@group(0) @binding(3) var<uniform> dispatch: DispatchParams;
+@group(0) @binding(4) var<storage, read_write> positions: array<f32>;
+@group(0) @binding(5) var<storage, read_write> normals: array<f32>;
+
+fn safeNormalize(v: vec3f) -> vec3f {
+    let len = length(v);
+    if (len > 1e-10) {
+        return v / len;
+    }
+    return vec3f(0.0, 0.0, 1.0);
+}
+
+@compute @workgroup_size(256)
+fn main(@builtin(global_invocation_id) gid: vec3u) {
+    let idx = gid.x;
+    if (idx >= dispatch.vertexCount) {
+        return;
+    }
+
+    let jobIdx = vertexJobIndex[idx];
+    let job = jobs[jobIdx];
+    let cols = job.gridU + 1u;
+    let localIdx = idx - job.startVertex;
+    let i = localIdx % cols;
+    let j = localIdx / cols;
+    if (j > job.gridV) {
+        return;
+    }
+
+    let u = job.uMin + f32(i) * job.du;
+    let v = job.vMin + f32(j) * job.dv;
+    let outBase = idx * 3u;
+    let surface = surfaces[job.surfaceIndex];
+
+    let location = surface.location.xyz;
+    let axis = surface.axis.xyz;
+    let refDir = surface.refDir.xyz;
+    let yDir = surface.yDir.xyz;
+
+    let cosU = cos(u);
+    let sinU = sin(u);
+    var position = vec3f(0.0, 0.0, 0.0);
+    var normal = vec3f(0.0, 0.0, 1.0);
+
+    if (surface.surfaceType == 0u) {
+        position = location + u * refDir + v * yDir;
+        normal = safeNormalize(axis);
+    } else if (surface.surfaceType == 1u) {
+        let radius = surface.scalar0;
+        let radial = cosU * refDir + sinU * yDir;
+        position = location + radius * radial + v * axis;
+        normal = safeNormalize(radial);
+    } else if (surface.surfaceType == 2u) {
+        let radius = surface.scalar0;
+        let cosV = cos(v);
+        let sinV = sin(v);
+        let radial = cosV * (cosU * refDir + sinU * yDir) + sinV * axis;
+        position = location + radius * radial;
+        normal = safeNormalize(radial);
+    } else if (surface.surfaceType == 3u) {
+        let radius = surface.scalar0;
+        let semiAngle = surface.scalar1;
+        let cosA = cos(semiAngle);
+        let sinA = sin(semiAngle);
+        let radial = cosU * refDir + sinU * yDir;
+        let localRadius = radius + v * sinA;
+        let z = v * cosA;
+        position = location + localRadius * radial + z * axis;
+        normal = safeNormalize(cosA * radial - sinA * axis);
+    } else if (surface.surfaceType == 4u) {
+        let majorRadius = surface.scalar0;
+        let minorRadius = surface.scalar1;
+        let cosV = cos(v);
+        let sinV = sin(v);
+        let radial = cosU * refDir + sinU * yDir;
+        let tubeCenter = majorRadius + minorRadius * cosV;
+        position = location + tubeCenter * radial + minorRadius * sinV * axis;
+        normal = safeNormalize(cosV * radial + sinV * axis);
+    }
+
+    positions[outBase + 0u] = position.x;
+    positions[outBase + 1u] = position.y;
+    positions[outBase + 2u] = position.z;
+    normals[outBase + 0u] = normal.x;
+    normals[outBase + 1u] = normal.y;
+    normals[outBase + 2u] = normal.z;
+}
+`;
+
 const gpuEvalCache: {
     device: GPUDevice | null;
     pipeline: GPUComputePipeline | null;
@@ -225,6 +351,62 @@ const gpuEvalCache: {
     stagingNormalsCapacity: 0,
 };
 
+const gpuGridEvalCache: {
+    device: GPUDevice | null;
+    pipeline: GPUComputePipeline | null;
+    bindGroup: GPUBindGroup | null;
+    bindGroupRefs: {
+        surfaces: GPUBuffer | null;
+        jobs: GPUBuffer | null;
+        vertexJobIndex: GPUBuffer | null;
+        dispatch: GPUBuffer | null;
+        positions: GPUBuffer | null;
+        normals: GPUBuffer | null;
+    };
+    surfacesBuffer: GPUBuffer | null;
+    jobsBuffer: GPUBuffer | null;
+    vertexJobIndexBuffer: GPUBuffer | null;
+    dispatchParamsBuffer: GPUBuffer | null;
+    positionsBuffer: GPUBuffer | null;
+    normalsBuffer: GPUBuffer | null;
+    stagingPositionsBuffer: GPUBuffer | null;
+    stagingNormalsBuffer: GPUBuffer | null;
+    surfacesCapacity: number;
+    jobsCapacity: number;
+    vertexJobIndexCapacity: number;
+    positionsCapacity: number;
+    normalsCapacity: number;
+    stagingPositionsCapacity: number;
+    stagingNormalsCapacity: number;
+} = {
+    device: null,
+    pipeline: null,
+    bindGroup: null,
+    bindGroupRefs: {
+        surfaces: null,
+        jobs: null,
+        vertexJobIndex: null,
+        dispatch: null,
+        positions: null,
+        normals: null,
+    },
+    surfacesBuffer: null,
+    jobsBuffer: null,
+    vertexJobIndexBuffer: null,
+    dispatchParamsBuffer: null,
+    positionsBuffer: null,
+    normalsBuffer: null,
+    stagingPositionsBuffer: null,
+    stagingNormalsBuffer: null,
+    surfacesCapacity: 0,
+    jobsCapacity: 0,
+    vertexJobIndexCapacity: 0,
+    positionsCapacity: 0,
+    normalsCapacity: 0,
+    stagingPositionsCapacity: 0,
+    stagingNormalsCapacity: 0,
+};
+
 function destroyCache() {
     gpuEvalCache.bindGroup = null;
     gpuEvalCache.bindGroupRefs.uv = null;
@@ -256,6 +438,39 @@ function destroyCache() {
     gpuEvalCache.normalsCapacity = 0;
     gpuEvalCache.stagingPositionsCapacity = 0;
     gpuEvalCache.stagingNormalsCapacity = 0;
+}
+
+function destroyGridCache() {
+    gpuGridEvalCache.bindGroup = null;
+    gpuGridEvalCache.bindGroupRefs.surfaces = null;
+    gpuGridEvalCache.bindGroupRefs.jobs = null;
+    gpuGridEvalCache.bindGroupRefs.vertexJobIndex = null;
+    gpuGridEvalCache.bindGroupRefs.dispatch = null;
+    gpuGridEvalCache.bindGroupRefs.positions = null;
+    gpuGridEvalCache.bindGroupRefs.normals = null;
+    gpuGridEvalCache.surfacesBuffer?.destroy();
+    gpuGridEvalCache.jobsBuffer?.destroy();
+    gpuGridEvalCache.vertexJobIndexBuffer?.destroy();
+    gpuGridEvalCache.dispatchParamsBuffer?.destroy();
+    gpuGridEvalCache.positionsBuffer?.destroy();
+    gpuGridEvalCache.normalsBuffer?.destroy();
+    gpuGridEvalCache.stagingPositionsBuffer?.destroy();
+    gpuGridEvalCache.stagingNormalsBuffer?.destroy();
+    gpuGridEvalCache.surfacesBuffer = null;
+    gpuGridEvalCache.jobsBuffer = null;
+    gpuGridEvalCache.vertexJobIndexBuffer = null;
+    gpuGridEvalCache.dispatchParamsBuffer = null;
+    gpuGridEvalCache.positionsBuffer = null;
+    gpuGridEvalCache.normalsBuffer = null;
+    gpuGridEvalCache.stagingPositionsBuffer = null;
+    gpuGridEvalCache.stagingNormalsBuffer = null;
+    gpuGridEvalCache.surfacesCapacity = 0;
+    gpuGridEvalCache.jobsCapacity = 0;
+    gpuGridEvalCache.vertexJobIndexCapacity = 0;
+    gpuGridEvalCache.positionsCapacity = 0;
+    gpuGridEvalCache.normalsCapacity = 0;
+    gpuGridEvalCache.stagingPositionsCapacity = 0;
+    gpuGridEvalCache.stagingNormalsCapacity = 0;
 }
 
 function ensureBuffer(
@@ -358,6 +573,40 @@ async function ensurePipeline(): Promise<{ device: GPUDevice; pipeline: GPUCompu
     return { device, pipeline: gpuEvalCache.pipeline };
 }
 
+async function ensureGridPipeline(): Promise<{ device: GPUDevice; pipeline: GPUComputePipeline }> {
+    const device = await getGPUDevice();
+    if (gpuGridEvalCache.device !== device) {
+        destroyGridCache();
+        gpuGridEvalCache.pipeline = null;
+        gpuGridEvalCache.device = device;
+    }
+
+    if (!gpuGridEvalCache.pipeline) {
+        const module = device.createShaderModule({
+            label: "surface-eval-grid-shader",
+            code: SURFACE_EVAL_GRID_SHADER,
+        });
+        gpuGridEvalCache.pipeline = device.createComputePipeline({
+            label: "surface-eval-grid-pipeline",
+            layout: "auto",
+            compute: {
+                module,
+                entryPoint: "main",
+            },
+        });
+    }
+
+    if (!gpuGridEvalCache.dispatchParamsBuffer) {
+        gpuGridEvalCache.dispatchParamsBuffer = device.createBuffer({
+            label: "surface-eval-grid-dispatch-params",
+            size: 16,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+    }
+
+    return { device, pipeline: gpuGridEvalCache.pipeline };
+}
+
 let hasWarnedGpuEvalFailure = false;
 
 interface PendingSurfaceEvalJob {
@@ -370,13 +619,29 @@ let pendingJobs: PendingSurfaceEvalJob[] = [];
 let flushInFlight = false;
 let flushScheduled = false;
 
+function getSurfaceEvalBatchDelayMs(): number {
+    const explicitDelay = readGlobalNumber("__GPU_SURFACE_EVAL_BATCH_DELAY_MS__");
+    if (explicitDelay !== undefined) {
+        return Math.max(0, Math.min(32, explicitDelay));
+    }
+    return 0;
+}
+
 function scheduleFlush() {
     if (flushScheduled) return;
     flushScheduled = true;
-    queueMicrotask(() => {
+    const delayMs = getSurfaceEvalBatchDelayMs();
+    if (delayMs <= 0) {
+        queueMicrotask(() => {
+            flushScheduled = false;
+            void flushPendingJobs();
+        });
+        return;
+    }
+    setTimeout(() => {
         flushScheduled = false;
         void flushPendingJobs();
-    });
+    }, delayMs);
 }
 
 async function flushPendingJobs() {
@@ -610,5 +875,298 @@ export async function evaluateSurfaceMeshGPU(
             resolve,
         });
         scheduleFlush();
+    });
+}
+
+let hasWarnedGpuGridEvalFailure = false;
+
+interface PendingGridEvalJob {
+    surface: SupportedSurface;
+    gridDensityU: number;
+    gridDensityV: number;
+    uMin: number;
+    vMin: number;
+    du: number;
+    dv: number;
+    resolve: (result: { positions: Float32Array; normals: Float32Array } | null) => void;
+}
+
+let pendingGridJobs: PendingGridEvalJob[] = [];
+let gridFlushInFlight = false;
+let gridFlushScheduled = false;
+
+function getSurfaceGridEvalBatchDelayMs(): number {
+    const explicitDelay = readGlobalNumber("__GPU_SURFACE_GRID_BATCH_DELAY_MS__");
+    if (explicitDelay !== undefined) {
+        return Math.max(0, Math.min(32, explicitDelay));
+    }
+    return 0;
+}
+
+function scheduleGridFlush() {
+    if (gridFlushScheduled) return;
+    gridFlushScheduled = true;
+    const delayMs = getSurfaceGridEvalBatchDelayMs();
+    if (delayMs <= 0) {
+        queueMicrotask(() => {
+            gridFlushScheduled = false;
+            void flushPendingGridJobs();
+        });
+        return;
+    }
+    setTimeout(() => {
+        gridFlushScheduled = false;
+        void flushPendingGridJobs();
+    }, delayMs);
+}
+
+async function flushPendingGridJobs() {
+    if (gridFlushInFlight) return;
+    gridFlushInFlight = true;
+    try {
+        while (pendingGridJobs.length > 0) {
+            const jobs = pendingGridJobs;
+            pendingGridJobs = [];
+            await runDenseGridBatch(jobs);
+        }
+    } finally {
+        gridFlushInFlight = false;
+    }
+}
+
+async function runDenseGridBatch(jobs: PendingGridEvalJob[]) {
+    if (jobs.length === 0) return;
+    try {
+        const { device, pipeline } = await ensureGridPipeline();
+
+        const surfaceParamsF32 = new Float32Array(jobs.length * FLOATS_PER_SURFACE);
+        const surfaceParamsU32 = new Uint32Array(surfaceParamsF32.buffer);
+        const jobParamsU32 = new Uint32Array(jobs.length * 8);
+        const jobParamsF32 = new Float32Array(jobParamsU32.buffer);
+
+        let totalVerts = 0;
+        for (const job of jobs) {
+            totalVerts += (job.gridDensityU + 1) * (job.gridDensityV + 1);
+        }
+        const vertexJobIndex = new Uint32Array(totalVerts);
+        const ranges: Array<{ start: number; count: number }> = [];
+
+        let cursor = 0;
+        for (let jobIndex = 0; jobIndex < jobs.length; jobIndex++) {
+            const job = jobs[jobIndex];
+            const count = (job.gridDensityU + 1) * (job.gridDensityV + 1);
+            ranges.push({ start: cursor, count });
+            vertexJobIndex.fill(jobIndex, cursor, cursor + count);
+
+            writeSurfaceParams(surfaceParamsF32, surfaceParamsU32, jobIndex, job.surface);
+
+            const base = jobIndex * 8;
+            jobParamsU32[base + 0] = job.gridDensityU;
+            jobParamsU32[base + 1] = job.gridDensityV;
+            jobParamsU32[base + 2] = cursor;
+            jobParamsU32[base + 3] = jobIndex;
+            jobParamsF32[base + 4] = job.uMin;
+            jobParamsF32[base + 5] = job.vMin;
+            jobParamsF32[base + 6] = job.du;
+            jobParamsF32[base + 7] = job.dv;
+
+            cursor += count;
+        }
+
+        const outputBytes = totalVerts * 3 * 4;
+        const dispatchParams = new Uint32Array([totalVerts, 0, 0, 0]);
+
+        const surfacesInfo = ensureBuffer(
+            device,
+            gpuGridEvalCache.surfacesBuffer,
+            gpuGridEvalCache.surfacesCapacity,
+            surfaceParamsF32.byteLength,
+            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            "surface-eval-grid-surfaces"
+        );
+        gpuGridEvalCache.surfacesBuffer = surfacesInfo.buffer;
+        gpuGridEvalCache.surfacesCapacity = surfacesInfo.capacity;
+
+        const jobsInfo = ensureBuffer(
+            device,
+            gpuGridEvalCache.jobsBuffer,
+            gpuGridEvalCache.jobsCapacity,
+            jobParamsU32.byteLength,
+            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            "surface-eval-grid-jobs"
+        );
+        gpuGridEvalCache.jobsBuffer = jobsInfo.buffer;
+        gpuGridEvalCache.jobsCapacity = jobsInfo.capacity;
+
+        const vertexJobIndexInfo = ensureBuffer(
+            device,
+            gpuGridEvalCache.vertexJobIndexBuffer,
+            gpuGridEvalCache.vertexJobIndexCapacity,
+            vertexJobIndex.byteLength,
+            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+            "surface-eval-grid-vertex-job-index"
+        );
+        gpuGridEvalCache.vertexJobIndexBuffer = vertexJobIndexInfo.buffer;
+        gpuGridEvalCache.vertexJobIndexCapacity = vertexJobIndexInfo.capacity;
+
+        const positionsInfo = ensureBuffer(
+            device,
+            gpuGridEvalCache.positionsBuffer,
+            gpuGridEvalCache.positionsCapacity,
+            outputBytes,
+            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+            "surface-eval-grid-positions"
+        );
+        gpuGridEvalCache.positionsBuffer = positionsInfo.buffer;
+        gpuGridEvalCache.positionsCapacity = positionsInfo.capacity;
+
+        const normalsInfo = ensureBuffer(
+            device,
+            gpuGridEvalCache.normalsBuffer,
+            gpuGridEvalCache.normalsCapacity,
+            outputBytes,
+            GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+            "surface-eval-grid-normals"
+        );
+        gpuGridEvalCache.normalsBuffer = normalsInfo.buffer;
+        gpuGridEvalCache.normalsCapacity = normalsInfo.capacity;
+
+        const stagingPositionsInfo = ensureBuffer(
+            device,
+            gpuGridEvalCache.stagingPositionsBuffer,
+            gpuGridEvalCache.stagingPositionsCapacity,
+            outputBytes,
+            GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+            "surface-eval-grid-positions-staging"
+        );
+        gpuGridEvalCache.stagingPositionsBuffer = stagingPositionsInfo.buffer;
+        gpuGridEvalCache.stagingPositionsCapacity = stagingPositionsInfo.capacity;
+
+        const stagingNormalsInfo = ensureBuffer(
+            device,
+            gpuGridEvalCache.stagingNormalsBuffer,
+            gpuGridEvalCache.stagingNormalsCapacity,
+            outputBytes,
+            GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ,
+            "surface-eval-grid-normals-staging"
+        );
+        gpuGridEvalCache.stagingNormalsBuffer = stagingNormalsInfo.buffer;
+        gpuGridEvalCache.stagingNormalsCapacity = stagingNormalsInfo.capacity;
+
+        device.queue.writeBuffer(gpuGridEvalCache.surfacesBuffer, 0, surfaceParamsF32);
+        device.queue.writeBuffer(gpuGridEvalCache.jobsBuffer, 0, jobParamsU32);
+        device.queue.writeBuffer(gpuGridEvalCache.vertexJobIndexBuffer, 0, vertexJobIndex);
+        device.queue.writeBuffer(gpuGridEvalCache.dispatchParamsBuffer!, 0, dispatchParams);
+
+        const needsBindGroupRefresh =
+            !gpuGridEvalCache.bindGroup ||
+            gpuGridEvalCache.bindGroupRefs.surfaces !== gpuGridEvalCache.surfacesBuffer ||
+            gpuGridEvalCache.bindGroupRefs.jobs !== gpuGridEvalCache.jobsBuffer ||
+            gpuGridEvalCache.bindGroupRefs.vertexJobIndex !== gpuGridEvalCache.vertexJobIndexBuffer ||
+            gpuGridEvalCache.bindGroupRefs.dispatch !== gpuGridEvalCache.dispatchParamsBuffer ||
+            gpuGridEvalCache.bindGroupRefs.positions !== gpuGridEvalCache.positionsBuffer ||
+            gpuGridEvalCache.bindGroupRefs.normals !== gpuGridEvalCache.normalsBuffer;
+
+        if (needsBindGroupRefresh) {
+            gpuGridEvalCache.bindGroup = device.createBindGroup({
+                layout: pipeline.getBindGroupLayout(0),
+                entries: [
+                    { binding: 0, resource: { buffer: gpuGridEvalCache.surfacesBuffer } },
+                    { binding: 1, resource: { buffer: gpuGridEvalCache.jobsBuffer } },
+                    { binding: 2, resource: { buffer: gpuGridEvalCache.vertexJobIndexBuffer } },
+                    { binding: 3, resource: { buffer: gpuGridEvalCache.dispatchParamsBuffer! } },
+                    { binding: 4, resource: { buffer: gpuGridEvalCache.positionsBuffer } },
+                    { binding: 5, resource: { buffer: gpuGridEvalCache.normalsBuffer } },
+                ],
+            });
+            gpuGridEvalCache.bindGroupRefs.surfaces = gpuGridEvalCache.surfacesBuffer;
+            gpuGridEvalCache.bindGroupRefs.jobs = gpuGridEvalCache.jobsBuffer;
+            gpuGridEvalCache.bindGroupRefs.vertexJobIndex = gpuGridEvalCache.vertexJobIndexBuffer;
+            gpuGridEvalCache.bindGroupRefs.dispatch = gpuGridEvalCache.dispatchParamsBuffer;
+            gpuGridEvalCache.bindGroupRefs.positions = gpuGridEvalCache.positionsBuffer;
+            gpuGridEvalCache.bindGroupRefs.normals = gpuGridEvalCache.normalsBuffer;
+        }
+
+        const encoder = device.createCommandEncoder({ label: "surface-eval-grid-batch-encoder" });
+        const pass = encoder.beginComputePass({ label: "surface-eval-grid-batch-pass" });
+        pass.setPipeline(pipeline);
+        pass.setBindGroup(0, gpuGridEvalCache.bindGroup!);
+        pass.dispatchWorkgroups(Math.ceil(totalVerts / 256));
+        pass.end();
+
+        encoder.copyBufferToBuffer(gpuGridEvalCache.positionsBuffer, 0, gpuGridEvalCache.stagingPositionsBuffer, 0, outputBytes);
+        encoder.copyBufferToBuffer(gpuGridEvalCache.normalsBuffer, 0, gpuGridEvalCache.stagingNormalsBuffer, 0, outputBytes);
+        device.queue.submit([encoder.finish()]);
+
+        await Promise.all([
+            gpuGridEvalCache.stagingPositionsBuffer.mapAsync(GPUMapMode.READ, 0, outputBytes),
+            gpuGridEvalCache.stagingNormalsBuffer.mapAsync(GPUMapMode.READ, 0, outputBytes),
+        ]);
+
+        const positionsMapped = gpuGridEvalCache.stagingPositionsBuffer.getMappedRange(0, outputBytes);
+        const normalsMapped = gpuGridEvalCache.stagingNormalsBuffer.getMappedRange(0, outputBytes);
+        const positionsView = new Float32Array(positionsMapped);
+        const normalsView = new Float32Array(normalsMapped);
+
+        try {
+            for (let i = 0; i < jobs.length; i++) {
+                const { start, count } = ranges[i];
+                const base = start * 3;
+                const end = base + count * 3;
+                const positions = new Float32Array(count * 3);
+                const normals = new Float32Array(count * 3);
+                positions.set(positionsView.subarray(base, end));
+                normals.set(normalsView.subarray(base, end));
+                jobs[i].resolve({ positions, normals });
+            }
+        } finally {
+            gpuGridEvalCache.stagingPositionsBuffer.unmap();
+            gpuGridEvalCache.stagingNormalsBuffer.unmap();
+        }
+    } catch (err) {
+        if (!hasWarnedGpuGridEvalFailure) {
+            console.warn("[surface-eval-gpu] Dense grid GPU batch failed; falling back.", err);
+            hasWarnedGpuGridEvalFailure = true;
+        }
+        for (const job of jobs) {
+            job.resolve(null);
+        }
+    }
+}
+
+export async function evaluateSurfaceDenseGridGPU(
+    surface: Surface,
+    gridDensityU: number,
+    gridDensityV: number,
+    uMin: number,
+    vMin: number,
+    du: number,
+    dv: number
+): Promise<{ positions: Float32Array; normals: Float32Array } | null> {
+    if (!readGlobalBoolean("__ENABLE_GPU_SURFACE_GRID_EVAL__", true)) {
+        return null;
+    }
+    if (!isSupportedSurface(surface)) {
+        return null;
+    }
+
+    const vertexCount = (gridDensityU + 1) * (gridDensityV + 1);
+    const minVerts = Math.max(1024, Math.floor(readGlobalNumber("__GPU_SURFACE_GRID_EVAL_MIN_VERTS__") ?? 4096));
+    if (vertexCount < minVerts) {
+        return null;
+    }
+
+    return await new Promise((resolve) => {
+        pendingGridJobs.push({
+            surface,
+            gridDensityU,
+            gridDensityV,
+            uMin,
+            vMin,
+            du,
+            dv,
+            resolve,
+        });
+        scheduleGridFlush();
     });
 }

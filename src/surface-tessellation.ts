@@ -21,7 +21,7 @@ import {
     classifyAndBuildTrimGridTrianglesGPU,
 } from "./trim-grid-gpu";
 import { evaluateSurface, surfaceNormal } from "./surfaces";
-import { evaluateSurfaceMeshGPU } from "./surface-eval-gpu";
+import { evaluateSurfaceMeshGPU, evaluateSurfaceDenseGridGPU } from "./surface-eval-gpu";
 import { createRectangularUVBoundary } from "./uv-extraction";
 import {
     adaptiveRefineMesh,
@@ -769,6 +769,38 @@ export async function tessellateTrimmedSurface(
             allowPartialCellTriangles,
         });
         if (gpuTriangles && gpuTriangles.triangleCount > 0) {
+            const denseGpuEval = await evaluateSurfaceDenseGridGPU(
+                surface as any,
+                gridDensityU,
+                gridDensityV,
+                uMin,
+                vMin,
+                du,
+                dv
+            );
+            if (denseGpuEval) {
+                const uvs = new Float32Array(totalGridPoints * 2);
+                for (let j = 0; j <= gridDensityV; j++) {
+                    for (let i = 0; i <= gridDensityU; i++) {
+                        const idx = j * (gridDensityU + 1) + i;
+                        uvs[idx * 2 + 0] = uMin + i * du;
+                        uvs[idx * 2 + 1] = vMin + j * dv;
+                    }
+                }
+                if (debugTrim) {
+                    trimDebugLog(
+                        `[tessellateTrimmedSurface] GPU dense-grid eval accepted: ` +
+                        `verts=${totalGridPoints}, tris=${gpuTriangles.triangleCount}`
+                    );
+                }
+                return {
+                    positions: denseGpuEval.positions,
+                    normals: denseGpuEval.normals,
+                    indices: gpuTriangles.indices,
+                    uvs,
+                };
+            }
+
             const uvVerticesDense: Vec2[] = new Array(totalGridPoints);
             for (let j = 0; j <= gridDensityV; j++) {
                 for (let i = 0; i <= gridDensityU; i++) {

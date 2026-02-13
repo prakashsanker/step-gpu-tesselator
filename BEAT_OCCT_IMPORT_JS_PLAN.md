@@ -159,6 +159,15 @@ Gate:
 5. Sync minimization:
    - Reuse GPU buffers/pipelines across faces/models.
    - Avoid per-face mapAsync/readback inside inner loops when possible.
+6. GPU model-wide mesh assembly (single readback):
+   - Curved-face batches should write into one global GPU output (positions/normals/indices).
+   - Replace per-face CPU stitching with one batch-level readback + merge.
+7. GPU-side prefix-sum/offset pass:
+   - Compute per-face vertex/index offsets on GPU.
+   - Move index rebasing/compaction out of CPU loops.
+8. Fixed benchmark loop for each step:
+   - Run full canary first.
+   - Then run representative and track Electronic Enclosure speed ratio (`ours/ref` and `ref/ours`), not only absolute ms.
 
 Validation cadence for this track:
 - Per step: `npm run -s bench:canary` + targeted visual checks (`c4-surfaces/*`, `c6-trimmed/*`, `VM-001`).
@@ -651,3 +660,74 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
   - This removes a real CPU↔GPU orchestration tax and improved the Electronic Enclosure slowdown multiple.
   - Absolute runtime remained noisy run-to-run; relative multiple is the metric to track.
   - Remaining gap is still dominated by load path + large non-load curved/trimmed throughput work.
+
+### 2026-02-13 M3 Step: Dense-Grid GPU Surface Evaluation for Fused Trim Path
+
+- Optimization implemented:
+  - Added dense-grid GPU surface evaluation path in `src/surface-eval-gpu.ts`:
+    - `evaluateSurfaceDenseGridGPU(...)`
+  - For fused trim classify+triangle-build faces, we now:
+    - evaluate dense-grid positions/normals directly on GPU from grid params,
+    - avoid CPU `Vec2[]` vertex materialization before evaluation.
+  - Wired in `src/surface-tessellation.ts` for the fused GPU trim path, with fallback to existing evaluation path.
+
+- Validation:
+  - `npm run -s bench:canary`
+    - pass `80/80`, quality gate pass.
+    - wins vs `occt-import-js`: `80/80`
+    - speedup median: `4.56x faster`
+  - `npm run -s bench:representative`
+    - Electronic Enclosure: `7279.1ms` vs ref `3082.5ms` (`2.36x slower`)
+    - VM-001: `211.4ms` vs ref `171.7ms` (`1.23x slower`)
+    - wins vs `occt-import-js`: `4/6`
+    - speedup median: `2.68x faster`
+    - loadStepFile share (Electronic Enclosure): `37.4%` (`2722.1ms / 7279.1ms`)
+    - trend note: ours improved in absolute time, but slowdown multiple vs ref stayed effectively flat due faster ref in this run.
+
+- Takeaway:
+  - This reduces CPU orchestration/object churn in the fused trim path.
+  - It did not create the expected representative-speedup multiple gain by itself.
+  - Next leverage remains larger batch-level GPU fusion (fewer per-face sync points) plus load-path work.
+
+### 2026-02-13 M4 Step (In Progress): GPU Curved-Batch Assembly + GPU Offsets
+
+- Optimization being implemented:
+  - Add GPU batch mesh assembly for curved-face model batches with a single batch readback.
+  - Add GPU-side prefix-sum offsets so per-face index rebasing/compaction is not CPU-stitched.
+- Validation protocol for this step:
+  - Run full canary.
+  - Run representative.
+  - Track Electronic Enclosure speed ratio trend (`ref/ours` and `ours/ref`) after each run.
+
+### 2026-02-13 M4 Step: GPU Curved-Batch Assembly + GPU Offset Pass (Initial Run)
+
+- Optimization implemented in code:
+  - Added `src/mesh-batch-assembly-gpu.ts`:
+    - GPU prefix-sum pass computes per-face vertex/index offsets.
+    - GPU assembly pass rebases indices and compacts curved-face batch meshes into one global output.
+    - Single staging readback (`mapAsync`) for combined positions+indices payload.
+  - Wired curved-face batching in `src/occ-test.ts` to use GPU assembly when enabled.
+  - Added runtime gate:
+    - `__ENABLE_GPU_CURVED_BATCH_ASSEMBLY__` (default ties to perf geometry-only mode).
+
+- Validation:
+  - `npm run -s bench:canary`
+    - successful: `80/80`
+    - wins vs `occt-import-js`: `78/80`
+    - speedup median: `4.45x faster`
+  - `npm run -s bench:representative`
+    - Electronic Enclosure: `ours=8050.4ms`, `ref=3758.5ms`
+      - `ours/ref = 2.14x slower`
+      - `ref/ours = 0.467x`
+    - VM-001: `ours=286.4ms`, `ref=192.3ms` (`1.49x slower`)
+    - wins vs `occt-import-js`: `4/6`
+    - speedup median: `2.70x faster`
+
+- Electronic Enclosure trend vs previous representative sample:
+  - absolute runtime: ours `+271.5ms` slower, ref `+143.4ms` slower
+  - ratio: slightly improved from `2.15x slower` to `2.14x slower` (`ref/ours` improved by `1.005x`)
+  - triangle ratio unchanged (`3.649x`)
+
+- Takeaway:
+  - Curved-batch CPU stitching moved to GPU offsets+assembly path without correctness failures in canary.
+  - Representative slowdown multiple improved only marginally; more GPU-side fusion is still required.

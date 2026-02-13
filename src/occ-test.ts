@@ -87,6 +87,7 @@ import {
   type TrimmedSurfaceBuildOptions,
 } from './surface-tessellation';
 import { computeSmoothNormalsGPUFlat } from './smooth-normals-gpu';
+import { assembleMeshBatchGPU } from './mesh-batch-assembly-gpu';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
@@ -4713,6 +4714,31 @@ function tessellatedMeshToVerticesAndTriangles(mesh: { positions: Float32Array; 
   return { vertices, triangles };
 }
 
+function faceMeshToFlatArrays(result: { vertices: Vec3[]; triangles: number[][] }): {
+  positions: Float32Array;
+  indices: Uint32Array;
+} {
+  const positions = new Float32Array(result.vertices.length * 3);
+  for (let i = 0; i < result.vertices.length; i++) {
+    const v = result.vertices[i];
+    const base = i * 3;
+    positions[base + 0] = v[0];
+    positions[base + 1] = v[1];
+    positions[base + 2] = v[2];
+  }
+
+  const indices = new Uint32Array(result.triangles.length * 3);
+  for (let i = 0; i < result.triangles.length; i++) {
+    const tri = result.triangles[i];
+    const base = i * 3;
+    indices[base + 0] = tri[0];
+    indices[base + 1] = tri[1];
+    indices[base + 2] = tri[2];
+  }
+
+  return { positions, indices };
+}
+
 function topAbsStateToValue(state: any): number | undefined {
   if (typeof state === 'number') return state;
   if (state && typeof state === 'object' && typeof state.value === 'number') {
@@ -8242,6 +8268,18 @@ async function tessellateOCCShape(
     1,
     Math.min(16, Math.floor(readGlobalNumber('__CURVED_FACE_BATCH_SIZE__') ?? 6))
   );
+  const enableModelLevelCurvedBatching = readGlobalBoolean(
+    '__ENABLE_MODEL_LEVEL_CURVED_BATCHING__',
+    preferGeometryOnlyLoad
+  );
+  const enableGpuCurvedBatchAssembly = readGlobalBoolean(
+    '__ENABLE_GPU_CURVED_BATCH_ASSEMBLY__',
+    preferGeometryOnlyLoad
+  );
+  const modelLevelCurvedBatchSize = Math.max(
+    curvedFaceBatchSize,
+    Math.min(64, Math.floor(readGlobalNumber('__MODEL_LEVEL_CURVED_BATCH_SIZE__') ?? 24))
+  );
   const FACE_DEBUG_IDS = readFaceIdsFromGlobal('__FACE_DEBUG_IDS__', [14, 63, 64, 65, 66, 994]);
   const FACE_DEBUG_MODE = readDebugModeFromGlobal('__FACE_DEBUG_MODE__', 'off');
 
@@ -8257,6 +8295,7 @@ async function tessellateOCCShape(
   const shouldCollectDiagnostics = Array.isArray(faceDiagnosticsOut);
   const curvedSurfaceTypes = new Set(['Cylinder', 'Sphere', 'Cone', 'Torus', 'BSplineSurface']);
   const batchingAllowed = enableCurvedFaceBatching && FACE_DEBUG_MODE === 'off' && !targetFaceSet;
+  const claimedByModelBatch = new Set<number>();
   // Debug skip controls kept near tessellation loop for quick manual toggles.
   const SKIP_TORUS_FACES = false;
   const SKIP_FACE_10 = false;
@@ -8333,9 +8372,20 @@ async function tessellateOCCShape(
 
   if (batchingAllowed && curvedFaceBatchSize > 1) {
     console.log(`[Tessellate] Curved-face batching enabled (batchSize=${curvedFaceBatchSize})`);
+    if (enableGpuCurvedBatchAssembly) {
+      console.log('[Tessellate] GPU curved-batch mesh assembly enabled (GPU offsets + single readback)');
+    }
+    if (enableModelLevelCurvedBatching && modelLevelCurvedBatchSize > curvedFaceBatchSize) {
+      console.log(
+        `[Tessellate] Model-level curved batching enabled (batchSize=${modelLevelCurvedBatchSize})`
+      );
+    }
   }
 
   for (let faceCursor = 0; faceCursor < faces.length; faceCursor++) {
+    if (claimedByModelBatch.has(faceCursor)) {
+      continue;
+    }
     const face = faces[faceCursor];
     const faceStart = performance.now();
 
@@ -8404,17 +8454,40 @@ async function tessellateOCCShape(
 
     if (batchingAllowed && curvedFaceBatchSize > 1 && curvedSurfaceTypes.has(face.surfaceType)) {
       const batch: Array<{ face: FaceWithEdgesInfo; faceStart: number }> = [{ face, faceStart }];
-      while (batch.length < curvedFaceBatchSize && faceCursor + 1 < faces.length) {
-        const candidate = faces[faceCursor + 1];
-        if (!curvedSurfaceTypes.has(candidate.surfaceType)) break;
+      const targetBatchSize = enableModelLevelCurvedBatching
+        ? modelLevelCurvedBatchSize
+        : curvedFaceBatchSize;
+      let scanCursor = faceCursor + 1;
+      while (batch.length < targetBatchSize && scanCursor < faces.length) {
+        if (enableModelLevelCurvedBatching && claimedByModelBatch.has(scanCursor)) {
+          scanCursor++;
+          continue;
+        }
+        const candidate = faces[scanCursor];
+        if (!curvedSurfaceTypes.has(candidate.surfaceType)) {
+          if (!enableModelLevelCurvedBatching) {
+            break;
+          }
+          scanCursor++;
+          continue;
+        }
         if ((SKIP_TORUS_FACES && candidate.surfaceType === 'Torus') ||
             (SKIP_FACE_10 && candidate.faceIndex === 10) ||
             (SKIP_FACE_16 && candidate.faceIndex === 16) ||
             (SKIP_FACE_17 && candidate.faceIndex === 17)) {
-          break;
+          if (!enableModelLevelCurvedBatching) {
+            break;
+          }
+          scanCursor++;
+          continue;
         }
         batch.push({ face: candidate, faceStart: performance.now() });
-        faceCursor++;
+        if (enableModelLevelCurvedBatching) {
+          claimedByModelBatch.add(scanCursor);
+        } else {
+          faceCursor = scanCursor;
+        }
+        scanCursor++;
       }
 
       const batchResults = await Promise.all(
@@ -8428,12 +8501,93 @@ async function tessellateOCCShape(
         })
       );
 
-      for (const batchResult of batchResults) {
-        if (!batchResult.ok) {
-          recordFaceError(batchResult.face, batchResult.faceStart, batchResult.error);
-        } else {
-          appendFaceResult(batchResult.face, batchResult.result, batchResult.faceStart);
+      const failedBatchResults = batchResults.filter(
+        (batchResult): batchResult is {
+          ok: false;
+          face: FaceWithEdgesInfo;
+          faceStart: number;
+          error: unknown;
+        } => !batchResult.ok
+      );
+      const successfulBatchResults = batchResults.filter(
+        (batchResult): batchResult is {
+          ok: true;
+          face: FaceWithEdgesInfo;
+          faceStart: number;
+          result: { vertices: Vec3[]; triangles: number[][] };
+        } => batchResult.ok
+      );
+
+      for (const failedBatchResult of failedBatchResults) {
+        recordFaceError(failedBatchResult.face, failedBatchResult.faceStart, failedBatchResult.error);
+      }
+
+      if (
+        enableGpuCurvedBatchAssembly &&
+        successfulBatchResults.length > 1
+      ) {
+        const batchFaces = successfulBatchResults.map((batchResult) => {
+          const flat = faceMeshToFlatArrays(batchResult.result);
+          return {
+            ...batchResult,
+            flat,
+          };
+        });
+
+        const assembledBatch = await assembleMeshBatchGPU(
+          batchFaces.map((batchFace) => ({
+            positions: batchFace.flat.positions,
+            indices: batchFace.flat.indices,
+            reverseWinding: !!batchFace.face.isReversed,
+          }))
+        );
+
+        if (assembledBatch) {
+          for (let i = 0; i < assembledBatch.positions.length; i += 3) {
+            allVertices.push([
+              assembledBatch.positions[i + 0],
+              assembledBatch.positions[i + 1],
+              assembledBatch.positions[i + 2],
+            ]);
+          }
+          for (let i = 0; i < assembledBatch.indices.length; i++) {
+            allIndices.push(assembledBatch.indices[i] + vertexOffset);
+          }
+
+          for (let batchIndex = 0; batchIndex < batchFaces.length; batchIndex++) {
+            const batchFace = batchFaces[batchIndex];
+            const vertexCount = assembledBatch.vertexCounts[batchIndex];
+            const triangleCount = Math.floor(assembledBatch.indexCounts[batchIndex] / 3);
+            const faceColor = batchFace.face.color || { r: 0.4, g: 0.6, b: 1.0 };
+            if (batchFace.face.color) hasAnyColor = true;
+            for (let v = 0; v < vertexCount; v++) {
+              allColors.push(faceColor);
+            }
+
+            const faceTime = performance.now() - batchFace.faceStart;
+            if (faceTime > 500) {
+              console.warn(
+                `[Tessellate] SLOW face ${batchFace.face.faceIndex} (${batchFace.face.surfaceType}): ` +
+                `${(faceTime / 1000).toFixed(2)}s, ${vertexCount} verts, ${triangleCount} tris`
+              );
+            }
+            pushFaceDiagnostic(
+              batchFace.face,
+              'ok',
+              faceTime,
+              vertexCount,
+              triangleCount
+            );
+            processedCount++;
+          }
+
+          vertexOffset += Math.floor(assembledBatch.positions.length / 3);
+          continue;
         }
+      }
+
+      for (const successfulBatchResult of successfulBatchResults) {
+        appendFaceResult(successfulBatchResult.face, successfulBatchResult.result, successfulBatchResult.faceStart);
       }
       continue;
     }
