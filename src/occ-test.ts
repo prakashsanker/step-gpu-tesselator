@@ -7858,6 +7858,12 @@ async function tessellateOCCShape(
 ): Promise<Mesh> {
   const shapeStart = performance.now();
   console.log(`[Tessellate] Starting tessellation of ${faces.length} faces...`);
+  const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+  const enableCurvedFaceBatching = readGlobalBoolean('__ENABLE_CURVED_FACE_BATCHING__', preferGeometryOnlyLoad);
+  const curvedFaceBatchSize = Math.max(
+    1,
+    Math.min(16, Math.floor(readGlobalNumber('__CURVED_FACE_BATCH_SIZE__') ?? 6))
+  );
   const FACE_DEBUG_IDS = readFaceIdsFromGlobal('__FACE_DEBUG_IDS__', [14, 63, 64, 65, 66, 994]);
   const FACE_DEBUG_MODE = readDebugModeFromGlobal('__FACE_DEBUG_MODE__', 'off');
 
@@ -7872,6 +7878,13 @@ async function tessellateOCCShape(
   let errorCount = 0;
   const progressInterval = Math.max(1, Math.floor(faces.length / 20)); // Log every 5%
   const shouldCollectDiagnostics = Array.isArray(faceDiagnosticsOut);
+  const curvedSurfaceTypes = new Set(['Cylinder', 'Sphere', 'Cone', 'Torus', 'BSplineSurface']);
+  const batchingAllowed = enableCurvedFaceBatching && FACE_DEBUG_MODE === 'off' && !targetFaceSet;
+  // Debug skip controls kept near tessellation loop for quick manual toggles.
+  const SKIP_TORUS_FACES = false;
+  const SKIP_FACE_10 = false;
+  const SKIP_FACE_16 = false;
+  const SKIP_FACE_17 = false;
 
   const pushFaceDiagnostic = (
     face: FaceWithEdgesInfo,
@@ -7897,205 +7910,210 @@ async function tessellateOCCShape(
     });
   };
 
-  for (const face of faces) {
-    let faceStart = performance.now();
-    try {
-      if (targetFaceSet && !targetFaceSet.has(face.faceIndex)) {
-        // In targeted diagnostic mode, skip non-target faces quietly so outputs stay focused.
-        skippedCount++;
-        processedCount++;
-        continue;
+  const appendFaceResult = (
+    face: FaceWithEdgesInfo,
+    result: { vertices: Vec3[]; triangles: number[][] },
+    faceStart: number
+  ) => {
+    // Compute per-vertex normals by averaging face normals
+    const normalStart = performance.now();
+    const vertexNormals: Vec3[] = result.vertices.map(() => [0, 0, 0] as Vec3);
+
+    for (const tri of result.triangles) {
+      const v0 = result.vertices[tri[0]];
+      const v1 = result.vertices[tri[1]];
+      const v2 = result.vertices[tri[2]];
+      const faceNormal = computeTriangleNormal(v0, v1, v2);
+      for (const idx of tri) {
+        vertexNormals[idx][0] += faceNormal[0];
+        vertexNormals[idx][1] += faceNormal[1];
+        vertexNormals[idx][2] += faceNormal[2];
       }
-      const isFaceDebugTarget = FACE_DEBUG_IDS.has(face.faceIndex);
-      if (FACE_DEBUG_MODE === 'skip' && isFaceDebugTarget) {
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'face-debug-skip');
-        skippedCount++;
-        processedCount++;
-        continue;
+    }
+
+    for (const n of vertexNormals) {
+      const len = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
+      if (len > 1e-10) {
+        n[0] /= len;
+        n[1] /= len;
+        n[2] /= len;
+      } else {
+        n[0] = 0;
+        n[1] = 0;
+        n[2] = 1;
       }
-      if (FACE_DEBUG_MODE === 'only' && !isFaceDebugTarget) {
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'face-debug-only');
-        skippedCount++;
-        processedCount++;
-        continue;
+    }
+
+    if (face.isReversed) {
+      for (const n of vertexNormals) {
+        n[0] = -n[0];
+        n[1] = -n[1];
+        n[2] = -n[2];
       }
-      if (FACE_DEBUG_MODE === 'only' && isFaceDebugTarget) {
-        console.warn(`[FACE DEBUG] keep-only face=${face.faceIndex} type=${face.surfaceType}`);
+      for (const tri of result.triangles) {
+        const temp = tri[1];
+        tri[1] = tri[2];
+        tri[2] = temp;
+      }
+      tessellationVerboseLog(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
+    }
+
+    tessellationProfile.computeNormals.total += performance.now() - normalStart;
+    tessellationProfile.computeNormals.calls++;
+
+    const faceColor = face.color || { r: 0.4, g: 0.6, b: 1.0 };
+    if (face.color) hasAnyColor = true;
+
+    for (let i = 0; i < result.vertices.length; i++) {
+      allVertices.push(result.vertices[i]);
+      allNormals.push(vertexNormals[i]);
+      allColors.push(faceColor);
+    }
+
+    for (const tri of result.triangles) {
+      allIndices.push(tri[0] + vertexOffset, tri[1] + vertexOffset, tri[2] + vertexOffset);
+    }
+
+    vertexOffset += result.vertices.length;
+    processedCount++;
+
+    const faceTime = performance.now() - faceStart;
+    if (faceTime > 500) {
+      console.warn(`[Tessellate] SLOW face ${face.faceIndex} (${face.surfaceType}): ${(faceTime / 1000).toFixed(2)}s, ${result.vertices.length} verts, ${result.triangles.length} tris`);
+    }
+    pushFaceDiagnostic(face, 'ok', faceTime, result.vertices.length, result.triangles.length);
+  };
+
+  const recordFaceError = (face: FaceWithEdgesInfo, faceStart: number, e: unknown) => {
+    console.error(`[Tessellate] Error tessellating face ${face.faceIndex}:`, e);
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    pushFaceDiagnostic(face, 'error', performance.now() - faceStart, 0, 0, errorMsg);
+    errorCount++;
+    processedCount++;
+  };
+
+  if (batchingAllowed && curvedFaceBatchSize > 1) {
+    console.log(`[Tessellate] Curved-face batching enabled (batchSize=${curvedFaceBatchSize})`);
+  }
+
+  for (let faceCursor = 0; faceCursor < faces.length; faceCursor++) {
+    const face = faces[faceCursor];
+    const faceStart = performance.now();
+
+    if (targetFaceSet && !targetFaceSet.has(face.faceIndex)) {
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+
+    const isFaceDebugTarget = FACE_DEBUG_IDS.has(face.faceIndex);
+    if (FACE_DEBUG_MODE === 'skip' && isFaceDebugTarget) {
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'face-debug-skip');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+    if (FACE_DEBUG_MODE === 'only' && !isFaceDebugTarget) {
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'face-debug-only');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+    if (FACE_DEBUG_MODE === 'only' && isFaceDebugTarget) {
+      console.warn(`[FACE DEBUG] keep-only face=${face.faceIndex} type=${face.surfaceType}`);
+    }
+
+    if (processedCount % progressInterval === 0 || processedCount < 10) {
+      const elapsed = ((performance.now() - shapeStart) / 1000).toFixed(1);
+      const pct = ((processedCount / faces.length) * 100).toFixed(1);
+      console.log(`[Tessellate] Face ${processedCount}/${faces.length} (${pct}%) - ${elapsed}s elapsed - type: ${face.surfaceType}`);
+      if (onProgress) {
+        const overallPct = Math.round(20 + (processedCount / faces.length) * 80);
+        onProgress(overallPct);
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+
+    if (SKIP_TORUS_FACES && face.surfaceType === 'Torus') {
+      console.log(`[Tessellate] SKIPPING Torus face ${face.faceIndex} (debug flag)`);
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-torus');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+    if (SKIP_FACE_10 && face.faceIndex === 10) {
+      console.log(`[Tessellate] SKIPPING Face 10 (debug flag) - Cylinder with V starting at 0`);
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-10');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+    if (SKIP_FACE_16 && face.faceIndex === 16) {
+      console.log(`[Tessellate] SKIPPING Face 16 (debug flag) - Cylinder`);
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-16');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+    if (SKIP_FACE_17 && face.faceIndex === 17) {
+      console.log(`[Tessellate] SKIPPING Face 17 (debug flag) - Cylinder`);
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-17');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+
+    if (batchingAllowed && curvedFaceBatchSize > 1 && curvedSurfaceTypes.has(face.surfaceType)) {
+      const batch: Array<{ face: FaceWithEdgesInfo; faceStart: number }> = [{ face, faceStart }];
+      while (batch.length < curvedFaceBatchSize && faceCursor + 1 < faces.length) {
+        const candidate = faces[faceCursor + 1];
+        if (!curvedSurfaceTypes.has(candidate.surfaceType)) break;
+        if ((SKIP_TORUS_FACES && candidate.surfaceType === 'Torus') ||
+            (SKIP_FACE_10 && candidate.faceIndex === 10) ||
+            (SKIP_FACE_16 && candidate.faceIndex === 16) ||
+            (SKIP_FACE_17 && candidate.faceIndex === 17)) {
+          break;
+        }
+        batch.push({ face: candidate, faceStart: performance.now() });
+        faceCursor++;
       }
 
-      // Progress logging
-      if (processedCount % progressInterval === 0 || processedCount < 10) {
-        const elapsed = ((performance.now() - shapeStart) / 1000).toFixed(1);
-        const pct = ((processedCount / faces.length) * 100).toFixed(1);
-        console.log(`[Tessellate] Face ${processedCount}/${faces.length} (${pct}%) - ${elapsed}s elapsed - type: ${face.surfaceType}`);
-        if (onProgress) {
-          // Map tessellation progress to 20-100% of overall progress
-          const overallPct = Math.round(20 + (processedCount / faces.length) * 80);
-          onProgress(overallPct);
-          // Yield to let the UI update
-          await new Promise(r => setTimeout(r, 0));
+      const batchResults = await Promise.all(
+        batch.map(async ({ face: batchFace, faceStart: batchFaceStart }) => {
+          try {
+            const result = await tessellateCurvedFaceFromOCC(batchFace);
+            return { ok: true as const, face: batchFace, faceStart: batchFaceStart, result };
+          } catch (error) {
+            return { ok: false as const, face: batchFace, faceStart: batchFaceStart, error };
+          }
+        })
+      );
+
+      for (const batchResult of batchResults) {
+        if (!batchResult.ok) {
+          recordFaceError(batchResult.face, batchResult.faceStart, batchResult.error);
+        } else {
+          appendFaceResult(batchResult.face, batchResult.result, batchResult.faceStart);
         }
       }
+      continue;
+    }
+
+    try {
       let result: { vertices: Vec3[]; triangles: number[][] };
-
-      // DEBUG FLAG: Set to true to skip torus faces for isolation testing
-      const SKIP_TORUS_FACES = false;
-
-      // DEBUG FLAGS: Set to true to skip specific faces for isolation testing
-      // Cylinder faces summary:
-      // Face 1:  V=[4.75, 85.00], reversed=false (half cylinder)
-      // Face 2:  V=[4.75, 57.50], reversed=false (full cylinder, crosses seam)
-      // Face 4:  V=[2.24, 4.99],  reversed=false (half cylinder, short)
-      // Face 7:  V=[2.24, 4.99],  reversed=false (full cylinder, short)
-      // Face 10: V=[0.00, 27.25], reversed=true  ⚠️ V STARTS AT 0!
-      // Face 13: V=[4.15, 54.40], reversed=true  (half cylinder)
-      // Face 15: V=[4.15, 62.37], reversed=true  (full cylinder)
-      // Face 16: V=?,            reversed=true  (hole wall)
-      // Face 17: V=?,            reversed=true  (hole wall)
-      const SKIP_FACE_10 = false;  // Fixed: 3D bbox filtering now in tessellateTrimmedSurface
-      const SKIP_FACE_16 = false;  // Hole wall cylinder
-      const SKIP_FACE_17 = false;  // Hole wall cylinder
-
-      if (SKIP_TORUS_FACES && face.surfaceType === 'Torus') {
-        console.log(`[Tessellate] SKIPPING Torus face ${face.faceIndex} (debug flag)`);
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-torus');
-        skippedCount++;
-        processedCount++;
-        continue;
-      }
-
-      if (SKIP_FACE_10 && face.faceIndex === 10) {
-        console.log(`[Tessellate] SKIPPING Face 10 (debug flag) - Cylinder with V starting at 0`);
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-10');
-        skippedCount++;
-        processedCount++;
-        continue;
-      }
-
-      if (SKIP_FACE_16 && face.faceIndex === 16) {
-        console.log(`[Tessellate] SKIPPING Face 16 (debug flag) - Cylinder`);
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-16');
-        skippedCount++;
-        processedCount++;
-        continue;
-      }
-
-      if (SKIP_FACE_17 && face.faceIndex === 17) {
-        console.log(`[Tessellate] SKIPPING Face 17 (debug flag) - Cylinder`);
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-17');
-        skippedCount++;
-        processedCount++;
-        continue;
-      }
-
       if (face.surfaceType === 'Plane') {
         result = await tessellatePlanarFaceFromOCC(face, triangulationMethod);
-      } else if (['Cylinder', 'Sphere', 'Cone', 'Torus', 'BSplineSurface'].includes(face.surfaceType)) {
-        // 3D bbox filtering for cylinders is now done inside tessellateTrimmedSurface
-        // during grid generation, which produces better results than post-filtering
+      } else if (curvedSurfaceTypes.has(face.surfaceType)) {
         result = await tessellateCurvedFaceFromOCC(face);
       } else {
-        // Skip unsupported surface types
         pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, `unsupported-surface:${face.surfaceType}`);
         skippedCount++;
         processedCount++;
         continue;
       }
-
-      // Compute per-vertex normals by averaging face normals
-      const normalStart = performance.now();
-
-      // First, initialize normals to zero
-      const vertexNormals: Vec3[] = result.vertices.map(() => [0, 0, 0] as Vec3);
-
-      // Accumulate face normals at each vertex
-      for (const tri of result.triangles) {
-        const v0 = result.vertices[tri[0]];
-        const v1 = result.vertices[tri[1]];
-        const v2 = result.vertices[tri[2]];
-        const faceNormal = computeTriangleNormal(v0, v1, v2);
-
-        // Add face normal to each vertex of the triangle
-        for (const idx of tri) {
-          vertexNormals[idx][0] += faceNormal[0];
-          vertexNormals[idx][1] += faceNormal[1];
-          vertexNormals[idx][2] += faceNormal[2];
-        }
-      }
-
-      // Normalize the accumulated normals
-      for (const n of vertexNormals) {
-        const len = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-        if (len > 1e-10) {
-          n[0] /= len;
-          n[1] /= len;
-          n[2] /= len;
-        } else {
-          // Default to up vector if degenerate
-          n[0] = 0;
-          n[1] = 0;
-          n[2] = 1;
-        }
-      }
-
-      // Handle REVERSED face orientation
-      // When a face is REVERSED, the surface normal should point in the opposite direction.
-      // This is common for hole inner walls - the cylinder surface naturally faces outward,
-      // but for a hole it should face inward.
-      if (face.isReversed) {
-        // Flip all normals
-        for (const n of vertexNormals) {
-          n[0] = -n[0];
-          n[1] = -n[1];
-          n[2] = -n[2];
-        }
-        // Reverse triangle winding (swap indices 1 and 2) so front face is correct
-        for (const tri of result.triangles) {
-          const temp = tri[1];
-          tri[1] = tri[2];
-          tri[2] = temp;
-        }
-        tessellationVerboseLog(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
-      }
-
-      tessellationProfile.computeNormals.total += performance.now() - normalStart;
-      tessellationProfile.computeNormals.calls++;
-
-      // Add vertices, normals and assign face color to each vertex
-      const faceColor = face.color || { r: 0.4, g: 0.6, b: 1.0 }; // Default blue-ish
-      if (face.color) {
-        hasAnyColor = true;
-      }
-
-      for (let i = 0; i < result.vertices.length; i++) {
-        allVertices.push(result.vertices[i]);
-        allNormals.push(vertexNormals[i]);
-        allColors.push(faceColor);
-      }
-
-      for (const tri of result.triangles) {
-        allIndices.push(
-          tri[0] + vertexOffset,
-          tri[1] + vertexOffset,
-          tri[2] + vertexOffset
-        );
-      }
-
-      vertexOffset += result.vertices.length;
-      processedCount++;
-
-      // Log slow faces
-      const faceTime = performance.now() - faceStart;
-      if (faceTime > 500) {
-        console.warn(`[Tessellate] SLOW face ${face.faceIndex} (${face.surfaceType}): ${(faceTime/1000).toFixed(2)}s, ${result.vertices.length} verts, ${result.triangles.length} tris`);
-      }
-      pushFaceDiagnostic(face, 'ok', faceTime, result.vertices.length, result.triangles.length);
+      appendFaceResult(face, result, faceStart);
     } catch (e) {
-      console.error(`[Tessellate] Error tessellating face ${face.faceIndex}:`, e);
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      pushFaceDiagnostic(face, 'error', performance.now() - faceStart, 0, 0, errorMsg);
-      errorCount++;
-      processedCount++;
+      recordFaceError(face, faceStart, e);
     }
   }
 
