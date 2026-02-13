@@ -16,6 +16,7 @@
 import { constrainedDelaunayTriangulation, cdtWithHoles } from "./cdt-gpu";
 import { triangulateWithHoles } from "./triangulate-fast";
 import { evaluateSurface, surfaceNormal } from "./surfaces";
+import { evaluateSurfaceMeshGPU } from "./surface-eval-gpu";
 import { createRectangularUVBoundary } from "./uv-extraction";
 import {
     adaptiveRefineMesh,
@@ -1110,21 +1111,47 @@ function isPointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
 /**
  * Evaluate UV mesh vertices to 3D positions and normals
  */
-function evaluateUVMesh(
+async function evaluateUVMesh(
     surface: Surface,
     uvVertices: Vec2[],
     triangleIndices: [number, number, number][]
-): TessellatedMesh {
+): Promise<TessellatedMesh> {
     const numVertices = uvVertices.length;
 
-    // Allocate arrays
+    // Allocate UVs + indices once regardless of eval path.
+    const uvs = new Float32Array(numVertices * 2);
+    const indices = new Uint32Array(triangleIndices.length * 3);
+
+    for (let i = 0; i < numVertices; i++) {
+        const [u, v] = uvVertices[i];
+        uvs[i * 2 + 0] = u;
+        uvs[i * 2 + 1] = v;
+    }
+
+    for (let i = 0; i < triangleIndices.length; i++) {
+        const [a, b, c] = triangleIndices[i];
+        indices[i * 3 + 0] = a;
+        indices[i * 3 + 1] = b;
+        indices[i * 3 + 2] = c;
+    }
+
+    // Try GPU evaluation for large primitive faces (CPU fallback below).
+    const gpuEvaluated = await evaluateSurfaceMeshGPU(surface as any, uvVertices);
+    if (gpuEvaluated) {
+        return {
+            positions: gpuEvaluated.positions,
+            normals: gpuEvaluated.normals,
+            indices,
+            uvs,
+        };
+    }
+
     const positions = new Float32Array(numVertices * 3);
     const normals = new Float32Array(numVertices * 3);
-    const uvs = new Float32Array(numVertices * 2);
 
     let nanCount = 0;
 
-    // Evaluate each vertex
+    // CPU fallback path.
     for (let i = 0; i < numVertices; i++) {
         const [u, v] = uvVertices[i];
 
@@ -1150,22 +1177,10 @@ function evaluateUVMesh(
         normals[i * 3 + 1] = norm[1];
         normals[i * 3 + 2] = norm[2];
 
-        // Store UVs
-        uvs[i * 2 + 0] = u;
-        uvs[i * 2 + 1] = v;
     }
 
     if (nanCount > 0) {
         console.warn(`[evaluateUVMesh] ${nanCount}/${numVertices} vertices had NaN positions`);
-    }
-
-    // Build index buffer
-    const indices = new Uint32Array(triangleIndices.length * 3);
-    for (let i = 0; i < triangleIndices.length; i++) {
-        const [a, b, c] = triangleIndices[i];
-        indices[i * 3 + 0] = a;
-        indices[i * 3 + 1] = b;
-        indices[i * 3 + 2] = c;
     }
 
     return { positions, normals, indices, uvs };

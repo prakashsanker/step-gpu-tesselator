@@ -86,6 +86,7 @@ import {
   tessellateTrimmedSurface,
   type TrimmedSurfaceBuildOptions,
 } from './surface-tessellation';
+import { computeSmoothNormalsGPUFlat } from './smooth-normals-gpu';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
@@ -7428,10 +7429,81 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           const vBounds = getLoopComponentBounds(loops.uvOuter, 1);
           const uSpanLocal = uBounds.uMax - uBounds.uMin;
           const vSpanLocal = vBounds.max - vBounds.min;
-          const defaultUSamples = uSpanLocal > 5.5 ? 64 : 48;
-          const defaultVSamples = Math.max(3, Math.min(12, Math.ceil(vSpanLocal / 2)));
-          const numUSamples = Math.max(16, Math.floor(readGlobalNumber('__CYLINDER_PATCH_U_SAMPLES__') ?? defaultUSamples));
-          const numVSamples = Math.max(2, Math.floor(readGlobalNumber('__CYLINDER_PATCH_V_SAMPLES__') ?? defaultVSamples));
+          const uSpanAbs = Math.max(1e-6, Math.abs(uSpanLocal));
+          const vSpanAbs = Math.max(1e-6, Math.abs(vSpanLocal));
+          const period = Math.PI * 2;
+          const isFullWrap = uSpanAbs > (period * 0.95);
+          const preferGeometryOnlyLoadForPatch = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+          const clampSample = (value: number, min: number, max: number) =>
+            Math.max(min, Math.min(max, Math.round(value)));
+
+          // Adaptive angular sampling based on cylinder radius + chord deflection.
+          // This keeps full-wrap cylinders smooth while avoiding heavy over-tessellation
+          // on small partial arcs (common in large STEP assemblies).
+          const radius = Math.max(1e-6, Math.abs(surface.radius));
+          const targetDeflectionRatio = Math.max(
+            0.0005,
+            readGlobalNumber('__CYLINDER_PATCH_TARGET_DEFLECTION_RATIO__') ?? (preferGeometryOnlyLoadForPatch ? 0.018 : 0.012)
+          );
+          const targetDeflectionAbs = readGlobalNumber('__CYLINDER_PATCH_TARGET_DEFLECTION_ABS__');
+          const targetDeflection = Math.max(1e-6, targetDeflectionAbs ?? (radius * targetDeflectionRatio));
+          const cosArg = Math.max(-1, Math.min(1, 1 - (targetDeflection / radius)));
+          const stepByDeflection = 2 * Math.acos(cosArg);
+          const maxAngularStep = Math.max(
+            0.08,
+            Math.min(Math.PI / 2, readGlobalNumber('__CYLINDER_PATCH_MAX_ANGULAR_STEP__') ?? (preferGeometryOnlyLoadForPatch ? 0.45 : 0.35))
+          );
+          const minAngularStep = Math.max(
+            0.04,
+            Math.min(maxAngularStep, readGlobalNumber('__CYLINDER_PATCH_MIN_ANGULAR_STEP__') ?? (preferGeometryOnlyLoadForPatch ? 0.12 : 0.1))
+          );
+          const effectiveAngularStep = Number.isFinite(stepByDeflection) && stepByDeflection > 1e-6
+            ? Math.max(minAngularStep, Math.min(maxAngularStep, stepByDeflection))
+            : maxAngularStep;
+          const adaptiveFullUSamples = Math.ceil(period / effectiveAngularStep);
+
+          const minPartialUSamples = Math.max(
+            3,
+            Math.floor(readGlobalNumber('__CYLINDER_PATCH_U_SAMPLES_PARTIAL_MIN__') ?? 4)
+          );
+          const minFullWrapUSamples = Math.max(
+            minPartialUSamples,
+            Math.floor(readGlobalNumber('__CYLINDER_PATCH_U_SAMPLES_FULL_MIN__') ?? (preferGeometryOnlyLoadForPatch ? 20 : 24))
+          );
+          const maxUSamples = Math.max(
+            minFullWrapUSamples,
+            Math.floor(readGlobalNumber('__CYLINDER_PATCH_U_SAMPLES_MAX__') ?? (preferGeometryOnlyLoadForPatch ? 64 : 96))
+          );
+          let numUSamples = Math.ceil(adaptiveFullUSamples * (uSpanAbs / period));
+          numUSamples = isFullWrap
+            ? Math.max(numUSamples, minFullWrapUSamples)
+            : Math.max(numUSamples, minPartialUSamples);
+
+          const axialStep = Math.max(
+            0.25,
+            readGlobalNumber('__CYLINDER_PATCH_V_STEP__') ?? (preferGeometryOnlyLoadForPatch ? 6.0 : 4.0)
+          );
+          const minVSamples = Math.max(1, Math.floor(readGlobalNumber('__CYLINDER_PATCH_V_SAMPLES_MIN__') ?? 1));
+          const maxVSamples = Math.max(
+            minVSamples,
+            Math.floor(readGlobalNumber('__CYLINDER_PATCH_V_SAMPLES_MAX__') ?? (preferGeometryOnlyLoadForPatch ? 8 : 12))
+          );
+          let numVSamples = Math.ceil(vSpanAbs / axialStep);
+          if (isFullWrap) {
+            numVSamples = Math.max(numVSamples, preferGeometryOnlyLoadForPatch ? 1 : 2);
+          }
+
+          const manualUSamples = readGlobalNumber('__CYLINDER_PATCH_U_SAMPLES__');
+          const manualVSamples = readGlobalNumber('__CYLINDER_PATCH_V_SAMPLES__');
+          if (manualUSamples != null) {
+            numUSamples = manualUSamples;
+          }
+          if (manualVSamples != null) {
+            numVSamples = manualVSamples;
+          }
+
+          numUSamples = clampSample(numUSamples, minPartialUSamples, maxUSamples);
+          numVSamples = clampSample(numVSamples, minVSamples, maxVSamples);
           const mesh = await tessellateCylinder(
             surface,
             uBounds.uMin,
@@ -7485,6 +7557,77 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         let trimmedBuildOptions: TrimmedSurfaceBuildOptions | undefined;
 
         const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+        const clampInt = (value: number, min: number, max: number) =>
+          Math.max(min, Math.min(max, Math.round(value)));
+        const applyAnisotropicTrimTriangleBudget = (
+          mode: 'cylinder' | 'cone',
+          params: {
+            hasTrimHoles: boolean;
+            seamSensitive: boolean;
+            holePointCount: number;
+            gridDensityU: number;
+            gridDensityV: number;
+            minUSamples: number;
+            maxUSamples: number;
+            minUSamplesWithHoles: number;
+            seamMinUSamples: number;
+            minVDensity: number;
+            maxVDensity: number;
+            minVDensityWithHoles: number;
+            seamMinVDensity: number;
+          }
+        ): { gridDensityU: number; gridDensityV: number } => {
+          let { gridDensityU, gridDensityV } = params;
+          if (!preferGeometryOnlyLoad) {
+            return { gridDensityU, gridDensityV };
+          }
+
+          const budgetKeyPrefix = mode === 'cylinder' ? '__PERF_CYLINDER_TRIM_TRI_BUDGET' : '__PERF_CONE_TRIM_TRI_BUDGET';
+          const defaultNoHoles = mode === 'cylinder' ? 520 : 220;
+          const defaultWithHoles = mode === 'cylinder' ? 760 : 620;
+          const baseBudget = Math.max(
+            96,
+            Math.floor(
+              readGlobalNumber(
+                params.hasTrimHoles ? `${budgetKeyPrefix}_WITH_HOLES__` : `${budgetKeyPrefix}_NO_HOLES__`
+              ) ?? (params.hasTrimHoles ? defaultWithHoles : defaultNoHoles)
+            )
+          );
+
+          // Slightly relax budget for very dense hole boundaries to avoid visual breakage.
+          const holeBonus = params.hasTrimHoles
+            ? Math.min(1.25, 1 + Math.max(0, params.holePointCount - 120) / 1000)
+            : 1.0;
+          const targetTriangles = Math.floor(baseBudget * holeBonus);
+          const estimatedTriangles = 2 * gridDensityU * gridDensityV;
+          if (estimatedTriangles <= targetTriangles) {
+            return { gridDensityU, gridDensityV };
+          }
+
+          const scale = Math.sqrt(targetTriangles / estimatedTriangles);
+          gridDensityU = clampInt(gridDensityU * scale, params.minUSamples, params.maxUSamples);
+          gridDensityV = clampInt(gridDensityV * scale, params.minVDensity, params.maxVDensity);
+
+          if (params.hasTrimHoles) {
+            gridDensityU = Math.max(gridDensityU, params.minUSamplesWithHoles);
+            gridDensityV = Math.max(gridDensityV, params.minVDensityWithHoles);
+          }
+          if (params.seamSensitive) {
+            gridDensityU = Math.max(gridDensityU, params.seamMinUSamples);
+            gridDensityV = Math.max(gridDensityV, params.seamMinVDensity);
+          }
+
+          const budgetDebug = readGlobalBoolean('__TRIM_TRI_BUDGET_DEBUG__', false);
+          if (budgetDebug) {
+            const afterTriangles = 2 * gridDensityU * gridDensityV;
+            console.log(
+              `[trim-tri-budget] face=${face.faceIndex} type=${mode} est=${estimatedTriangles} target=${targetTriangles} -> est2=${afterTriangles} (u=${gridDensityU}, v=${gridDensityV})`
+            );
+          }
+
+          return { gridDensityU, gridDensityV };
+        };
+
         const isCylinderSurfaceForTrim = face.surfaceType === 'Cylinder' && surface.type === 'CYLINDRICAL_SURFACE';
         if (isCylinderSurfaceForTrim) {
           const period = Math.PI * 2;
@@ -7493,8 +7636,6 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           const uSpan = Math.max(1e-6, uBounds.uMax - uBounds.uMin);
           const vSpan = Math.max(1e-6, vBounds.max - vBounds.min);
           const hasTrimHoles = loops.uvHoles.length > 0;
-          const clampInt = (value: number, min: number, max: number) =>
-            Math.max(min, Math.min(max, Math.round(value)));
 
           // Adaptive circumferential sampling:
           // Use a mild deflection target so we can lower triangle count while
@@ -7574,6 +7715,21 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             gridDensityV += 1;
           }
           gridDensityV = clampInt(gridDensityV, minVDensity, maxVDensity);
+          ({ gridDensityU, gridDensityV } = applyAnisotropicTrimTriangleBudget('cylinder', {
+            hasTrimHoles,
+            seamSensitive: cylinderCrossesSeam || degeneratePeriodicTrim,
+            holePointCount,
+            gridDensityU,
+            gridDensityV,
+            minUSamples,
+            maxUSamples,
+            minUSamplesWithHoles,
+            seamMinUSamples,
+            minVDensity,
+            maxVDensity,
+            minVDensityWithHoles,
+            seamMinVDensity,
+          }));
 
           trimmedBuildOptions = {
             ...trimmedBuildOptions,
@@ -7593,8 +7749,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           const uSpan = Math.max(1e-6, uBounds.uMax - uBounds.uMin);
           const vSpan = Math.max(1e-6, vBounds.max - vBounds.min);
           const hasTrimHoles = loops.uvHoles.length > 0;
-          const clampInt = (value: number, min: number, max: number) =>
-            Math.max(min, Math.min(max, Math.round(value)));
+          const holePointCount = loops.uvHoles.reduce((sum, loop) => sum + loop.length, 0);
 
           const targetAngularStep = Math.max(
             0.08,
@@ -7608,8 +7763,8 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             preferGeometryOnlyLoad ? 18 : 20,
             Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_FULL__') ?? adaptiveFullUSamples)
           );
-          const minUSamples = Math.max(14, Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 18 : 20)));
-          const maxUSamples = Math.max(minUSamples, Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 56 : 72)));
+          const minUSamples = Math.max(12, Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 12 : 20)));
+          const maxUSamples = Math.max(minUSamples, Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 48 : 72)));
           const minUSamplesWithHoles = Math.max(
             minUSamples,
             Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_HOLES_MIN__') ?? (preferGeometryOnlyLoad ? 20 : 24))
@@ -7627,7 +7782,10 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           }
           gridDensityU = clampInt(gridDensityU, minUSamples, maxUSamples);
 
-          const vStep = Math.max(0.2, readGlobalNumber('__CONE_TRIM_V_STEP__') ?? (preferGeometryOnlyLoad ? 4.0 : 3.5));
+          const defaultVStep = hasTrimHoles
+            ? (preferGeometryOnlyLoad ? 4.0 : 3.5)
+            : (preferGeometryOnlyLoad ? 5.5 : 3.5);
+          const vStep = Math.max(0.2, readGlobalNumber('__CONE_TRIM_V_STEP__') ?? defaultVStep);
           const minVDensity = Math.max(3, Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 3 : 4)));
           const maxVDensity = Math.max(minVDensity, Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 10 : 14)));
           const minVDensityWithHoles = Math.max(
@@ -7642,6 +7800,21 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             gridDensityV = Math.max(gridDensityV, minVDensityWithHoles);
           }
           gridDensityV = clampInt(gridDensityV, minVDensity, maxVDensity);
+          ({ gridDensityU, gridDensityV } = applyAnisotropicTrimTriangleBudget('cone', {
+            hasTrimHoles,
+            seamSensitive: coneCrossesSeam || degeneratePeriodicTrim,
+            holePointCount,
+            gridDensityU,
+            gridDensityV,
+            minUSamples,
+            maxUSamples,
+            minUSamplesWithHoles,
+            seamMinUSamples,
+            minVDensity,
+            maxVDensity,
+            minVDensityWithHoles,
+            seamMinVDensity: minVDensityWithHoles,
+          }));
 
           trimmedBuildOptions = {
             ...trimmedBuildOptions,
@@ -7650,7 +7823,6 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             gridDensityV,
           };
         }
-
         const useOccPrimaryBuildForKnownFace = isKnownLidFace && !!face.occFace;
         if (useOccPrimaryBuildForKnownFace && oc?.BRepTopAdaptor_FClass2d && oc?.gp_Pnt2d_3 && oc?.TopAbs_State) {
           try {
@@ -7989,30 +8161,66 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   return { vertices: [], triangles: [] };
 }
 
-/**
- * Compute the normal of a triangle given three vertices
- */
-function computeTriangleNormal(v0: Vec3, v1: Vec3, v2: Vec3): Vec3 {
-  // Edge vectors
-  const e1: Vec3 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
-  const e2: Vec3 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+function computeSmoothNormalsCPUFlat(vertices: Vec3[], indices: number[]): Float32Array {
+  const normals = new Float32Array(vertices.length * 3);
+  const triCount = Math.floor(indices.length / 3);
 
-  // Cross product
-  const n: Vec3 = [
-    e1[1] * e2[2] - e1[2] * e2[1],
-    e1[2] * e2[0] - e1[0] * e2[2],
-    e1[0] * e2[1] - e1[1] * e2[0]
-  ];
+  for (let tri = 0; tri < triCount; tri++) {
+    const i0 = indices[tri * 3 + 0];
+    const i1 = indices[tri * 3 + 1];
+    const i2 = indices[tri * 3 + 2];
+    const v0 = vertices[i0];
+    const v1 = vertices[i1];
+    const v2 = vertices[i2];
 
-  // Normalize
-  const len = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-  if (len > 1e-10) {
-    n[0] /= len;
-    n[1] /= len;
-    n[2] /= len;
+    const e1x = v1[0] - v0[0];
+    const e1y = v1[1] - v0[1];
+    const e1z = v1[2] - v0[2];
+    const e2x = v2[0] - v0[0];
+    const e2y = v2[1] - v0[1];
+    const e2z = v2[2] - v0[2];
+
+    let nx = e1y * e2z - e1z * e2y;
+    let ny = e1z * e2x - e1x * e2z;
+    let nz = e1x * e2y - e1y * e2x;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (len > 1e-10) {
+      nx /= len;
+      ny /= len;
+      nz /= len;
+    } else {
+      continue;
+    }
+
+    normals[i0 * 3 + 0] += nx;
+    normals[i0 * 3 + 1] += ny;
+    normals[i0 * 3 + 2] += nz;
+    normals[i1 * 3 + 0] += nx;
+    normals[i1 * 3 + 1] += ny;
+    normals[i1 * 3 + 2] += nz;
+    normals[i2 * 3 + 0] += nx;
+    normals[i2 * 3 + 1] += ny;
+    normals[i2 * 3 + 2] += nz;
   }
 
-  return n;
+  for (let i = 0; i < vertices.length; i++) {
+    const ix = i * 3;
+    const nx = normals[ix + 0];
+    const ny = normals[ix + 1];
+    const nz = normals[ix + 2];
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (len > 1e-10) {
+      normals[ix + 0] = nx / len;
+      normals[ix + 1] = ny / len;
+      normals[ix + 2] = nz / len;
+    } else {
+      normals[ix + 0] = 0;
+      normals[ix + 1] = 0;
+      normals[ix + 2] = 1;
+    }
+  }
+
+  return normals;
 }
 
 /**
@@ -8038,7 +8246,6 @@ async function tessellateOCCShape(
   const FACE_DEBUG_MODE = readDebugModeFromGlobal('__FACE_DEBUG_MODE__', 'off');
 
   const allVertices: Vec3[] = [];
-  const allNormals: Vec3[] = [];
   const allColors: RGBColor[] = []; // Per-vertex colors
   const allIndices: number[] = [];
   let vertexOffset = 0;
@@ -8085,41 +8292,7 @@ async function tessellateOCCShape(
     result: { vertices: Vec3[]; triangles: number[][] },
     faceStart: number
   ) => {
-    // Compute per-vertex normals by averaging face normals
-    const normalStart = performance.now();
-    const vertexNormals: Vec3[] = result.vertices.map(() => [0, 0, 0] as Vec3);
-
-    for (const tri of result.triangles) {
-      const v0 = result.vertices[tri[0]];
-      const v1 = result.vertices[tri[1]];
-      const v2 = result.vertices[tri[2]];
-      const faceNormal = computeTriangleNormal(v0, v1, v2);
-      for (const idx of tri) {
-        vertexNormals[idx][0] += faceNormal[0];
-        vertexNormals[idx][1] += faceNormal[1];
-        vertexNormals[idx][2] += faceNormal[2];
-      }
-    }
-
-    for (const n of vertexNormals) {
-      const len = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-      if (len > 1e-10) {
-        n[0] /= len;
-        n[1] /= len;
-        n[2] /= len;
-      } else {
-        n[0] = 0;
-        n[1] = 0;
-        n[2] = 1;
-      }
-    }
-
     if (face.isReversed) {
-      for (const n of vertexNormals) {
-        n[0] = -n[0];
-        n[1] = -n[1];
-        n[2] = -n[2];
-      }
       for (const tri of result.triangles) {
         const temp = tri[1];
         tri[1] = tri[2];
@@ -8128,15 +8301,11 @@ async function tessellateOCCShape(
       tessellationVerboseLog(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
     }
 
-    tessellationProfile.computeNormals.total += performance.now() - normalStart;
-    tessellationProfile.computeNormals.calls++;
-
     const faceColor = face.color || { r: 0.4, g: 0.6, b: 1.0 };
     if (face.color) hasAnyColor = true;
 
     for (let i = 0; i < result.vertices.length; i++) {
       allVertices.push(result.vertices[i]);
-      allNormals.push(vertexNormals[i]);
       allColors.push(faceColor);
     }
 
@@ -8301,14 +8470,36 @@ async function tessellateOCCShape(
     positions[i * 3 + 2] = p[2];
   });
 
-  const normals = new Float32Array(allNormals.length * 3);
-  allNormals.forEach((n, i) => {
-    normals[i * 3 + 0] = n[0];
-    normals[i * 3 + 1] = n[1];
-    normals[i * 3 + 2] = n[2];
-  });
-
   const indices = new Uint32Array(allIndices);
+  const triangleCount = Math.floor(indices.length / 3);
+
+  const normalStart = performance.now();
+  const enableGpuSmoothNormals = readGlobalBoolean('__ENABLE_GPU_SMOOTH_NORMALS__', true);
+  const gpuNormalsMinTris = Math.max(1000, Math.floor(readGlobalNumber('__GPU_SMOOTH_NORMALS_MIN_TRIS__') ?? 20000));
+  const gpuNormalsMinVerts = Math.max(1000, Math.floor(readGlobalNumber('__GPU_SMOOTH_NORMALS_MIN_VERTS__') ?? 20000));
+  const shouldTryGpuNormals = enableGpuSmoothNormals && triangleCount >= gpuNormalsMinTris && allVertices.length >= gpuNormalsMinVerts;
+
+  let normals: Float32Array;
+  if (triangleCount === 0 || allVertices.length === 0) {
+    normals = new Float32Array(allVertices.length * 3);
+  } else {
+    let gpuNormals: Float32Array | null = null;
+    if (shouldTryGpuNormals) {
+      try {
+        gpuNormals = await computeSmoothNormalsGPUFlat(positions, indices);
+        console.log(`[Tessellate] Smooth normals: GPU pass (${triangleCount} tris, ${allVertices.length} verts)`);
+      } catch (gpuErr) {
+        console.warn('[Tessellate] Smooth normals GPU pass failed, falling back to CPU:', gpuErr);
+      }
+    }
+
+    normals = gpuNormals ?? computeSmoothNormalsCPUFlat(allVertices, allIndices);
+    if (!gpuNormals) {
+      tessellationVerboseLog(`[Tessellate] Smooth normals: CPU pass (${triangleCount} tris)`);
+    }
+  }
+  tessellationProfile.computeNormals.total += performance.now() - normalStart;
+  tessellationProfile.computeNormals.calls++;
 
   // Build vertex colors array if we have any colors
   // NOTE: STEP file colors are typically already in linear color space (CAD convention)

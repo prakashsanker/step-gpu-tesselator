@@ -210,6 +210,9 @@ const PHASE_KEYS = [
     'meshAssembly',
 ];
 
+const ELECTRONIC_ENCLOSURE_PATH = 'step-examples/Electronic Enclousre.STEP';
+const ENCLOSURE_TREND_PATH = join(PROJECT_ROOT, 'tests', 'benchmark-electronic-trend.jsonl');
+
 const CANARY_QUALITY_GUARDS = [
     {
         path: 'step-examples/c4-surfaces/cone.step',
@@ -809,6 +812,80 @@ function saveResultsJson(config, models, results, excluded) {
     log(`\nResults saved to ${outPath}`, 'dim');
 }
 
+function getElectronicEnclosureResult(results) {
+    return results.find((r) => r.success && (r.path === ELECTRONIC_ENCLOSURE_PATH || r.name === 'Electronic Enclosure')) || null;
+}
+
+function summarizeLoadShare(phases, oursMs) {
+    if (!phases || !Number.isFinite(oursMs) || oursMs <= 0) {
+        return { loadMs: null, loadSharePct: null };
+    }
+    const loadMs = Number(phases.loadStepFile || 0);
+    return {
+        loadMs,
+        loadSharePct: (loadMs / oursMs) * 100,
+    };
+}
+
+function readLastEnclosureTrendRecord() {
+    if (!fs.existsSync(ENCLOSURE_TREND_PATH)) return null;
+    const content = fs.readFileSync(ENCLOSURE_TREND_PATH, 'utf8');
+    const lines = content
+        .split('\n')
+        .map((line) => line.trim())
+        .filter(Boolean);
+    for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+            return JSON.parse(lines[i]);
+        } catch (_) {
+            // Ignore malformed lines and keep scanning backward.
+        }
+    }
+    return null;
+}
+
+function saveElectronicEnclosureTrend(config, result) {
+    if (!result?.success) return;
+
+    const nowIso = new Date().toISOString();
+    const load = summarizeLoadShare(result.ours?.phases, result.ours?.avgMs);
+    const record = {
+        timestamp: nowIso,
+        suite: config.suite,
+        oursMs: result.ours.avgMs,
+        refMs: result.ref.avgMs,
+        speedup: result.speedup,
+        oursTris: result.ours.triangleCount,
+        refTris: result.ref.triangleCount,
+        triRatio: result.triangleRatio,
+        loadStepFileMs: load.loadMs,
+        loadSharePct: load.loadSharePct,
+    };
+
+    const previous = readLastEnclosureTrendRecord();
+    fs.appendFileSync(ENCLOSURE_TREND_PATH, `${JSON.stringify(record)}\n`);
+
+    log(`Electronic Enclosure trend saved: ${ENCLOSURE_TREND_PATH}`, 'dim');
+    if (!previous) {
+        log(
+            `Electronic Enclosure baseline: ours=${record.oursMs.toFixed(1)}ms, ref=${record.refMs.toFixed(1)}ms, speed=${record.speedup.toFixed(3)}x`,
+            'cyan',
+        );
+        return;
+    }
+
+    const deltaOurs = record.oursMs - previous.oursMs;
+    const deltaRef = record.refMs - previous.refMs;
+    const deltaSpeed = record.speedup - previous.speedup;
+    const oursDir = deltaOurs <= 0 ? 'faster' : 'slower';
+    const speedDir = deltaSpeed >= 0 ? 'up' : 'down';
+    const deltaTri = (record.triRatio ?? 0) - (previous.triRatio ?? 0);
+    log(
+        `Electronic Enclosure vs previous (${previous.timestamp}): ours ${oursDir} by ${Math.abs(deltaOurs).toFixed(1)}ms, speedup ${speedDir} ${Math.abs(deltaSpeed).toFixed(3)}x, triRatio Δ${deltaTri.toFixed(3)}, ref Δ${deltaRef.toFixed(1)}ms`,
+        deltaOurs <= 0 ? 'green' : 'yellow',
+    );
+}
+
 async function main() {
     const parsed = parseArgs(args);
     const { cfg: config, models, excluded } = selectConfig(parsed);
@@ -874,6 +951,10 @@ async function main() {
             }
         }
         saveResultsJson(config, models, results, excluded);
+        const enclosureResult = getElectronicEnclosureResult(results);
+        if (enclosureResult) {
+            saveElectronicEnclosureTrend(config, enclosureResult);
+        }
     } catch (err) {
         hadFatalError = true;
         log(`\nBenchmark runner error: ${err.message}`, 'red');

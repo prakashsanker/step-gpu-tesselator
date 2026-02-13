@@ -459,31 +459,37 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 ### 2026-02-13 Next Optimization Decision (Post Curved-Face Batching)
 
 - Current optimization in progress:
-  - **Triangle reduction on curved/trimmed faces** (adaptive budgets + anisotropic sampling), starting with Electronic Enclosure and VM-001.
+  - **GPU-first throughput work (M3/M4)** on curved/trimmed tessellation and post-tessellation mesh processing.
+  - Keep triangle reduction as a quality guardrail, not the primary lever this cycle.
 
 - Why:
   - Latest representative profile still shows Electronic Enclosure slower than `occt-import-js`.
-  - Runtime split is still dominated by tessellation work after load:
-    - total `7667.5ms`
-    - `loadStepFile`: `2928.0ms` (`38.2%`)
-    - non-load tessellation path: `~4739.5ms` (`61.8%`)
-  - Triangle inflation remains the key multiplier:
-    - Electronic Enclosure triangles: ours `222890` vs ref `39148` (`5.69x`).
+  - Runtime split remains dominated by non-load work after parsing:
+    - total `~7.7s`
+    - `loadStepFile`: `~2.8-2.9s` (`~36-38%`)
+    - non-load tessellation + mesh path: `~4.8-4.9s` (`~62-64%`)
+  - Triangle inflation has improved materially in recent passes, but we are still slower on large complex files; the bigger remaining gap is throughput on curved/trimmed face processing + mesh post-processing.
 
 - Impact model (estimated):
-  1. GPU parallelization improvements (M3/M4):
-     - Expected: `-0.8s` to `-1.8s` on Electronic Enclosure (`~10-24%` total).
+  1. GPU parallelization improvements (M3/M4) [Top priority]:
+     - Expected: `-1.0s` to `-2.2s` on Electronic Enclosure (`~13-29%` total).
      - Scope:
        - larger curved-face dispatch batches
-       - persistent buffers/pipelines
+       - persistent/reused GPU buffers and pipelines
        - reduced per-face submit/readback/sync
-  2. Triangle-count reduction (new top priority):
-     - Expected: `-1.5s` to `-3.0s` (`~20-40%` total).
+       - one-pass mesh-level GPU normals for large outputs
+  2. Pathological face preprocessing/classification controls:
+     - Expected: `-0.6s` to `-1.5s` (`~8-20%` total).
      - Scope:
-       - adaptive deflection/error budgets per face type
-       - anisotropic sampling (boundary-dense, interior-coarse)
-       - primitive-specific caps for cylinder/cone/torus/bspline
-  3. Load-path follow-up (M1.2 continuation):
+       - classify high-risk faces early (seam-crossing, huge trim loops, dense pcurves, near-singular UV spans)
+       - route only those faces to robust expensive paths
+       - keep default fast path for normal faces
+  3. Triangle-count reduction (targeted, hotspot-only):
+     - Expected: `-0.3s` to `-1.0s` (`~4-13%` total).
+     - Scope:
+       - adaptive deflection/error budgets where face-level profiles show inflation
+       - keep slot/corner fidelity and seam guardrails
+  4. Load-path follow-up (M1.2 continuation):
      - Expected: `-0.7s` to `-1.4s` (`~9-18%` total).
      - Scope:
        - transfer/copy elimination
@@ -491,26 +497,101 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
        - stricter perf-mode fast path
 
 - Execution order for next cycle:
-  1. Triangle reduction first (quality-guarded).
-  2. GPU batching/sync minimization second.
-  3. Load-path copy/transfer reduction third.
+  1. GPU batching/sync minimization + mesh-level GPU normals first.
+  2. Pathological preprocessing/classification gating second.
+  3. Hotspot-only triangle reduction third.
+  4. Load-path copy/transfer reduction in parallel.
 
 - Validation cadence for this cycle:
   - Every step: `npm run -s bench:canary` (80-model canary including VM-001).
   - Every 2 steps: `npm run -s bench:representative`.
   - Every 2-3 steps: full correctness gate (`node --experimental-vm-modules tests/run-tests.js`), then AI visual run when needed.
 
-### 2026-02-13 Triangle Reduction Track (Execution)
+### 2026-02-13 Pathological Face Preprocessing/Classification (Definition)
 
-- Optimization being executed now:
-  - Reduce triangle inflation at the source (boundary sampling + trim grid density), with sharp-feature preservation.
-- Why this is first:
-  - `Electronic Enclosure` remains triangle-heavy (`~5.7x` ref triangles), and this directly scales tessellation cost.
-- Concrete implementation steps:
-  1. Coarsen smooth circular boundary sampling in perf mode using adaptive deflection defaults (not fixed dense arcs).
-  2. Tighten cylinder/cone trimmed-face U/V density caps in perf mode, especially for high-complexity trims.
-  3. Keep seam/hole guardrails and corner-preserving behavior so we do not blunt slots or lose walls.
-- Validation for each step:
+- Meaning in this plan:
+  - "Pathological" faces are outliers that trigger expensive or unstable behavior if treated with the same defaults as ordinary faces.
+  - Examples:
+    - seam-crossing trims and wrapped domains
+    - very dense pcurve loops
+    - highly imbalanced inner/outer loop complexity
+    - singular/near-singular UV regions
+- Why it helps on unseen files:
+  - This is not model-specific tuning; it is complexity-based routing.
+  - Any unseen model with similar geometric complexity patterns is detected and routed to robust handling, while typical faces remain on a cheaper fast path.
+  - Result: lower tail latency and fewer worst-case slowdowns without overfitting to known fixtures.
+
+### 2026-02-13 M3 Step: GPU UV->3D Surface Evaluation (Primitive Curved Faces)
+
+- Optimization implemented:
+  - Added GPU compute path for per-vertex surface evaluation (UV -> position + normal) on:
+    - `CYLINDRICAL_SURFACE`
+    - `SPHERICAL_SURFACE`
+    - `CONICAL_SURFACE`
+    - `TOROIDAL_SURFACE`
+    - `PLANE`
+  - Kept CPU fallback for unsupported surfaces and small meshes.
+  - Added persistent GPU buffer/pipeline reuse for this path.
+  - Wired into `tessellateTrimmedSurface` evaluation stage via `evaluateUVMesh`.
+
+- Validation:
   - `npm run -s bench:canary`
-  - `npm run -s bench:representative` (includes Electronic Enclosure + VM-001)
-  - Visual spot-check on trimmed cylinder/cone fixtures before accepting.
+    - pass `80/80`, quality gate pass.
+  - `npm run -s bench:representative`
+    - Electronic Enclosure: `8091.7ms -> 7956.7ms` (`-135.0ms`)
+    - ref: `3250.5ms -> 3086.3ms`
+    - speedup multiple (`ref/ours`) moved `0.402x -> 0.388x` (worse)
+    - equivalent slowdown ratio (`ours/ref`) moved `2.49x -> 2.58x` (worse)
+    - loadStepFile share now `~40.1%` (`3188.9ms / 7956.7ms`)
+
+- Takeaway:
+  - This step improved our absolute runtime but regressed relative speedup vs `occt-import-js`.
+  - Remaining gap is still dominated by:
+    - load path (`transfer` + `readFile`) and
+    - curved/trim triangulation throughput outside UV evaluation.
+
+### 2026-02-13 M3 Step: Batched GPU Surface Evaluation Queue
+
+- Optimization implemented:
+  - Switched GPU UV->3D eval from per-call dispatch/readback to queued batched dispatch:
+    - collect multiple face eval jobs
+    - pack UVs + surface params into a single GPU submission
+    - single batched readback, then split results per face
+  - Goal: reduce per-face sync overhead in curved-face runs.
+
+- Validation:
+  - `npm run -s bench:canary`
+    - pass `80/80`, quality gate pass.
+  - `npm run -s bench:representative`
+    - Electronic Enclosure: `7956.7ms -> 8413.4ms` (regressed)
+    - speedup multiple (`ref/ours`) moved `0.388x -> 0.387x` (slightly worse)
+    - equivalent slowdown ratio (`ours/ref`) moved `2.58x -> 2.59x` (slightly worse)
+    - loadStepFile share dropped (`40.1% -> 36.1%`), but non-load path increased enough to offset.
+
+- Takeaway:
+  - This batching shape is not yet a net win on representative KPI.
+  - Next revision should reduce CPU packing/splitting overhead and increase effective batch size before keeping this path on by default.
+
+### 2026-02-13 Known Regression Note (Visual Quality)
+
+- Observed regression:
+  - Batched GPU surface-eval variant introduced visible shading/faceting artifacts on Electronic Enclosure (interior cone/bowl region).
+- Action:
+  - Keep this variant experimental only (do not treat as production default).
+  - Add a visual check for this artifact before accepting future GPU-eval batching changes.
+- Suspected causes to verify in a future fix pass:
+  - batched surface parameter packing/decoding mismatch,
+  - per-batch result slicing/indexing mistakes,
+  - normal continuity mismatch on trimmed/seam-sensitive regions.
+
+### Next GPU Priority (After This Attempt)
+
+- Highest leverage next step:
+  - Move trimmed-grid classification + triangle candidate generation from CPU loops to GPU kernels.
+- Why this is next:
+  - Current majority non-load time is still in curved/trimmed tessellation prep, not just UV->3D evaluation.
+  - `tessellateTrimmedSurface` still spends heavy CPU time in:
+    - point-in-polygon / hole inclusion checks per grid point,
+    - per-cell triangle candidate filtering.
+- Expected impact:
+  - Better amortization than per-face UV eval alone, especially on large trimmed curved faces (Electronic Enclosure).
