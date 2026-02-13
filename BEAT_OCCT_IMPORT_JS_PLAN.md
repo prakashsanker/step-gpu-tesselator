@@ -760,3 +760,64 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 - Takeaway:
   - Removing CPU re-flattening delivered a meaningful representative ratio improvement on Electronic Enclosure.
   - Next step should continue reducing CPU-side per-face object assembly (toward model-level typed output assembly).
+
+### 2026-02-13 M4 Step: Typed-Array-First Model Assembly (No Global Vec3/number Stitching)
+
+- Optimization implemented in code:
+  - `tessellateOCCShape` now accumulates mesh output as typed chunks:
+    - `positionChunks: Float32Array[]`
+    - `indexChunks: Uint32Array[]`
+    - color runs (`vertexCount + color`) instead of per-vertex color objects.
+  - Final mesh assembly now concatenates typed chunks directly into final `positions/indices`.
+  - CPU smooth-normal fallback switched from object-vertex path to typed arrays:
+    - `computeSmoothNormalsCPUFromFlat(positions, indices)`.
+
+- Validation:
+  - `npm run -s bench:canary`
+    - successful: `80/80`
+    - failed: `0/80`
+    - wins vs `occt-import-js`: `78/80`
+    - speedup median: `4.31x faster`
+  - `npm run -s bench:representative`
+    - Electronic Enclosure: `ours=8672.2ms`, `ref=3279.5ms`
+      - `ours/ref = 2.64x slower`
+      - `ref/ours = 0.378x`
+    - VM-001: `ours=203.9ms`, `ref=197.1ms` (`1.03x slower`)
+    - wins vs `occt-import-js`: `4/6`
+
+- Electronic Enclosure trend vs previous representative sample:
+  - ours slower by `1064.7ms`
+  - ratio regressed by `1.308x` (`2.02x slower -> 2.64x slower`)
+  - triRatio unchanged (`3.649x`)
+  - ref faster by `483.6ms` in this run.
+
+- Takeaway:
+  - Typed assembly path is functionally stable (canary pass), but this single representative sample regressed.
+  - Regression appears dominated by run-to-run load-path variance in this measurement; keep tracking ratio trend over subsequent steps.
+
+### 2026-02-13 M4 Step: Increase Model-Level Curved Batch Size (Fewer GPU Readbacks)
+
+- Optimization implemented in code:
+  - Increased perf-mode default for model-level curved batching:
+    - `__MODEL_LEVEL_CURVED_BATCH_SIZE__` default `24 -> 256` when `__PERF_GEOMETRY_ONLY_LOAD__=true`.
+  - Raised hard cap for model-level curved batch size:
+    - `64 -> 1024` (still clamped and runtime-tunable via global).
+  - This reduces `assembleMeshBatchGPU(...)` invocations and `mapAsync` readbacks for curved-face-heavy models.
+
+- Validation:
+  - `npm run -s bench:canary`
+    - successful: `80/80`
+    - failed: `0/80`
+    - wins vs `occt-import-js`: `77/80`
+    - speedup median: `4.73x faster`
+  - `node tests/benchmark-comprehensive.js --suite representative --runs 3 --warmup 1`
+    - Electronic Enclosure: `ours=7202.5ms`, `ref=2825.9ms`
+      - `ours/ref = 2.55x slower`
+      - `ref/ours = 0.392x`
+      - `loadStepFile=2629.2ms` (`36.5%` of ours)
+    - VM-001: `ours=168.2ms`, `ref=165.4ms` (`1.02x slower`)
+    - wins vs `occt-import-js`: `4/6`
+
+- Takeaway:
+  - Change is stable (no canary regressions).
+  - Electronic Enclosure remains limited by load path + curved-face runtime variability, so next step should remove remaining per-batch sync by pushing model-level curved assembly to a true single-readback path.

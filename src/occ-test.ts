@@ -8191,24 +8191,25 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<Fac
   return { vertices: [], triangles: [] };
 }
 
-function computeSmoothNormalsCPUFlat(vertices: Vec3[], indices: number[]): Float32Array {
-  const normals = new Float32Array(vertices.length * 3);
+function computeSmoothNormalsCPUFromFlat(positions: Float32Array, indices: Uint32Array): Float32Array {
+  const vertexCount = Math.floor(positions.length / 3);
+  const normals = new Float32Array(vertexCount * 3);
   const triCount = Math.floor(indices.length / 3);
 
   for (let tri = 0; tri < triCount; tri++) {
     const i0 = indices[tri * 3 + 0];
     const i1 = indices[tri * 3 + 1];
     const i2 = indices[tri * 3 + 2];
-    const v0 = vertices[i0];
-    const v1 = vertices[i1];
-    const v2 = vertices[i2];
+    const v0Base = i0 * 3;
+    const v1Base = i1 * 3;
+    const v2Base = i2 * 3;
 
-    const e1x = v1[0] - v0[0];
-    const e1y = v1[1] - v0[1];
-    const e1z = v1[2] - v0[2];
-    const e2x = v2[0] - v0[0];
-    const e2y = v2[1] - v0[1];
-    const e2z = v2[2] - v0[2];
+    const e1x = positions[v1Base + 0] - positions[v0Base + 0];
+    const e1y = positions[v1Base + 1] - positions[v0Base + 1];
+    const e1z = positions[v1Base + 2] - positions[v0Base + 2];
+    const e2x = positions[v2Base + 0] - positions[v0Base + 0];
+    const e2y = positions[v2Base + 1] - positions[v0Base + 1];
+    const e2z = positions[v2Base + 2] - positions[v0Base + 2];
 
     let nx = e1y * e2z - e1z * e2y;
     let ny = e1z * e2x - e1x * e2z;
@@ -8233,7 +8234,7 @@ function computeSmoothNormalsCPUFlat(vertices: Vec3[], indices: number[]): Float
     normals[i2 * 3 + 2] += nz;
   }
 
-  for (let i = 0; i < vertices.length; i++) {
+  for (let i = 0; i < vertexCount; i++) {
     const ix = i * 3;
     const nx = normals[ix + 0];
     const ny = normals[ix + 1];
@@ -8280,16 +8281,22 @@ async function tessellateOCCShape(
     '__ENABLE_GPU_CURVED_BATCH_ASSEMBLY__',
     preferGeometryOnlyLoad
   );
+  const defaultModelLevelCurvedBatchSize = preferGeometryOnlyLoad ? 256 : 24;
   const modelLevelCurvedBatchSize = Math.max(
     curvedFaceBatchSize,
-    Math.min(64, Math.floor(readGlobalNumber('__MODEL_LEVEL_CURVED_BATCH_SIZE__') ?? 24))
+    Math.min(
+      1024,
+      Math.floor(readGlobalNumber('__MODEL_LEVEL_CURVED_BATCH_SIZE__') ?? defaultModelLevelCurvedBatchSize)
+    )
   );
   const FACE_DEBUG_IDS = readFaceIdsFromGlobal('__FACE_DEBUG_IDS__', [14, 63, 64, 65, 66, 994]);
   const FACE_DEBUG_MODE = readDebugModeFromGlobal('__FACE_DEBUG_MODE__', 'off');
 
-  const allVertices: Vec3[] = [];
-  const allColors: RGBColor[] = []; // Per-vertex colors
-  const allIndices: number[] = [];
+  const positionChunks: Float32Array[] = [];
+  const indexChunks: Uint32Array[] = [];
+  const colorRuns: Array<{ vertexCount: number; color: RGBColor }> = [];
+  let totalVertices = 0;
+  let totalIndices = 0;
   let vertexOffset = 0;
   let hasAnyColor = false;
   let processedCount = 0;
@@ -8342,25 +8349,27 @@ async function tessellateOCCShape(
     const faceColor = face.color || { r: 0.4, g: 0.6, b: 1.0 };
     if (face.color) hasAnyColor = true;
 
-    for (let i = 0; i < flat.positions.length; i += 3) {
-      allVertices.push([
-        flat.positions[i + 0],
-        flat.positions[i + 1],
-        flat.positions[i + 2],
-      ]);
-      allColors.push(faceColor);
-    }
+    positionChunks.push(flat.positions);
+    colorRuns.push({ vertexCount, color: faceColor });
 
+    const rebasedIndices = new Uint32Array(flat.indices.length);
     for (let i = 0; i < flat.indices.length; i += 3) {
       const i0 = flat.indices[i + 0] + vertexOffset;
       const i1 = flat.indices[i + 1] + vertexOffset;
       const i2 = flat.indices[i + 2] + vertexOffset;
       if (face.isReversed) {
-        allIndices.push(i0, i2, i1);
+        rebasedIndices[i + 0] = i0;
+        rebasedIndices[i + 1] = i2;
+        rebasedIndices[i + 2] = i1;
       } else {
-        allIndices.push(i0, i1, i2);
+        rebasedIndices[i + 0] = i0;
+        rebasedIndices[i + 1] = i1;
+        rebasedIndices[i + 2] = i2;
       }
     }
+    indexChunks.push(rebasedIndices);
+    totalVertices += vertexCount;
+    totalIndices += rebasedIndices.length;
     if (face.isReversed) {
       tessellationVerboseLog(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
     }
@@ -8556,16 +8565,15 @@ async function tessellateOCCShape(
         );
 
         if (assembledBatch) {
-          for (let i = 0; i < assembledBatch.positions.length; i += 3) {
-            allVertices.push([
-              assembledBatch.positions[i + 0],
-              assembledBatch.positions[i + 1],
-              assembledBatch.positions[i + 2],
-            ]);
-          }
+          positionChunks.push(assembledBatch.positions);
+          totalVertices += Math.floor(assembledBatch.positions.length / 3);
+
+          const rebasedBatchIndices = new Uint32Array(assembledBatch.indices.length);
           for (let i = 0; i < assembledBatch.indices.length; i++) {
-            allIndices.push(assembledBatch.indices[i] + vertexOffset);
+            rebasedBatchIndices[i] = assembledBatch.indices[i] + vertexOffset;
           }
+          indexChunks.push(rebasedBatchIndices);
+          totalIndices += rebasedBatchIndices.length;
 
           for (let batchIndex = 0; batchIndex < batchFaces.length; batchIndex++) {
             const batchFace = batchFaces[batchIndex];
@@ -8573,9 +8581,7 @@ async function tessellateOCCShape(
             const triangleCount = Math.floor(assembledBatch.indexCounts[batchIndex] / 3);
             const faceColor = batchFace.face.color || { r: 0.4, g: 0.6, b: 1.0 };
             if (batchFace.face.color) hasAnyColor = true;
-            for (let v = 0; v < vertexCount; v++) {
-              allColors.push(faceColor);
-            }
+            colorRuns.push({ vertexCount, color: faceColor });
 
             const faceTime = performance.now() - batchFace.faceStart;
             if (faceTime > 500) {
@@ -8625,42 +8631,47 @@ async function tessellateOCCShape(
 
   const tessTime = ((performance.now() - shapeStart) / 1000).toFixed(2);
   console.log(`[Tessellate] Completed: ${processedCount} faces in ${tessTime}s (${skippedCount} skipped, ${errorCount} errors)`);
-  console.log(`[Tessellate] Generated: ${allVertices.length} vertices, ${allIndices.length / 3} triangles`);
+  console.log(`[Tessellate] Generated: ${totalVertices} vertices, ${totalIndices / 3} triangles`);
 
   // Build final mesh
   const assemblyStart = performance.now();
 
-  const positions = new Float32Array(allVertices.length * 3);
-  allVertices.forEach((p, i) => {
-    positions[i * 3 + 0] = p[0];
-    positions[i * 3 + 1] = p[1];
-    positions[i * 3 + 2] = p[2];
-  });
+  const positions = new Float32Array(totalVertices * 3);
+  let positionWriteOffset = 0;
+  for (const chunk of positionChunks) {
+    positions.set(chunk, positionWriteOffset);
+    positionWriteOffset += chunk.length;
+  }
 
-  const indices = new Uint32Array(allIndices);
+  const indices = new Uint32Array(totalIndices);
+  let indexWriteOffset = 0;
+  for (const chunk of indexChunks) {
+    indices.set(chunk, indexWriteOffset);
+    indexWriteOffset += chunk.length;
+  }
   const triangleCount = Math.floor(indices.length / 3);
 
   const normalStart = performance.now();
   const enableGpuSmoothNormals = readGlobalBoolean('__ENABLE_GPU_SMOOTH_NORMALS__', true);
   const gpuNormalsMinTris = Math.max(1000, Math.floor(readGlobalNumber('__GPU_SMOOTH_NORMALS_MIN_TRIS__') ?? 20000));
   const gpuNormalsMinVerts = Math.max(1000, Math.floor(readGlobalNumber('__GPU_SMOOTH_NORMALS_MIN_VERTS__') ?? 20000));
-  const shouldTryGpuNormals = enableGpuSmoothNormals && triangleCount >= gpuNormalsMinTris && allVertices.length >= gpuNormalsMinVerts;
+  const shouldTryGpuNormals = enableGpuSmoothNormals && triangleCount >= gpuNormalsMinTris && totalVertices >= gpuNormalsMinVerts;
 
   let normals: Float32Array;
-  if (triangleCount === 0 || allVertices.length === 0) {
-    normals = new Float32Array(allVertices.length * 3);
+  if (triangleCount === 0 || totalVertices === 0) {
+    normals = new Float32Array(totalVertices * 3);
   } else {
     let gpuNormals: Float32Array | null = null;
     if (shouldTryGpuNormals) {
       try {
         gpuNormals = await computeSmoothNormalsGPUFlat(positions, indices);
-        console.log(`[Tessellate] Smooth normals: GPU pass (${triangleCount} tris, ${allVertices.length} verts)`);
+        console.log(`[Tessellate] Smooth normals: GPU pass (${triangleCount} tris, ${totalVertices} verts)`);
       } catch (gpuErr) {
         console.warn('[Tessellate] Smooth normals GPU pass failed, falling back to CPU:', gpuErr);
       }
     }
 
-    normals = gpuNormals ?? computeSmoothNormalsCPUFlat(allVertices, allIndices);
+    normals = gpuNormals ?? computeSmoothNormalsCPUFromFlat(positions, indices);
     if (!gpuNormals) {
       tessellationVerboseLog(`[Tessellate] Smooth normals: CPU pass (${triangleCount} tris)`);
     }
@@ -8674,13 +8685,17 @@ async function tessellateOCCShape(
   // So we pass them through directly without conversion
   let vertexColors: Float32Array | undefined;
   if (hasAnyColor) {
-    vertexColors = new Float32Array(allColors.length * 3);
-    allColors.forEach((c, i) => {
-      // Pass through colors directly - STEP colors are already linear
-      vertexColors![i * 3 + 0] = c.r;
-      vertexColors![i * 3 + 1] = c.g;
-      vertexColors![i * 3 + 2] = c.b;
-    });
+    vertexColors = new Float32Array(totalVertices * 3);
+    let colorOffset = 0;
+    for (const run of colorRuns) {
+      for (let i = 0; i < run.vertexCount; i++) {
+        const base = colorOffset * 3;
+        vertexColors[base + 0] = run.color.r;
+        vertexColors[base + 1] = run.color.g;
+        vertexColors[base + 2] = run.color.b;
+        colorOffset++;
+      }
+    }
   }
 
   tessellationProfile.meshAssembly.total += performance.now() - assemblyStart;
@@ -8693,9 +8708,8 @@ async function tessellateOCCShape(
   if (vertexColors) {
     // Count unique colors
     const uniqueColors = new Set<string>();
-    for (let i = 0; i < allColors.length; i++) {
-      const c = allColors[i];
-      uniqueColors.add(`${c.r.toFixed(2)},${c.g.toFixed(2)},${c.b.toFixed(2)}`);
+    for (const run of colorRuns) {
+      uniqueColors.add(`${run.color.r.toFixed(2)},${run.color.g.toFixed(2)},${run.color.b.toFixed(2)}`);
     }
     console.log(`[Tessellate] Vertex colors created: ${vertexColors.length / 3} vertices, ${uniqueColors.size} unique colors`);
   } else {
