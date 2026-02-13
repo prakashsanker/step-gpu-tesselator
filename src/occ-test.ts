@@ -5858,9 +5858,22 @@ function buildOcctInspiredConeTrimDomainFromPCurves(
   const padV = Math.max(minPad, (vMax - vMin) * padFactor);
 
   const sourcePointCount = alignedWires.reduce((sum, wire) => sum + wire.length, 0);
+  const hasTrimHoles = face.innerLoops.length > 0;
   const gridScale = Math.max(0.1, readGlobalNumber('__OCCT_INSPIRED_TRIM_GRID_SCALE__') ?? 0.9);
-  const minGrid = Math.max(8, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID__') ?? 14));
-  const maxGrid = Math.max(minGrid, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID__') ?? 32));
+  let minGrid = Math.max(8, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID__') ?? 14));
+  let maxGrid = Math.max(minGrid, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID__') ?? 32));
+  if (!hasTrimHoles) {
+    const minGridNoHoles = Math.max(
+      minGrid,
+      Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID_NO_HOLES__') ?? 26)
+    );
+    const maxGridNoHoles = Math.max(
+      minGridNoHoles,
+      Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID_NO_HOLES__') ?? 48)
+    );
+    minGrid = minGridNoHoles;
+    maxGrid = Math.max(maxGrid, maxGridNoHoles);
+  }
   const gridDensity = Math.max(
     minGrid,
     Math.min(maxGrid, Math.ceil(Math.sqrt(sourcePointCount) * gridScale))
@@ -6188,6 +6201,26 @@ function getFaceTrimLoopsUV(
 }
 
 function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles: Vec2[][]): number {
+  const isPeriodicSeamSensitiveTrim = (): boolean => {
+    if (uvOuter.length < 3) return false;
+    const period = Math.PI * 2;
+    const seamJumpThreshold = period * 0.75;
+    let maxJump = 0;
+    for (let i = 0; i < uvOuter.length; i++) {
+      const u1 = uvOuter[i][0];
+      const u2 = uvOuter[(i + 1) % uvOuter.length][0];
+      const jump = Math.abs(u2 - u1);
+      if (jump > maxJump) maxJump = jump;
+    }
+    const nearPosPI = uvOuter.filter((p) => p[0] > Math.PI - 0.3).length;
+    const nearNegPI = uvOuter.filter((p) => p[0] < -Math.PI + 0.3).length;
+    const uBounds = getLoopUBounds(uvOuter);
+    const uSpan = uBounds.uMax - uBounds.uMin;
+    const crossesByCounts = nearPosPI >= 2 && nearNegPI >= 2;
+    const crossesByJump = maxJump > seamJumpThreshold && uSpan > Math.PI;
+    return crossesByCounts || crossesByJump;
+  };
+
   const totalPts = uvHoles.reduce((acc, h) => acc + h.length, uvOuter.length);
   // Keep trim-grid growth sublinear and capped by default. This is a key speed
   // control for complex trims where boundary sampling can be very dense.
@@ -6220,6 +6253,24 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
   if (totalPts > highComplexPointThreshold) {
     const complexityGridCap = Math.max(minGrid, Math.floor(effectiveMaxGrid * 0.75));
     effectiveMaxGrid = Math.min(effectiveMaxGrid, complexityGridCap);
+  }
+
+  // Keep seam-sensitive periodic trims away from under-sampled fold artifacts.
+  // This applies to cone/cylinder trims that cross the U seam and is intentionally
+  // scoped so we do not globally increase cost.
+  if ((face.surfaceType === 'Cone' || face.surfaceType === 'Cylinder') && isPeriodicSeamSensitiveTrim()) {
+    const seamMinGrid = Math.max(
+      minGrid,
+      Math.floor(
+        readGlobalNumber(
+          face.surfaceType === 'Cone'
+            ? '__CONE_PERIODIC_SEAM_MIN_GRID_DENSITY__'
+            : '__CYLINDER_PERIODIC_SEAM_MIN_GRID_DENSITY__'
+        ) ?? (face.surfaceType === 'Cone' ? 18 : 22)
+      )
+    );
+    base = Math.max(base, seamMinGrid);
+    effectiveMaxGrid = Math.max(effectiveMaxGrid, seamMinGrid);
   }
 
   return Math.max(minGrid, Math.min(effectiveMaxGrid, base));
@@ -6497,10 +6548,19 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
       } else if (oc?.BRepTopAdaptor_FClass2d && oc?.gp_Pnt2d_3 && oc?.TopAbs_State) {
         let occBuildClassifier: any | undefined;
         try {
+          const hasTrimHoles = face.innerLoops.length > 0;
           occBuildClassifier = new oc.BRepTopAdaptor_FClass2d(face.occFace, 1e-7);
+          const useTriangleGate = hasTrimHoles || readGlobalBoolean('__OCCT_INSPIRED_TRIM_GATE_NO_HOLES__', false);
           const maxOutSamples = Math.max(
             0,
-            Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_OUT_SAMPLES__') ?? 1)
+            Math.floor(
+              readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_OUT_SAMPLES__') ??
+              (hasTrimHoles ? 1 : 3)
+            )
+          );
+          const allowPartialCellTriangles = readGlobalBoolean(
+            '__OCCT_INSPIRED_TRIM_ALLOW_PARTIAL_CELL_TRIANGLES__',
+            !hasTrimHoles
           );
           const classifyInside = (u: number, v: number): boolean => {
             const uvPoint = new oc.gp_Pnt2d_3(u, v);
@@ -6515,19 +6575,21 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           };
           const buildOptions: TrimmedSurfaceBuildOptions = {
             uvInsideTest: classifyInside,
-            keepTriangle: (samples) => {
-              let outCount = 0;
-              for (const [u, v] of samples) {
-                if (!classifyInside(u, v)) {
-                  outCount++;
-                  if (outCount > maxOutSamples) {
-                    return false;
+            keepTriangle: useTriangleGate
+              ? (samples) => {
+                  let outCount = 0;
+                  for (const [u, v] of samples) {
+                    if (!classifyInside(u, v)) {
+                      outCount++;
+                      if (outCount > maxOutSamples) {
+                        return false;
+                      }
+                    }
                   }
+                  return true;
                 }
-              }
-              return true;
-            },
-            allowPartialCellTriangles: false,
+              : undefined,
+            allowPartialCellTriangles,
             logLabel: `occt-inspired-face-${face.faceIndex}`,
           };
           const coneSurface = {

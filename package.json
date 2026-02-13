@@ -7,7 +7,6 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "bench:canary": "node tests/benchmark-comprehensive.js --suite canary",
     "test": "node --experimental-vm-modules tests/run-tests.js",
     "test:watch": "node --experimental-vm-modules tests/run-tests.js --watch",
     "baseline:beat": "node scripts/run-beat-occt-baseline.mjs",

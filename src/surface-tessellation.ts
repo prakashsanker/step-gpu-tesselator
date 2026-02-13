@@ -520,7 +520,7 @@ export async function tessellateTrimmedSurface(
     // ===== Use CDT with holes for proper hole support =====
     // CDT (Constrained Delaunay Triangulation) with cavity-based constraint recovery
     // ensures hole boundary edges are preserved in the triangulation
-    if (continuousHoles.length > 0) {
+    if (continuousHoles.length > 0 && !preferGridForHoles) {
         trimDebugLog(`[tessellateTrimmedSurface] Triangulating ${continuousHoles.length} hole loops`);
 
         // If boundary is sparse (e.g., just 4 rectangle corners), densify it

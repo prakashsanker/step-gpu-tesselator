@@ -17,7 +17,7 @@
 import puppeteer from 'puppeteer';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import fs from 'fs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -47,6 +47,7 @@ function parseArgs(argv) {
         warmup: null,
         timeoutMs: null,
         filter: null,
+        maxFiles: null,
         prewarm: true,
     };
 
@@ -72,6 +73,9 @@ function parseArgs(argv) {
         } else if (arg === '--filter') {
             parsed.filter = argv[i + 1] || null;
             i += 1;
+        } else if (arg === '--max-files') {
+            parsed.maxFiles = Number(argv[i + 1]);
+            i += 1;
         } else if (arg === '--no-prewarm') {
             parsed.prewarm = false;
         } else if (arg === '--help' || arg === '-h') {
@@ -94,6 +98,7 @@ Options:
   --warmup N                Warmup runs per model
   --timeout-ms N            Per-run timeout in milliseconds
   --filter PATTERN          Substring filter on model name/path
+  --max-files N             Limit selected model count after filtering
   --no-prewarm              Disable one-time harness prewarm run
   --help                    Show this help
 `);
@@ -101,18 +106,11 @@ Options:
 
 const SUITES = {
     canary: {
-        description: 'Fast representative set for tight dev loop',
-        timeoutMs: 180000,
+        description: 'All non-real-world STEP files (larger stability gate)',
+        timeoutMs: 300000,
         warmupRuns: 0,
         benchmarkRuns: 1,
-        models: [
-            { name: 'Plate XLarge (holes)', path: 'step-examples/benchmark/plate-xlarge-20x20.step', category: 'holes' },
-            { name: 'Cone (primitive)', path: 'step-examples/c4-surfaces/cone.step', category: 'cone' },
-            { name: 'Cylinder With Hole (trim)', path: 'step-examples/c6-trimmed/cylinder-with-hole.step', category: 'trimmed' },
-            { name: 'BSpline Bowl', path: 'step-examples/c5-bspline/bspline-bowl.step', category: 'bspline' },
-            { name: 'Conical Surface (complex)', path: 'step-examples/complex/conical-surface.step', category: 'complex' },
-            { name: 'VM-001', path: 'step-examples/VM-001.STEP', category: 'industry' },
-        ],
+        models: [],
     },
     representative: {
         description: 'Real-world performance gate including electronic enclosure',
@@ -161,6 +159,34 @@ const EXCLUDED_MODELS = [
     { path: 'step-examples/complex/rotor-201nal.step', reason: 'Timeout (too slow for routine perf loop)' },
 ];
 
+// Canary policy guardrails:
+// - Include VM-001 in canary by default (even though it's real-world).
+// - Keep rocky_house/rotor excluded from routine loops.
+const CANARY_ALWAYS_INCLUDE = new Set([
+    'step-examples/VM-001.STEP',
+]);
+const CANARY_REQUIRED_EXCLUDE_PATTERNS = [
+    /rocky_house/i,
+    /rotor-201nal/i,
+];
+
+const REAL_WORLD_PATH_PATTERNS = [
+    /^step-examples\/Electronic Enclousre\.STEP$/i,
+    /^step-examples\/VM-\d+\.STEP$/i,
+    /^step-examples\/external\//i,
+];
+
+const EXCLUDED_BASENAME_PATTERNS = [
+    /rocky_house/i,
+    /rotor/i,
+];
+
+const BROKEN_CANARY_FILES = new Set([
+    'step-examples/c2-holes/2.2-projection/tilted-triangle-no-plane.step',
+    'step-examples/complex/air.step',
+    'step-examples/complex/nissan.step',
+]);
+
 const PHASE_KEYS = [
     'loadStepFile',
     'extractFacesWithEdges',
@@ -171,6 +197,119 @@ const PHASE_KEYS = [
     'computeNormals',
     'meshAssembly',
 ];
+
+const CANARY_QUALITY_GUARDS = [
+    {
+        path: 'step-examples/c4-surfaces/cone.step',
+        minTriangles: 700,
+        minTriRatio: 0.35,
+        reason: 'Cone seam/twist regressions collapse triangle coverage',
+    },
+    {
+        path: 'step-examples/complex/conical-surface.step',
+        minTriangles: 1000,
+        minTriRatio: 0.75,
+        reason: 'Complex conical trims should not collapse to under-resolved meshes',
+    },
+];
+
+function walkStepFiles(relativeDir) {
+    const root = join(PROJECT_ROOT, relativeDir);
+    const out = [];
+
+    const recurse = (absDir, relDir) => {
+        const entries = fs.readdirSync(absDir, { withFileTypes: true });
+        for (const entry of entries) {
+            const absPath = join(absDir, entry.name);
+            const relPath = `${relDir}/${entry.name}`;
+            if (entry.isDirectory()) {
+                recurse(absPath, relPath);
+                continue;
+            }
+            if (!entry.isFile()) continue;
+            if (!/\.(step|stp)$/i.test(entry.name)) continue;
+            out.push(relPath);
+        }
+    };
+
+    recurse(root, relativeDir);
+    return out.sort();
+}
+
+function categorizePath(relativePath) {
+    const parts = relativePath.split('/');
+    return parts.length >= 2 ? parts[1] : 'misc';
+}
+
+function shouldExcludeCanary(relativePath) {
+    if (CANARY_ALWAYS_INCLUDE.has(relativePath)) return null;
+    for (const pattern of REAL_WORLD_PATH_PATTERNS) {
+        if (pattern.test(relativePath)) return 'real-world';
+    }
+    if (BROKEN_CANARY_FILES.has(relativePath)) return 'known-broken';
+    const fileName = basename(relativePath);
+    for (const pattern of EXCLUDED_BASENAME_PATTERNS) {
+        if (pattern.test(fileName)) return 'requested-exclusion';
+    }
+    return null;
+}
+
+function validateCanaryPolicy(selected, excluded) {
+    const missingRequired = [...CANARY_ALWAYS_INCLUDE].filter((path) => !selected.includes(path));
+    if (missingRequired.length > 0) {
+        throw new Error(`Canary policy violation: required include missing: ${missingRequired.join(', ')}`);
+    }
+
+    const excludedPaths = excluded.map((item) => item.path);
+    const missingExcluded = CANARY_REQUIRED_EXCLUDE_PATTERNS.filter(
+        (pattern) => !excludedPaths.some((path) => pattern.test(path))
+    );
+    if (missingExcluded.length > 0) {
+        throw new Error(`Canary policy violation: expected exclusions missing for patterns: ${missingExcluded.map(String).join(', ')}`);
+    }
+}
+
+function buildCanaryModels(parsed) {
+    const allStepFiles = walkStepFiles('step-examples');
+    const excluded = [];
+    let selected = [];
+
+    for (const relativePath of allStepFiles) {
+        const excludedReason = shouldExcludeCanary(relativePath);
+        if (excludedReason) {
+            excluded.push({ path: relativePath, reason: excludedReason });
+            continue;
+        }
+        selected.push(relativePath);
+    }
+
+    // Enforce policy before optional filters so default canary cannot silently drift.
+    validateCanaryPolicy(selected, excluded);
+
+    if (parsed.filter) {
+        const pattern = parsed.filter.toLowerCase();
+        selected = selected.filter((path) => path.toLowerCase().includes(pattern));
+    }
+    if (Number.isFinite(parsed.maxFiles) && parsed.maxFiles > 0) {
+        selected = selected.slice(0, parsed.maxFiles);
+    }
+    if (!parsed.filter) {
+        for (const requiredPath of CANARY_ALWAYS_INCLUDE) {
+            if (!selected.includes(requiredPath) && allStepFiles.includes(requiredPath)) {
+                selected.push(requiredPath);
+            }
+        }
+        selected.sort();
+    }
+
+    const models = selected.map((path) => ({
+        name: path.replace('step-examples/', ''),
+        path,
+        category: categorizePath(path),
+    }));
+
+    return { models, excluded };
+}
 
 function selectConfig(parsed) {
     const suiteConfig = SUITES[parsed.suite];
@@ -187,16 +326,27 @@ function selectConfig(parsed) {
         benchmarkRuns: Number.isFinite(parsed.runs) ? parsed.runs : suiteConfig.benchmarkRuns,
         suite: parsed.suite,
         suiteDescription: suiteConfig.description,
+        filter: parsed.filter,
+        maxFiles: parsed.maxFiles,
         prewarm: parsed.prewarm !== false,
     };
 
-    let models = [...suiteConfig.models];
-    if (parsed.filter) {
+    let models = [];
+    let excluded = [...EXCLUDED_MODELS];
+    if (parsed.suite === 'canary') {
+        const canary = buildCanaryModels(parsed);
+        models = canary.models;
+        excluded = [...excluded, ...canary.excluded];
+    } else {
+        models = [...suiteConfig.models];
+    }
+
+    if (parsed.filter && parsed.suite !== 'canary') {
         const pattern = parsed.filter.toLowerCase();
         models = models.filter((m) => (`${m.name} ${m.path}`).toLowerCase().includes(pattern));
     }
 
-    return { cfg, models };
+    return { cfg, models, excluded };
 }
 
 function percentile(values, p) {
@@ -452,7 +602,7 @@ async function prewarmHarness(page, config) {
     );
 }
 
-function printSuiteHeader(config, models) {
+function printSuiteHeader(config, models, excluded) {
     log('\n' + '='.repeat(120), 'blue');
     log(` Representative Benchmark (${config.suite})`, 'bold');
     log(` ${config.suiteDescription}`, 'cyan');
@@ -461,7 +611,7 @@ function printSuiteHeader(config, models) {
     log('='.repeat(120), 'blue');
 
     log('\nExcluded from routine suites:', 'yellow');
-    for (const ex of EXCLUDED_MODELS) {
+    for (const ex of excluded) {
         log(`  - ${ex.path}: ${ex.reason}`, 'dim');
     }
 }
@@ -562,7 +712,38 @@ function printAggregateSummary(results) {
     log(`  ref avg runtime: ${formatMs(mean(refTimes))} (p90 ${formatMs(percentile(refTimes, 90))})`, 'cyan');
 }
 
-function saveResultsJson(config, models, results) {
+function evaluateCanaryQualityGuards(results) {
+    const violations = [];
+    const byPath = new Map(results.map((r) => [r.path, r]));
+    for (const guard of CANARY_QUALITY_GUARDS) {
+        const result = byPath.get(guard.path);
+        if (!result) {
+            violations.push(`${guard.path}: missing from canary selection (${guard.reason})`);
+            continue;
+        }
+        if (!result.success) {
+            violations.push(`${guard.path}: benchmark failed (${guard.reason})`);
+            continue;
+        }
+        const oursTris = result.ours?.triangleCount ?? 0;
+        const refTris = result.ref?.triangleCount ?? 0;
+        const triRatio = refTris > 0 ? oursTris / refTris : null;
+
+        if (Number.isFinite(guard.minTriangles) && oursTris < guard.minTriangles) {
+            violations.push(
+                `${guard.path}: triangles ${oursTris} < ${guard.minTriangles} (${guard.reason})`
+            );
+        }
+        if (Number.isFinite(guard.minTriRatio) && triRatio !== null && triRatio < guard.minTriRatio) {
+            violations.push(
+                `${guard.path}: triRatio ${triRatio.toFixed(3)} < ${guard.minTriRatio} (${guard.reason})`
+            );
+        }
+    }
+    return violations;
+}
+
+function saveResultsJson(config, models, results, excluded) {
     const output = {
         timestamp: new Date().toISOString(),
         suite: config.suite,
@@ -574,7 +755,7 @@ function saveResultsJson(config, models, results) {
             modelCount: models.length,
             prewarm: config.prewarm,
         },
-        excluded: EXCLUDED_MODELS,
+        excluded,
         results,
     };
 
@@ -585,19 +766,20 @@ function saveResultsJson(config, models, results) {
 
 async function main() {
     const parsed = parseArgs(args);
-    const { cfg: config, models } = selectConfig(parsed);
+    const { cfg: config, models, excluded } = selectConfig(parsed);
 
     if (models.length === 0) {
         throw new Error('No benchmark models selected. Check --filter or suite.');
     }
 
-    printSuiteHeader(config, models);
+    printSuiteHeader(config, models, excluded);
 
     let viteProcess = null;
     let vitePort = config.vitePort;
     let browser = null;
     const results = [];
     let hadFatalError = false;
+    let qualityViolations = [];
 
     try {
         const vite = await startViteServer(config);
@@ -635,7 +817,18 @@ async function main() {
 
         printResultsTable(results);
         printAggregateSummary(results);
-        saveResultsJson(config, models, results);
+        if (config.suite === 'canary' && !config.filter && !Number.isFinite(config.maxFiles)) {
+            qualityViolations = evaluateCanaryQualityGuards(results);
+            if (qualityViolations.length > 0) {
+                log('\nCanary Quality Gate: FAIL', 'red');
+                for (const violation of qualityViolations) {
+                    log(`  - ${violation}`, 'red');
+                }
+            } else {
+                log('\nCanary Quality Gate: PASS', 'green');
+            }
+        }
+        saveResultsJson(config, models, results, excluded);
     } catch (err) {
         hadFatalError = true;
         log(`\nBenchmark runner error: ${err.message}`, 'red');
@@ -651,7 +844,7 @@ async function main() {
         }
     }
 
-    const hasFailure = results.some((r) => !r.success);
+    const hasFailure = results.some((r) => !r.success) || qualityViolations.length > 0;
     process.exit(hadFatalError || hasFailure ? 1 : 0);
 }
 

@@ -16,6 +16,11 @@ New commands:
 - `npm run -s bench:representative` (real-world gate, includes Electronic Enclosure)
 - `npm run -s bench:full` (broader milestone sweep)
 
+Canary policy (guarded in code):
+
+- `VM-001` is always included in canary as a required large-file sentinel.
+- `rocky_house*` and `rotor-201nal.step` stay excluded from routine canary/perf loops.
+
 `tests/benchmark-comprehensive.js` now supports:
 
 - `--suite canary|representative|full`
