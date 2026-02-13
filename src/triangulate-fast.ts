@@ -11,30 +11,61 @@ import earcut from 'earcut';
 import { earClippingOptimized } from './ear-clipping-optimized';
 import { earClippingParallel } from './ear-clipping-parallel';
 
-// Thresholds for algorithm selection.
-// Empirically, earcut outperforms our GPU paths for many medium polygons once
-// dispatch/setup overhead is included, so keep CPU coverage broad and reserve
-// GPU paths for truly large loops.
-const EARCUT_THRESHOLD = 1024;
-const OPTIMIZED_THRESHOLD = 4096;
+// Default thresholds for algorithm selection.
+// Runtime overrides (via global flags) allow benchmark experiments:
+// - __TRI_FAST_EARCUT_THRESHOLD__
+// - __TRI_FAST_OPTIMIZED_THRESHOLD__
+// - __TRI_FAST_GPU_PRIORITY__
+const DEFAULT_EARCUT_THRESHOLD = 1024;
+const DEFAULT_OPTIMIZED_THRESHOLD = 4096;
 
 type Vec2 = [number, number];
 type Vec3 = [number, number, number];
+
+interface TriangulateFastThresholds {
+  earcutThreshold: number;
+  optimizedThreshold: number;
+}
+
+function readGlobalNumber(key: string): number | undefined {
+  const raw = (globalThis as any)?.[key];
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
+}
+
+function resolveThresholds(): TriangulateFastThresholds {
+  const gpuPriority = (globalThis as any)?.__TRI_FAST_GPU_PRIORITY__ === true;
+  const perfGeometryOnly = (globalThis as any)?.__PERF_GEOMETRY_ONLY_LOAD__ === true;
+
+  const defaultEarcut = (gpuPriority || perfGeometryOnly) ? 128 : DEFAULT_EARCUT_THRESHOLD;
+  const defaultOptimized = (gpuPriority || perfGeometryOnly) ? 1024 : DEFAULT_OPTIMIZED_THRESHOLD;
+
+  const earcutThreshold = Math.max(
+    16,
+    Math.floor(readGlobalNumber('__TRI_FAST_EARCUT_THRESHOLD__') ?? defaultEarcut)
+  );
+  const optimizedThreshold = Math.max(
+    earcutThreshold + 1,
+    Math.floor(readGlobalNumber('__TRI_FAST_OPTIMIZED_THRESHOLD__') ?? defaultOptimized)
+  );
+
+  return { earcutThreshold, optimizedThreshold };
+}
 
 /**
  * Triangulate a simple polygon using the optimal algorithm.
  */
 export async function triangulateFast(points: Vec2[] | Vec3[]): Promise<number[][]> {
   const n = points.length;
+  const { earcutThreshold, optimizedThreshold } = resolveThresholds();
 
   if (n < 3) return [];
   if (n === 3) return [[0, 1, 2]];
 
-  if (n < EARCUT_THRESHOLD) {
+  if (n < earcutThreshold) {
     return triangulateWithEarcut(points);
   }
 
-  if (n <= OPTIMIZED_THRESHOLD) {
+  if (n <= optimizedThreshold) {
     return triangulateWithGPUOptimized(points);
   }
 

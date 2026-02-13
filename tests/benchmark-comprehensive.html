@@ -55,12 +55,14 @@
                     const prevEnableLoadDiagnostics = globalThis.__ENABLE_LOAD_DIAGNOSTICS__;
                     const prevCurveVerbose = globalThis.__CURVE_VERBOSE_LOGS__;
                     const prevTessVerbose = globalThis.__TESSELLATION_VERBOSE_LOGS__;
+                    const prevTriFastGpuPriority = globalThis.__TRI_FAST_GPU_PRIORITY__;
                     globalThis.__PERF_GEOMETRY_ONLY_LOAD__ = true;
                     globalThis.__ENABLE_XCAF_READER__ = false;
                     globalThis.__ENABLE_STEP_COLOR_PARSING__ = false;
                     globalThis.__ENABLE_LOAD_DIAGNOSTICS__ = false;
                     globalThis.__CURVE_VERBOSE_LOGS__ = false;
                     globalThis.__TESSELLATION_VERBOSE_LOGS__ = false;
+                    globalThis.__TRI_FAST_GPU_PRIORITY__ = true;
 
                     let mesh;
                     try {
@@ -95,6 +97,11 @@
                             delete globalThis.__TESSELLATION_VERBOSE_LOGS__;
                         } else {
                             globalThis.__TESSELLATION_VERBOSE_LOGS__ = prevTessVerbose;
+                        }
+                        if (prevTriFastGpuPriority === undefined) {
+                            delete globalThis.__TRI_FAST_GPU_PRIORITY__;
+                        } else {
+                            globalThis.__TRI_FAST_GPU_PRIORITY__ = prevTriFastGpuPriority;
                         }
                     }
 

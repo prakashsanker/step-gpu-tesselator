@@ -142,6 +142,28 @@ Gate:
 Gate:
 - Better p90 and worst-case latency on large STEP files.
 
+### M3/M4 Execution Track (Current Focus)
+1. GPU-priority triangulation policy (in progress):
+   - Make triangulation thresholds runtime-tunable.
+   - Enable GPU-priority thresholds in benchmark perf mode.
+   - Verify geometry quality on cylinder/cone trim canaries before broader rollout.
+2. Batched planar triangulation:
+   - Route no-hole planar faces through batched GPU triangulation (single dispatch per batch).
+   - Keep hole/complex topology on current stable path.
+3. Batched curved-face dispatch preparation:
+   - Build per-face trim/sampling jobs first, submit compute in grouped batches.
+   - Reduce one-face-at-a-time GPU submit/readback behavior.
+4. Post-tessellation GPU normals:
+   - Compute normals in a single mesh-level GPU pass for large outputs.
+   - Keep CPU fallback below a triangle threshold.
+5. Sync minimization:
+   - Reuse GPU buffers/pipelines across faces/models.
+   - Avoid per-face mapAsync/readback inside inner loops when possible.
+
+Validation cadence for this track:
+- Per step: `npm run -s bench:canary` + targeted visual checks (`c4-surfaces/*`, `c6-trimmed/*`, `VM-001`).
+- Every 2 steps: representative run + full correctness suite.
+
 ### M5: Final Quality/Performance Balance
 - Tune defaults (tolerances/deflection-like knobs) for best quality-per-ms.
 - Validate no new holes/gaps/artifacts.
