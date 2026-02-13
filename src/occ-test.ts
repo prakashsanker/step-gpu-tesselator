@@ -3510,13 +3510,54 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
               let numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_DEFAULT_SAMPLES__') ?? 16));
 
               if (curveType === 'Circle') {
-                // Keep planar circular boundaries denser so cylinder caps don't become
-                // visibly polygonal after planar tessellation.
-                const defaultAngleStep = face.surfaceType === 'Plane' ? (Math.PI / 36) : (Math.PI / 12);
+                // Adaptive circular sampling (deflection-guided) to prevent very dense
+                // planar boundaries from exploding triangle counts on large models.
+                const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+                const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+                const defaultAngleStep = face.surfaceType === 'Plane'
+                  ? (preferGeometryOnlyLoad ? (Math.PI / 18) : (Math.PI / 24))
+                  : (preferGeometryOnlyLoad ? (Math.PI / 9) : (Math.PI / 12));
                 const angleStepKey = face.surfaceType === 'Plane'
                   ? '__EDGE_CIRCLE_ANGLE_STEP_PLANE__'
                   : '__EDGE_CIRCLE_ANGLE_STEP__';
-                const angleStep = readGlobalNumber(angleStepKey) ?? defaultAngleStep;
+                let angleStep = readGlobalNumber(angleStepKey) ?? defaultAngleStep;
+
+                if ((readGlobalBoolean('__EDGE_CIRCLE_ADAPTIVE_SAMPLING__', true)) && typeof curveAdaptor.Circle === 'function') {
+                  try {
+                    const circle = curveAdaptor.Circle();
+                    const radius = Math.max(1e-6, Math.abs(circle.Radius?.() ?? 0));
+                    if (radius > 1e-6) {
+                      const ratioDefault = face.surfaceType === 'Plane'
+                        ? (preferGeometryOnlyLoad ? 0.018 : 0.012)
+                        : (preferGeometryOnlyLoad ? 0.026 : 0.018);
+                      const deflRatio = Math.max(
+                        0.001,
+                        readGlobalNumber('__EDGE_CIRCLE_DEFLECTION_RATIO__') ?? ratioDefault
+                      );
+                      const deflAbs = readGlobalNumber('__EDGE_CIRCLE_DEFLECTION_ABS__');
+                      const targetDeflection = Math.max(1e-6, deflAbs ?? (radius * deflRatio));
+                      const cosArg = clamp(1 - (targetDeflection / radius), -1, 1);
+                      const stepByDeflection = 2 * Math.acos(cosArg);
+                      const maxAngleStepDefault = face.surfaceType === 'Plane'
+                        ? (preferGeometryOnlyLoad ? 0.36 : 0.28)
+                        : (preferGeometryOnlyLoad ? 0.45 : 0.35);
+                      const maxAngleStep = Math.max(
+                        0.06,
+                        readGlobalNumber('__EDGE_CIRCLE_MAX_ANGLE_STEP__') ?? maxAngleStepDefault
+                      );
+                      const minAngleStep = Math.max(
+                        0.02,
+                        Math.min(maxAngleStep, readGlobalNumber('__EDGE_CIRCLE_MIN_ANGLE_STEP__') ?? (preferGeometryOnlyLoad ? 0.1 : 0.08))
+                      );
+                      if (Number.isFinite(stepByDeflection) && stepByDeflection > 1e-6) {
+                        angleStep = clamp(stepByDeflection, minAngleStep, maxAngleStep);
+                      }
+                    }
+                    circle.delete?.();
+                  } catch {
+                    // Fall back to configured/default angle step.
+                  }
+                }
                 numSamples = Math.ceil(Math.abs(paramRange) / angleStep);
               } else if (curveType === 'Ellipse') {
                 numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_ELLIPSE_SAMPLES__') ?? 20));
@@ -7443,6 +7484,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         let usedOccBuildClassifier = false;
         let trimmedBuildOptions: TrimmedSurfaceBuildOptions | undefined;
 
+        const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
         const isCylinderSurfaceForTrim = face.surfaceType === 'Cylinder' && surface.type === 'CYLINDRICAL_SURFACE';
         if (isCylinderSurfaceForTrim) {
           const period = Math.PI * 2;
@@ -7450,25 +7492,88 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           const vBounds = getLoopComponentBounds(loops.uvOuter, 1);
           const uSpan = Math.max(1e-6, uBounds.uMax - uBounds.uMin);
           const vSpan = Math.max(1e-6, vBounds.max - vBounds.min);
+          const hasTrimHoles = loops.uvHoles.length > 0;
+          const clampInt = (value: number, min: number, max: number) =>
+            Math.max(min, Math.min(max, Math.round(value)));
 
-          const fullUSamples = Math.max(32, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_FULL__') ?? 64));
-          const minUSamples = Math.max(16, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_MIN__') ?? 32));
-          const maxUSamples = Math.max(minUSamples, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_MAX__') ?? 128));
-          const minUSamplesWithHoles = Math.max(minUSamples, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_HOLES_MIN__') ?? 48));
+          // Adaptive circumferential sampling:
+          // Use a mild deflection target so we can lower triangle count while
+          // keeping circular walls visually stable.
+          const radius = Math.max(1e-6, Math.abs(surface.radius));
+          const targetDeflectionRatio = Math.max(
+            0.0025,
+            readGlobalNumber('__CYLINDER_TRIM_TARGET_DEFLECTION_RATIO__') ?? (preferGeometryOnlyLoad ? 0.016 : 0.012)
+          );
+          const targetDeflectionAbs = readGlobalNumber('__CYLINDER_TRIM_TARGET_DEFLECTION_ABS__');
+          const targetDeflection = Math.max(
+            1e-6,
+            targetDeflectionAbs ?? (radius * targetDeflectionRatio)
+          );
+          const cosArg = Math.max(-1, Math.min(1, 1 - (targetDeflection / radius)));
+          const stepByDeflection = 2 * Math.acos(cosArg);
+          const maxAngularStep = Math.max(
+            0.08,
+            Math.min(Math.PI / 3, readGlobalNumber('__CYLINDER_TRIM_MAX_ANGULAR_STEP__') ?? (preferGeometryOnlyLoad ? 0.24 : 0.2))
+          );
+          const minAngularStep = Math.max(
+            0.05,
+            Math.min(maxAngularStep, readGlobalNumber('__CYLINDER_TRIM_MIN_ANGULAR_STEP__') ?? (preferGeometryOnlyLoad ? 0.12 : 0.1))
+          );
+          const effectiveAngularStep = Number.isFinite(stepByDeflection) && stepByDeflection > 1e-6
+            ? Math.max(minAngularStep, Math.min(maxAngularStep, stepByDeflection))
+            : maxAngularStep;
+          const adaptiveFullUSamples = Math.ceil(period / effectiveAngularStep);
+
+          const fullUSamples = Math.max(
+            preferGeometryOnlyLoad ? 20 : 24,
+            Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_FULL__') ?? adaptiveFullUSamples)
+          );
+          const minUSamples = Math.max(16, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 20 : 24)));
+          const maxUSamples = Math.max(minUSamples, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 72 : 96)));
+          const minUSamplesWithHoles = Math.max(
+            minUSamples,
+            Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_HOLES_MIN__') ?? (preferGeometryOnlyLoad ? 24 : 28))
+          );
+          const seamMinUSamples = Math.max(
+            minUSamples,
+            Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_SEAM_MIN__') ?? (preferGeometryOnlyLoad ? 26 : 30))
+          );
           let gridDensityU = Math.round(fullUSamples * (uSpan / period));
-          if (loops.uvHoles.length > 0) {
+          if (hasTrimHoles) {
             gridDensityU = Math.max(gridDensityU, minUSamplesWithHoles);
           }
-          gridDensityU = Math.max(minUSamples, Math.min(maxUSamples, gridDensityU));
-
-          const vStep = Math.max(0.2, readGlobalNumber('__CYLINDER_TRIM_V_STEP__') ?? 2.0);
-          const minVDensity = Math.max(4, Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_MIN__') ?? 8));
-          const maxVDensity = Math.max(minVDensity, Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_MAX__') ?? 24));
-          let gridDensityV = Math.ceil(vSpan / vStep);
-          if (loops.uvHoles.length > 0) {
-            gridDensityV = Math.max(gridDensityV, Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_HOLES_MIN__') ?? 10));
+          if (cylinderCrossesSeam || degeneratePeriodicTrim) {
+            gridDensityU = Math.max(gridDensityU, seamMinUSamples);
           }
-          gridDensityV = Math.max(minVDensity, Math.min(maxVDensity, gridDensityV));
+
+          const holePointCount = loops.uvHoles.reduce((sum, loop) => sum + loop.length, 0);
+          if (holePointCount > (preferGeometryOnlyLoad ? 220 : 120)) {
+            gridDensityU = Math.max(gridDensityU, Math.ceil(minUSamplesWithHoles * 1.1));
+          }
+          gridDensityU = clampInt(gridDensityU, minUSamples, maxUSamples);
+
+          const vStep = Math.max(0.2, readGlobalNumber('__CYLINDER_TRIM_V_STEP__') ?? (preferGeometryOnlyLoad ? 3.5 : 3.0));
+          const minVDensity = Math.max(3, Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 4 : 5)));
+          const maxVDensity = Math.max(minVDensity, Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 14 : 18)));
+          const minVDensityWithHoles = Math.max(
+            minVDensity,
+            Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_HOLES_MIN__') ?? (preferGeometryOnlyLoad ? 6 : 7))
+          );
+          const seamMinVDensity = Math.max(
+            minVDensity,
+            Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_SEAM_MIN__') ?? (preferGeometryOnlyLoad ? 7 : 8))
+          );
+          let gridDensityV = Math.ceil(vSpan / vStep);
+          if (hasTrimHoles) {
+            gridDensityV = Math.max(gridDensityV, minVDensityWithHoles);
+          }
+          if (cylinderCrossesSeam || degeneratePeriodicTrim) {
+            gridDensityV = Math.max(gridDensityV, seamMinVDensity);
+          }
+          if (holePointCount > (preferGeometryOnlyLoad ? 220 : 120)) {
+            gridDensityV += 1;
+          }
+          gridDensityV = clampInt(gridDensityV, minVDensity, maxVDensity);
 
           trimmedBuildOptions = {
             ...trimmedBuildOptions,
@@ -7478,6 +7583,71 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             // Keep the OCCT-inspired cylinder hole path enabled by default.
             // This is the known-stable visual mode (with slight corner curvature).
             preferGridForHoles: true,
+          };
+        }
+        const isConeSurfaceForTrim = face.surfaceType === 'Cone' && surface.type === 'CONICAL_SURFACE';
+        if (isConeSurfaceForTrim) {
+          const period = Math.PI * 2;
+          const uBounds = getLoopUBounds(loops.uvOuter);
+          const vBounds = getLoopComponentBounds(loops.uvOuter, 1);
+          const uSpan = Math.max(1e-6, uBounds.uMax - uBounds.uMin);
+          const vSpan = Math.max(1e-6, vBounds.max - vBounds.min);
+          const hasTrimHoles = loops.uvHoles.length > 0;
+          const clampInt = (value: number, min: number, max: number) =>
+            Math.max(min, Math.min(max, Math.round(value)));
+
+          const targetAngularStep = Math.max(
+            0.08,
+            Math.min(
+              Math.PI / 3,
+              readGlobalNumber('__CONE_TRIM_TARGET_ANGULAR_STEP__') ?? (hasTrimHoles ? (preferGeometryOnlyLoad ? 0.2 : 0.16) : (preferGeometryOnlyLoad ? 0.24 : 0.2))
+            )
+          );
+          const adaptiveFullUSamples = Math.ceil(period / targetAngularStep);
+          const fullUSamples = Math.max(
+            preferGeometryOnlyLoad ? 18 : 20,
+            Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_FULL__') ?? adaptiveFullUSamples)
+          );
+          const minUSamples = Math.max(14, Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 18 : 20)));
+          const maxUSamples = Math.max(minUSamples, Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 56 : 72)));
+          const minUSamplesWithHoles = Math.max(
+            minUSamples,
+            Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_HOLES_MIN__') ?? (preferGeometryOnlyLoad ? 20 : 24))
+          );
+          const seamMinUSamples = Math.max(
+            minUSamples,
+            Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_SEAM_MIN__') ?? (preferGeometryOnlyLoad ? 22 : 26))
+          );
+          let gridDensityU = Math.round(fullUSamples * (uSpan / period));
+          if (hasTrimHoles) {
+            gridDensityU = Math.max(gridDensityU, minUSamplesWithHoles);
+          }
+          if (coneCrossesSeam || degeneratePeriodicTrim) {
+            gridDensityU = Math.max(gridDensityU, seamMinUSamples);
+          }
+          gridDensityU = clampInt(gridDensityU, minUSamples, maxUSamples);
+
+          const vStep = Math.max(0.2, readGlobalNumber('__CONE_TRIM_V_STEP__') ?? (preferGeometryOnlyLoad ? 4.0 : 3.5));
+          const minVDensity = Math.max(3, Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 3 : 4)));
+          const maxVDensity = Math.max(minVDensity, Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 10 : 14)));
+          const minVDensityWithHoles = Math.max(
+            minVDensity,
+            Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_HOLES_MIN__') ?? (preferGeometryOnlyLoad ? 5 : 6))
+          );
+          let gridDensityV = Math.ceil(vSpan / vStep);
+          if (hasTrimHoles) {
+            gridDensityV = Math.max(gridDensityV, minVDensityWithHoles);
+          }
+          if (coneCrossesSeam || degeneratePeriodicTrim) {
+            gridDensityV = Math.max(gridDensityV, minVDensityWithHoles);
+          }
+          gridDensityV = clampInt(gridDensityV, minVDensity, maxVDensity);
+
+          trimmedBuildOptions = {
+            ...trimmedBuildOptions,
+            // Cone trims benefit from denser angular sampling than radial sampling.
+            gridDensityU,
+            gridDensityV,
           };
         }
 

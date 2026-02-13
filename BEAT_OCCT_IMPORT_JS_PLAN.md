@@ -499,3 +499,18 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
   - Every step: `npm run -s bench:canary` (80-model canary including VM-001).
   - Every 2 steps: `npm run -s bench:representative`.
   - Every 2-3 steps: full correctness gate (`node --experimental-vm-modules tests/run-tests.js`), then AI visual run when needed.
+
+### 2026-02-13 Triangle Reduction Track (Execution)
+
+- Optimization being executed now:
+  - Reduce triangle inflation at the source (boundary sampling + trim grid density), with sharp-feature preservation.
+- Why this is first:
+  - `Electronic Enclosure` remains triangle-heavy (`~5.7x` ref triangles), and this directly scales tessellation cost.
+- Concrete implementation steps:
+  1. Coarsen smooth circular boundary sampling in perf mode using adaptive deflection defaults (not fixed dense arcs).
+  2. Tighten cylinder/cone trimmed-face U/V density caps in perf mode, especially for high-complexity trims.
+  3. Keep seam/hole guardrails and corner-preserving behavior so we do not blunt slots or lose walls.
+- Validation for each step:
+  - `npm run -s bench:canary`
+  - `npm run -s bench:representative` (includes Electronic Enclosure + VM-001)
+  - Visual spot-check on trimmed cylinder/cone fixtures before accepting.
