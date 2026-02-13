@@ -731,3 +731,32 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 - Takeaway:
   - Curved-batch CPU stitching moved to GPU offsets+assembly path without correctness failures in canary.
   - Representative slowdown multiple improved only marginally; more GPU-side fusion is still required.
+
+### 2026-02-13 M4 Step: Remove Curved-Face Re-Flattening (Carry Flat Mesh Buffers)
+
+- Optimization implemented in code:
+  - `tessellatedMeshToVerticesAndTriangles(...)` now keeps native typed mesh buffers attached to curved-face results.
+  - Curved-face batch GPU assembly path now consumes these flat buffers directly (`getFaceResultFlatArrays`) instead of rebuilding typed arrays from `Vec3[]/number[][]`.
+  - Non-batch append path also consumes flat buffers directly when available, avoiding extra per-face flattening work in hot loops.
+
+- Validation:
+  - `npm run -s bench:canary`
+    - successful: `80/80`
+    - failed: `0/80`
+    - wins vs `occt-import-js`: `77/80`
+    - speedup median: `4.44x faster`
+  - `npm run -s bench:representative`
+    - Electronic Enclosure: `ours=7607.5ms`, `ref=3763.2ms`
+      - `ours/ref = 2.02x slower`
+      - `ref/ours = 0.495x`
+    - VM-001: `ours=290.2ms`, `ref=185.0ms` (`1.57x slower`)
+    - wins vs `occt-import-js`: `4/6`
+
+- Electronic Enclosure trend vs previous representative sample:
+  - ours faster by `442.9ms`
+  - ratio improved by `1.060x` (`2.14x slower -> 2.02x slower`)
+  - triRatio unchanged (`3.649x`)
+
+- Takeaway:
+  - Removing CPU re-flattening delivered a meaningful representative ratio improvement on Electronic Enclosure.
+  - Next step should continue reducing CPU-side per-face object assembly (toward model-level typed output assembly).

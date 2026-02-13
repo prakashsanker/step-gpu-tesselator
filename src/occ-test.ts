@@ -4697,27 +4697,34 @@ async function tessellatePlanarFaceFromOCC(
 /**
  * Helper to convert TessellatedMesh to vertices/triangles format
  */
-function tessellatedMeshToVerticesAndTriangles(mesh: { positions: Float32Array; indices: Uint32Array }): {
+interface FaceTessellationResult {
   vertices: Vec3[];
   triangles: number[][];
-} {
-  const vertices: Vec3[] = [];
-  for (let i = 0; i < mesh.positions.length; i += 3) {
-    vertices.push([mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]]);
-  }
-
-  const triangles: number[][] = [];
-  for (let i = 0; i < mesh.indices.length; i += 3) {
-    triangles.push([mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]]);
-  }
-
-  return { vertices, triangles };
+  flat?: {
+    positions: Float32Array;
+    indices: Uint32Array;
+  };
 }
 
-function faceMeshToFlatArrays(result: { vertices: Vec3[]; triangles: number[][] }): {
+function tessellatedMeshToVerticesAndTriangles(mesh: { positions: Float32Array; indices: Uint32Array }): FaceTessellationResult {
+  return {
+    vertices: [],
+    triangles: [],
+    flat: {
+      positions: mesh.positions,
+      indices: mesh.indices,
+    },
+  };
+}
+
+function getFaceResultFlatArrays(result: FaceTessellationResult): {
   positions: Float32Array;
   indices: Uint32Array;
 } {
+  if (result.flat) {
+    return result.flat;
+  }
+
   const positions = new Float32Array(result.vertices.length * 3);
   for (let i = 0; i < result.vertices.length; i++) {
     const v = result.vertices[i];
@@ -6871,10 +6878,7 @@ async function tessellateFaceFromOcctTriangulation(face: FaceWithEdgesInfo): Pro
 /**
  * Tessellate a curved surface face using existing surface-tessellation functions
  */
-async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
-  vertices: Vec3[];
-  triangles: number[][];
-}> {
+async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<FaceTessellationResult> {
   const faceStart = performance.now();
   const curveVerboseLogs = curveDebugEnabled();
   const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
@@ -8328,38 +8332,47 @@ async function tessellateOCCShape(
 
   const appendFaceResult = (
     face: FaceWithEdgesInfo,
-    result: { vertices: Vec3[]; triangles: number[][] },
+    result: FaceTessellationResult,
     faceStart: number
   ) => {
-    if (face.isReversed) {
-      for (const tri of result.triangles) {
-        const temp = tri[1];
-        tri[1] = tri[2];
-        tri[2] = temp;
-      }
-      tessellationVerboseLog(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
-    }
+    const flat = getFaceResultFlatArrays(result);
+    const vertexCount = Math.floor(flat.positions.length / 3);
+    const triangleCount = Math.floor(flat.indices.length / 3);
 
     const faceColor = face.color || { r: 0.4, g: 0.6, b: 1.0 };
     if (face.color) hasAnyColor = true;
 
-    for (let i = 0; i < result.vertices.length; i++) {
-      allVertices.push(result.vertices[i]);
+    for (let i = 0; i < flat.positions.length; i += 3) {
+      allVertices.push([
+        flat.positions[i + 0],
+        flat.positions[i + 1],
+        flat.positions[i + 2],
+      ]);
       allColors.push(faceColor);
     }
 
-    for (const tri of result.triangles) {
-      allIndices.push(tri[0] + vertexOffset, tri[1] + vertexOffset, tri[2] + vertexOffset);
+    for (let i = 0; i < flat.indices.length; i += 3) {
+      const i0 = flat.indices[i + 0] + vertexOffset;
+      const i1 = flat.indices[i + 1] + vertexOffset;
+      const i2 = flat.indices[i + 2] + vertexOffset;
+      if (face.isReversed) {
+        allIndices.push(i0, i2, i1);
+      } else {
+        allIndices.push(i0, i1, i2);
+      }
+    }
+    if (face.isReversed) {
+      tessellationVerboseLog(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
     }
 
-    vertexOffset += result.vertices.length;
+    vertexOffset += vertexCount;
     processedCount++;
 
     const faceTime = performance.now() - faceStart;
     if (faceTime > 500) {
-      console.warn(`[Tessellate] SLOW face ${face.faceIndex} (${face.surfaceType}): ${(faceTime / 1000).toFixed(2)}s, ${result.vertices.length} verts, ${result.triangles.length} tris`);
+      console.warn(`[Tessellate] SLOW face ${face.faceIndex} (${face.surfaceType}): ${(faceTime / 1000).toFixed(2)}s, ${vertexCount} verts, ${triangleCount} tris`);
     }
-    pushFaceDiagnostic(face, 'ok', faceTime, result.vertices.length, result.triangles.length);
+    pushFaceDiagnostic(face, 'ok', faceTime, vertexCount, triangleCount);
   };
 
   const recordFaceError = (face: FaceWithEdgesInfo, faceStart: number, e: unknown) => {
@@ -8514,7 +8527,7 @@ async function tessellateOCCShape(
           ok: true;
           face: FaceWithEdgesInfo;
           faceStart: number;
-          result: { vertices: Vec3[]; triangles: number[][] };
+          result: FaceTessellationResult;
         } => batchResult.ok
       );
 
@@ -8527,7 +8540,7 @@ async function tessellateOCCShape(
         successfulBatchResults.length > 1
       ) {
         const batchFaces = successfulBatchResults.map((batchResult) => {
-          const flat = faceMeshToFlatArrays(batchResult.result);
+          const flat = getFaceResultFlatArrays(batchResult.result);
           return {
             ...batchResult,
             flat,
@@ -8593,7 +8606,7 @@ async function tessellateOCCShape(
     }
 
     try {
-      let result: { vertices: Vec3[]; triangles: number[][] };
+      let result: FaceTessellationResult;
       if (face.surfaceType === 'Plane') {
         result = await tessellatePlanarFaceFromOCC(face, triangulationMethod);
       } else if (curvedSurfaceTypes.has(face.surfaceType)) {
