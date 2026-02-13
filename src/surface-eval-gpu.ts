@@ -172,6 +172,15 @@ fn main(@builtin(global_invocation_id) gid: vec3u) {
 const gpuEvalCache: {
     device: GPUDevice | null;
     pipeline: GPUComputePipeline | null;
+    bindGroup: GPUBindGroup | null;
+    bindGroupRefs: {
+        uv: GPUBuffer | null;
+        index: GPUBuffer | null;
+        surfaces: GPUBuffer | null;
+        positions: GPUBuffer | null;
+        normals: GPUBuffer | null;
+        dispatch: GPUBuffer | null;
+    };
     uvBuffer: GPUBuffer | null;
     vertexSurfaceIndexBuffer: GPUBuffer | null;
     surfacesBuffer: GPUBuffer | null;
@@ -190,6 +199,15 @@ const gpuEvalCache: {
 } = {
     device: null,
     pipeline: null,
+    bindGroup: null,
+    bindGroupRefs: {
+        uv: null,
+        index: null,
+        surfaces: null,
+        positions: null,
+        normals: null,
+        dispatch: null,
+    },
     uvBuffer: null,
     vertexSurfaceIndexBuffer: null,
     surfacesBuffer: null,
@@ -208,6 +226,13 @@ const gpuEvalCache: {
 };
 
 function destroyCache() {
+    gpuEvalCache.bindGroup = null;
+    gpuEvalCache.bindGroupRefs.uv = null;
+    gpuEvalCache.bindGroupRefs.index = null;
+    gpuEvalCache.bindGroupRefs.surfaces = null;
+    gpuEvalCache.bindGroupRefs.positions = null;
+    gpuEvalCache.bindGroupRefs.normals = null;
+    gpuEvalCache.bindGroupRefs.dispatch = null;
     gpuEvalCache.uvBuffer?.destroy();
     gpuEvalCache.vertexSurfaceIndexBuffer?.destroy();
     gpuEvalCache.surfacesBuffer?.destroy();
@@ -485,22 +510,39 @@ async function runBatch(jobs: PendingSurfaceEvalJob[]) {
         device.queue.writeBuffer(gpuEvalCache.surfacesBuffer, 0, surfaceParamsF32);
         device.queue.writeBuffer(gpuEvalCache.dispatchParamsBuffer!, 0, dispatchData);
 
-        const bindGroup = device.createBindGroup({
-            layout: pipeline.getBindGroupLayout(0),
-            entries: [
-                { binding: 0, resource: { buffer: gpuEvalCache.uvBuffer } },
-                { binding: 1, resource: { buffer: gpuEvalCache.vertexSurfaceIndexBuffer } },
-                { binding: 2, resource: { buffer: gpuEvalCache.surfacesBuffer } },
-                { binding: 3, resource: { buffer: gpuEvalCache.positionsBuffer } },
-                { binding: 4, resource: { buffer: gpuEvalCache.normalsBuffer } },
-                { binding: 5, resource: { buffer: gpuEvalCache.dispatchParamsBuffer! } },
-            ],
-        });
+        const needsBindGroupRefresh =
+            !gpuEvalCache.bindGroup ||
+            gpuEvalCache.bindGroupRefs.uv !== gpuEvalCache.uvBuffer ||
+            gpuEvalCache.bindGroupRefs.index !== gpuEvalCache.vertexSurfaceIndexBuffer ||
+            gpuEvalCache.bindGroupRefs.surfaces !== gpuEvalCache.surfacesBuffer ||
+            gpuEvalCache.bindGroupRefs.positions !== gpuEvalCache.positionsBuffer ||
+            gpuEvalCache.bindGroupRefs.normals !== gpuEvalCache.normalsBuffer ||
+            gpuEvalCache.bindGroupRefs.dispatch !== gpuEvalCache.dispatchParamsBuffer;
+
+        if (needsBindGroupRefresh) {
+            gpuEvalCache.bindGroup = device.createBindGroup({
+                layout: pipeline.getBindGroupLayout(0),
+                entries: [
+                    { binding: 0, resource: { buffer: gpuEvalCache.uvBuffer } },
+                    { binding: 1, resource: { buffer: gpuEvalCache.vertexSurfaceIndexBuffer } },
+                    { binding: 2, resource: { buffer: gpuEvalCache.surfacesBuffer } },
+                    { binding: 3, resource: { buffer: gpuEvalCache.positionsBuffer } },
+                    { binding: 4, resource: { buffer: gpuEvalCache.normalsBuffer } },
+                    { binding: 5, resource: { buffer: gpuEvalCache.dispatchParamsBuffer! } },
+                ],
+            });
+            gpuEvalCache.bindGroupRefs.uv = gpuEvalCache.uvBuffer;
+            gpuEvalCache.bindGroupRefs.index = gpuEvalCache.vertexSurfaceIndexBuffer;
+            gpuEvalCache.bindGroupRefs.surfaces = gpuEvalCache.surfacesBuffer;
+            gpuEvalCache.bindGroupRefs.positions = gpuEvalCache.positionsBuffer;
+            gpuEvalCache.bindGroupRefs.normals = gpuEvalCache.normalsBuffer;
+            gpuEvalCache.bindGroupRefs.dispatch = gpuEvalCache.dispatchParamsBuffer;
+        }
 
         const encoder = device.createCommandEncoder({ label: "surface-eval-encoder" });
         const pass = encoder.beginComputePass({ label: "surface-eval-pass" });
         pass.setPipeline(pipeline);
-        pass.setBindGroup(0, bindGroup);
+        pass.setBindGroup(0, gpuEvalCache.bindGroup!);
         pass.dispatchWorkgroups(Math.ceil(totalVerts / 256));
         pass.end();
 
@@ -515,20 +557,23 @@ async function runBatch(jobs: PendingSurfaceEvalJob[]) {
 
         const positionsMapped = gpuEvalCache.stagingPositionsBuffer.getMappedRange(0, outputBytes);
         const normalsMapped = gpuEvalCache.stagingNormalsBuffer.getMappedRange(0, outputBytes);
-        const positionsAll = new Float32Array(positionsMapped.slice(0));
-        const normalsAll = new Float32Array(normalsMapped.slice(0));
+        const positionsView = new Float32Array(positionsMapped);
+        const normalsView = new Float32Array(normalsMapped);
 
-        gpuEvalCache.stagingPositionsBuffer.unmap();
-        gpuEvalCache.stagingNormalsBuffer.unmap();
-
-        for (let i = 0; i < jobs.length; i++) {
-            const { start, count } = ranges[i];
-            const posBase = start * 3;
-            const posEnd = posBase + count * 3;
-            jobs[i].resolve({
-                positions: positionsAll.slice(posBase, posEnd),
-                normals: normalsAll.slice(posBase, posEnd),
-            });
+        try {
+            for (let i = 0; i < jobs.length; i++) {
+                const { start, count } = ranges[i];
+                const posBase = start * 3;
+                const posEnd = posBase + count * 3;
+                const positions = new Float32Array(count * 3);
+                const normals = new Float32Array(count * 3);
+                positions.set(positionsView.subarray(posBase, posEnd));
+                normals.set(normalsView.subarray(posBase, posEnd));
+                jobs[i].resolve({ positions, normals });
+            }
+        } finally {
+            gpuEvalCache.stagingPositionsBuffer.unmap();
+            gpuEvalCache.stagingNormalsBuffer.unmap();
         }
     } catch (err) {
         if (!hasWarnedGpuEvalFailure) {

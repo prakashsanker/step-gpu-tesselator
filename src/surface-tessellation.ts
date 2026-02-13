@@ -15,7 +15,11 @@
 
 import { constrainedDelaunayTriangulation, cdtWithHoles } from "./cdt-gpu";
 import { triangulateWithHoles } from "./triangulate-fast";
-import { classifyTrimGridGPU } from "./trim-grid-gpu";
+import {
+    classifyTrimGridGPU,
+    buildTrimGridTrianglesGPU,
+    classifyAndBuildTrimGridTrianglesGPU,
+} from "./trim-grid-gpu";
 import { evaluateSurface, surfaceNormal } from "./surfaces";
 import { evaluateSurfaceMeshGPU } from "./surface-eval-gpu";
 import { createRectangularUVBoundary } from "./uv-extraction";
@@ -115,6 +119,10 @@ function trimDebugLog(...args: unknown[]): void {
     if ((globalThis as any)?.__TRIM_VERBOSE_LOGS__ === true) {
         console.log(...args);
     }
+}
+
+function trimDebugEnabled(): boolean {
+    return (globalThis as any)?.__TRIM_VERBOSE_LOGS__ === true;
 }
 
 function readTrimNumber(key: string): number | null {
@@ -440,7 +448,10 @@ export async function tessellateTrimmedSurface(
     // Only treat as discontinuity if it's NOT a full circle
     const hasDiscontinuity = nearPosPI > 0 && nearNegPI > 0 && !isFullCircle;
 
-    trimDebugLog(`[tessellateTrimmedSurface] nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, uSpan=${uSpan.toFixed(3)}, isFullCircle=${isFullCircle}, hasDiscontinuity=${hasDiscontinuity}`);
+    const debugTrim = trimDebugEnabled();
+    if (debugTrim) {
+        trimDebugLog(`[tessellateTrimmedSurface] nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, uSpan=${uSpan.toFixed(3)}, isFullCircle=${isFullCircle}, hasDiscontinuity=${hasDiscontinuity}`);
+    }
 
     // Create a continuous version of the boundary for polygon testing
     let continuousBoundary: Vec2[];
@@ -498,7 +509,7 @@ export async function tessellateTrimmedSurface(
     const buildLabel = buildOptions?.logLabel ?? 'default';
 
     // Debug: log continuous boundary bounds
-    {
+    if (debugTrim) {
         let cbUMin = Infinity, cbUMax = -Infinity, cbVMin = Infinity, cbVMax = -Infinity;
         for (const [u, v] of continuousBoundary) {
             cbUMin = Math.min(cbUMin, u);
@@ -658,6 +669,19 @@ export async function tessellateTrimmedSurface(
     const du = (uMax - uMin) / gridDensityU;
     const dv = (vMax - vMin) / gridDensityV;
 
+    // OCC-backed UV classifiers can be stateful on first query for a face.
+    // Do a single warmup probe so classification is stable without relying on
+    // debug-only probe code paths.
+    if (useCustomUvInside) {
+        const probeU = (uMin + uMax) * 0.5;
+        const probeV = (vMin + vMax) * 0.5;
+        try {
+            buildOptions!.uvInsideTest!(probeU, probeV);
+        } catch {
+            // Best-effort warmup only; main classification keeps fail-open behavior.
+        }
+    }
+
     const uvVertices: Vec2[] = [];
     const vertexGrid: (number | null)[][] = []; // Maps grid position to vertex index
 
@@ -714,6 +738,54 @@ export async function tessellateTrimmedSurface(
         enableGpuTrimGridClassification &&
         !useCustomUvInside &&
         totalGridPoints >= gpuGridMinPoints;
+    // GPU-first path: build triangle connectivity directly from the trim mask.
+    // Keep this conservative so we can fall back to the existing CPU path for
+    // classifier- or bbox-sensitive faces.
+    const enableGpuTrimTriangleBuild = readTrimBoolean("__ENABLE_GPU_TRIM_TRIANGLE_BUILD__", true);
+    const gpuTrimTriangleMinCells = Math.max(
+        256,
+        Math.floor(readTrimNumber("__GPU_TRIM_TRIANGLE_BUILD_MIN_CELLS__") ?? 1024)
+    );
+    const totalGridCells = gridDensityU * gridDensityV;
+    const canUseGpuTrimTriangleBuild =
+        enableGpuTrimTriangleBuild &&
+        !bbox3d &&
+        !keepTriangle &&
+        !useCustomUvInside &&
+        totalGridCells >= gpuTrimTriangleMinCells;
+
+    if (canUseGpuTrimTriangleBuild) {
+        const gpuTriangles = await classifyAndBuildTrimGridTrianglesGPU({
+            boundary: continuousBoundary,
+            holes: continuousHoles,
+            gridDensityU,
+            gridDensityV,
+            uMin,
+            vMin,
+            du,
+            dv,
+            boundaryTolerance,
+            useNearBoundary: !skipNearBoundaryChecks,
+            allowPartialCellTriangles,
+        });
+        if (gpuTriangles && gpuTriangles.triangleCount > 0) {
+            const uvVerticesDense: Vec2[] = new Array(totalGridPoints);
+            for (let j = 0; j <= gridDensityV; j++) {
+                for (let i = 0; i <= gridDensityU; i++) {
+                    const idx = j * (gridDensityU + 1) + i;
+                    uvVerticesDense[idx] = [uMin + i * du, vMin + j * dv];
+                }
+            }
+            if (debugTrim) {
+                trimDebugLog(
+                    `[tessellateTrimmedSurface] GPU classify+triangle build accepted: ` +
+                    `cells=${totalGridCells}, triangles=${gpuTriangles.triangleCount}`
+                );
+            }
+            return evaluateUVMesh(surface, uvVerticesDense, gpuTriangles.indices);
+        }
+    }
+
     let gpuTrimMask: Uint32Array | null = null;
     if (canUseGpuTrimGridClassification) {
         gpuTrimMask = await classifyTrimGridGPU({
@@ -728,10 +800,40 @@ export async function tessellateTrimmedSurface(
             boundaryTolerance,
             useNearBoundary: !skipNearBoundaryChecks,
         });
-        if (gpuTrimMask) {
+        if (gpuTrimMask && debugTrim) {
             trimDebugLog(
                 `[tessellateTrimmedSurface] GPU trim classification enabled for ${totalGridPoints} grid points`
             );
+        }
+    }
+
+    if (canUseGpuTrimTriangleBuild && gpuTrimMask) {
+        const gpuTriangles = await buildTrimGridTrianglesGPU({
+            mask: gpuTrimMask,
+            gridDensityU,
+            gridDensityV,
+            allowPartialCellTriangles,
+        });
+        if (gpuTriangles && gpuTriangles.triangleCount > 0) {
+            const uvVerticesDense: Vec2[] = new Array(totalGridPoints);
+            let insideByMask = 0;
+            for (let j = 0; j <= gridDensityV; j++) {
+                for (let i = 0; i <= gridDensityU; i++) {
+                    const idx = j * (gridDensityU + 1) + i;
+                    uvVerticesDense[idx] = [uMin + i * du, vMin + j * dv];
+                    if (gpuTrimMask[idx] !== 0) {
+                        insideByMask++;
+                    }
+                }
+            }
+            if (debugTrim) {
+                trimDebugLog(
+                    `[tessellateTrimmedSurface] GPU trim triangle build accepted: ` +
+                    `cells=${totalGridCells}, includedVerts=${insideByMask}/${totalGridPoints}, ` +
+                    `triangles=${gpuTriangles.triangleCount}`
+                );
+            }
+            return evaluateUVMesh(surface, uvVerticesDense, gpuTriangles.indices);
         }
     }
 
@@ -801,7 +903,7 @@ export async function tessellateTrimmedSurface(
         }
     }
 
-    if (bbox3d) {
+    if (bbox3d && debugTrim) {
         trimDebugLog(`[tessellateTrimmedSurface] 3D bbox provided: X=[${bbox3d.xMin.toFixed(2)}, ${bbox3d.xMax.toFixed(2)}], Y=[${bbox3d.yMin.toFixed(2)}, ${bbox3d.yMax.toFixed(2)}], Z=[${bbox3d.zMin.toFixed(2)}, ${bbox3d.zMax.toFixed(2)}]`);
         trimDebugLog(`[tessellateTrimmedSurface] 3D bbox filtered ${bbox3dFilteredCount} points outside bounds`);
 
@@ -816,103 +918,105 @@ export async function tessellateTrimmedSurface(
         }
     }
 
-    trimDebugLog(`[tessellateTrimmedSurface] Grid bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
-    trimDebugLog(`[tessellateTrimmedSurface] Grid points: ${insideCount} inside, ${outsideCount} outside${useCustomUvInside ? ` (mode=${buildLabel})` : ''}`);
+    if (debugTrim) {
+        trimDebugLog(`[tessellateTrimmedSurface] Grid bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+        trimDebugLog(`[tessellateTrimmedSurface] Grid points: ${insideCount} inside, ${outsideCount} outside${useCustomUvInside ? ` (mode=${buildLabel})` : ''}`);
 
-    // Diagnostic: test a specific point that should be inside (center of grid)
-    const testU = (uMin + uMax) / 2;
-    const testV = (vMin + vMax) / 2;
-    const testInside = useCustomUvInside
-        ? !!buildOptions!.uvInsideTest!(testU, testV)
-        : isPointInPolygon([testU, testV], continuousBoundary);
-    const testInHole = useCustomUvInside
-        ? false
-        : continuousHoles.some(hole => isPointInPolygon([testU, testV], hole));
-    trimDebugLog(`[tessellateTrimmedSurface] Test point (${testU.toFixed(3)}, ${testV.toFixed(3)}): insideBoundary=${testInside}, insideHole=${testInHole}`);
+        // Diagnostic: test a specific point that should be inside (center of grid)
+        const testU = (uMin + uMax) / 2;
+        const testV = (vMin + vMax) / 2;
+        const testInside = useCustomUvInside
+            ? !!buildOptions!.uvInsideTest!(testU, testV)
+            : isPointInPolygon([testU, testV], continuousBoundary);
+        const testInHole = useCustomUvInside
+            ? false
+            : continuousHoles.some(hole => isPointInPolygon([testU, testV], hole));
+        trimDebugLog(`[tessellateTrimmedSurface] Test point (${testU.toFixed(3)}, ${testV.toFixed(3)}): insideBoundary=${testInside}, insideHole=${testInHole}`);
 
-    // Debug: trace through point-in-polygon for the center point
-    if (!testInside && continuousHoles.length === 0) {
-        trimDebugLog(`[DEBUG] Tracing point-in-polygon for center point:`);
-        let crossings = 0;
-        for (let i = 0, j = continuousBoundary.length - 1; i < continuousBoundary.length; j = i++) {
-            const [xi, yi] = continuousBoundary[i];
-            const [xj, yj] = continuousBoundary[j];
-            const yCrossesRay = ((yi > testV) !== (yj > testV));
-            if (yCrossesRay) {
-                const xIntersect = (xj - xi) * (testV - yi) / (yj - yi) + xi;
-                if (testU < xIntersect) {
-                    crossings++;
-                    if (crossings <= 10) {
-                        trimDebugLog(`  Crossing ${crossings}: edge [${j}]->[${i}] from (${xj.toFixed(2)},${yj.toFixed(2)}) to (${xi.toFixed(2)},${yi.toFixed(2)}), intersect at x=${xIntersect.toFixed(2)}`);
+        // Debug: trace through point-in-polygon for the center point
+        if (!testInside && continuousHoles.length === 0) {
+            trimDebugLog(`[DEBUG] Tracing point-in-polygon for center point:`);
+            let crossings = 0;
+            for (let i = 0, j = continuousBoundary.length - 1; i < continuousBoundary.length; j = i++) {
+                const [xi, yi] = continuousBoundary[i];
+                const [xj, yj] = continuousBoundary[j];
+                const yCrossesRay = ((yi > testV) !== (yj > testV));
+                if (yCrossesRay) {
+                    const xIntersect = (xj - xi) * (testV - yi) / (yj - yi) + xi;
+                    if (testU < xIntersect) {
+                        crossings++;
+                        if (crossings <= 10) {
+                            trimDebugLog(`  Crossing ${crossings}: edge [${j}]->[${i}] from (${xj.toFixed(2)},${yj.toFixed(2)}) to (${xi.toFixed(2)},${yi.toFixed(2)}), intersect at x=${xIntersect.toFixed(2)}`);
+                        }
                     }
                 }
             }
+            trimDebugLog(`[DEBUG] Total crossings: ${crossings} -> inside=${crossings % 2 === 1}`);
+
+            // Show boundary polygon structure
+            trimDebugLog(`[DEBUG] Boundary polygon (${continuousBoundary.length} points):`);
+            trimDebugLog(`  First 5: ${continuousBoundary.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
+            const quarter = Math.floor(continuousBoundary.length / 4);
+            trimDebugLog(`  At ${quarter}: (${continuousBoundary[quarter][0].toFixed(2)},${continuousBoundary[quarter][1].toFixed(2)})`);
+            const half = Math.floor(continuousBoundary.length / 2);
+            trimDebugLog(`  At ${half}: (${continuousBoundary[half][0].toFixed(2)},${continuousBoundary[half][1].toFixed(2)})`);
+            const threeQuarter = Math.floor(continuousBoundary.length * 3 / 4);
+            trimDebugLog(`  At ${threeQuarter}: (${continuousBoundary[threeQuarter][0].toFixed(2)},${continuousBoundary[threeQuarter][1].toFixed(2)})`);
+            trimDebugLog(`  Last 5: ${continuousBoundary.slice(-5).map((p, i) => `[${continuousBoundary.length-5+i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
         }
-        trimDebugLog(`[DEBUG] Total crossings: ${crossings} -> inside=${crossings % 2 === 1}`);
 
-        // Show boundary polygon structure
-        trimDebugLog(`[DEBUG] Boundary polygon (${continuousBoundary.length} points):`);
-        trimDebugLog(`  First 5: ${continuousBoundary.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
-        const quarter = Math.floor(continuousBoundary.length / 4);
-        trimDebugLog(`  At ${quarter}: (${continuousBoundary[quarter][0].toFixed(2)},${continuousBoundary[quarter][1].toFixed(2)})`);
-        const half = Math.floor(continuousBoundary.length / 2);
-        trimDebugLog(`  At ${half}: (${continuousBoundary[half][0].toFixed(2)},${continuousBoundary[half][1].toFixed(2)})`);
-        const threeQuarter = Math.floor(continuousBoundary.length * 3 / 4);
-        trimDebugLog(`  At ${threeQuarter}: (${continuousBoundary[threeQuarter][0].toFixed(2)},${continuousBoundary[threeQuarter][1].toFixed(2)})`);
-        trimDebugLog(`  Last 5: ${continuousBoundary.slice(-5).map((p, i) => `[${continuousBoundary.length-5+i}](${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ')}`);
-    }
+        // Additional diagnostic: test a point that SHOULD be inside the hole
+        if (continuousHoles.length > 0) {
+            const hole = continuousHoles[0];
+            const holeUs = hole.map(p => p[0]);
+            const holeVs = hole.map(p => p[1]);
+            const holeCenterU = (Math.min(...holeUs) + Math.max(...holeUs)) / 2;
+            const holeCenterV = (Math.min(...holeVs) + Math.max(...holeVs)) / 2;
+            const holeCenterInHole = isPointInPolygon([holeCenterU, holeCenterV], hole);
+            trimDebugLog(`[tessellateTrimmedSurface] Hole center (${holeCenterU.toFixed(3)}, ${holeCenterV.toFixed(3)}): insideHole=${holeCenterInHole}`);
 
-    // Additional diagnostic: test a point that SHOULD be inside the hole
-    if (continuousHoles.length > 0) {
-        const hole = continuousHoles[0];
-        const holeUs = hole.map(p => p[0]);
-        const holeVs = hole.map(p => p[1]);
-        const holeCenterU = (Math.min(...holeUs) + Math.max(...holeUs)) / 2;
-        const holeCenterV = (Math.min(...holeVs) + Math.max(...holeVs)) / 2;
-        const holeCenterInHole = isPointInPolygon([holeCenterU, holeCenterV], hole);
-        trimDebugLog(`[tessellateTrimmedSurface] Hole center (${holeCenterU.toFixed(3)}, ${holeCenterV.toFixed(3)}): insideHole=${holeCenterInHole}`);
-
-        // Debug: manually trace through point-in-polygon for the hole center
-        let debugCrossings = 0;
-        const testX = holeCenterU;
-        const testY = holeCenterV;
-        for (let i = 0, j = hole.length - 1; i < hole.length; j = i++) {
-            const [xi, yi] = hole[i];
-            const [xj, yj] = hole[j];
-            const yCrossesRay = ((yi > testY) !== (yj > testY));
-            if (yCrossesRay) {
-                const xIntersect = (xj - xi) * (testY - yi) / (yj - yi) + xi;
-                if (testX < xIntersect) {
-                    debugCrossings++;
-                    if (debugCrossings <= 5) {
-                        trimDebugLog(`[DEBUG] Crossing ${debugCrossings}: edge [${j}]->[${i}] from (${xj.toFixed(2)},${yj.toFixed(2)}) to (${xi.toFixed(2)},${yi.toFixed(2)}), intersect at x=${xIntersect.toFixed(2)}`);
+            // Debug: manually trace through point-in-polygon for the hole center
+            let debugCrossings = 0;
+            const testX = holeCenterU;
+            const testY = holeCenterV;
+            for (let i = 0, j = hole.length - 1; i < hole.length; j = i++) {
+                const [xi, yi] = hole[i];
+                const [xj, yj] = hole[j];
+                const yCrossesRay = ((yi > testY) !== (yj > testY));
+                if (yCrossesRay) {
+                    const xIntersect = (xj - xi) * (testY - yi) / (yj - yi) + xi;
+                    if (testX < xIntersect) {
+                        debugCrossings++;
+                        if (debugCrossings <= 5) {
+                            trimDebugLog(`[DEBUG] Crossing ${debugCrossings}: edge [${j}]->[${i}] from (${xj.toFixed(2)},${yj.toFixed(2)}) to (${xi.toFixed(2)},${yi.toFixed(2)})`);
+                        }
                     }
                 }
             }
+            trimDebugLog(`[DEBUG] Total crossings: ${debugCrossings} -> inside=${debugCrossings % 2 === 1}`);
+
+            // Check if all hole points are in expected range
+            const outOfRangeU = hole.filter(p => p[0] < -4 || p[0] > 7);
+            const outOfRangeV = hole.filter(p => p[1] < -1 || p[1] > 3);
+            if (outOfRangeU.length > 0 || outOfRangeV.length > 0) {
+                trimDebugLog(`[DEBUG] WARNING: ${outOfRangeU.length} points have U outside [-4,7], ${outOfRangeV.length} have V outside [-1,3]`);
+            }
+
+            // Show the polygon vertices at key positions
+            trimDebugLog(`[DEBUG] Hole polygon shape (${hole.length} points):`);
+            trimDebugLog(`  [0]: (${hole[0][0].toFixed(3)}, ${hole[0][1].toFixed(3)})`);
+            trimDebugLog(`  [1]: (${hole[1][0].toFixed(3)}, ${hole[1][1].toFixed(3)})`);
+            const mid = Math.floor(hole.length / 2);
+            trimDebugLog(`  [${mid}]: (${hole[mid][0].toFixed(3)}, ${hole[mid][1].toFixed(3)})`);
+            trimDebugLog(`  [${hole.length-2}]: (${hole[hole.length-2][0].toFixed(3)}, ${hole[hole.length-2][1].toFixed(3)})`);
+            trimDebugLog(`  [${hole.length-1}]: (${hole[hole.length-1][0].toFixed(3)}, ${hole[hole.length-1][1].toFixed(3)})`);
+
+            // Check if first point at V=0.6, last points approaching first
+            const firstV = hole[0][1];
+            const lastV = hole[hole.length-1][1];
+            trimDebugLog(`[DEBUG] First point V=${firstV.toFixed(3)}, last point V=${lastV.toFixed(3)}`);
+            trimDebugLog(`[DEBUG] Test point V=${testY.toFixed(3)} - should be between ${Math.min(firstV, lastV).toFixed(3)} and ${Math.max(firstV, lastV).toFixed(3)} for the vertical edges`);
         }
-        trimDebugLog(`[DEBUG] Total crossings: ${debugCrossings} -> inside=${debugCrossings % 2 === 1}`);
-
-        // Check if all hole points are in expected range
-        const outOfRangeU = hole.filter(p => p[0] < -4 || p[0] > 7);
-        const outOfRangeV = hole.filter(p => p[1] < -1 || p[1] > 3);
-        if (outOfRangeU.length > 0 || outOfRangeV.length > 0) {
-            trimDebugLog(`[DEBUG] WARNING: ${outOfRangeU.length} points have U outside [-4,7], ${outOfRangeV.length} have V outside [-1,3]`);
-        }
-
-        // Show the polygon vertices at key positions
-        trimDebugLog(`[DEBUG] Hole polygon shape (${hole.length} points):`);
-        trimDebugLog(`  [0]: (${hole[0][0].toFixed(3)}, ${hole[0][1].toFixed(3)})`);
-        trimDebugLog(`  [1]: (${hole[1][0].toFixed(3)}, ${hole[1][1].toFixed(3)})`);
-        const mid = Math.floor(hole.length / 2);
-        trimDebugLog(`  [${mid}]: (${hole[mid][0].toFixed(3)}, ${hole[mid][1].toFixed(3)})`);
-        trimDebugLog(`  [${hole.length-2}]: (${hole[hole.length-2][0].toFixed(3)}, ${hole[hole.length-2][1].toFixed(3)})`);
-        trimDebugLog(`  [${hole.length-1}]: (${hole[hole.length-1][0].toFixed(3)}, ${hole[hole.length-1][1].toFixed(3)})`);
-
-        // Check if first point at V=0.6, last points approaching first
-        const firstV = hole[0][1];
-        const lastV = hole[hole.length-1][1];
-        trimDebugLog(`[DEBUG] First point V=${firstV.toFixed(3)}, last point V=${lastV.toFixed(3)}`);
-        trimDebugLog(`[DEBUG] Test point V=${testY.toFixed(3)} - should be between ${Math.min(firstV, lastV).toFixed(3)} and ${Math.max(firstV, lastV).toFixed(3)} for the vertical edges`);
     }
 
     // Create triangles from the grid
@@ -1155,13 +1259,15 @@ function isPointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
 async function evaluateUVMesh(
     surface: Surface,
     uvVertices: Vec2[],
-    triangleIndices: [number, number, number][]
+    triangleIndices: [number, number, number][] | Uint32Array
 ): Promise<TessellatedMesh> {
     const numVertices = uvVertices.length;
 
     // Allocate UVs + indices once regardless of eval path.
     const uvs = new Float32Array(numVertices * 2);
-    const indices = new Uint32Array(triangleIndices.length * 3);
+    const indices = triangleIndices instanceof Uint32Array
+        ? triangleIndices
+        : new Uint32Array(triangleIndices.length * 3);
 
     for (let i = 0; i < numVertices; i++) {
         const [u, v] = uvVertices[i];
@@ -1169,11 +1275,13 @@ async function evaluateUVMesh(
         uvs[i * 2 + 1] = v;
     }
 
-    for (let i = 0; i < triangleIndices.length; i++) {
-        const [a, b, c] = triangleIndices[i];
-        indices[i * 3 + 0] = a;
-        indices[i * 3 + 1] = b;
-        indices[i * 3 + 2] = c;
+    if (!(triangleIndices instanceof Uint32Array)) {
+        for (let i = 0; i < triangleIndices.length; i++) {
+            const [a, b, c] = triangleIndices[i];
+            indices[i * 3 + 0] = a;
+            indices[i * 3 + 1] = b;
+            indices[i * 3 + 2] = c;
+        }
     }
 
     // Try GPU evaluation for large primitive faces (CPU fallback below).

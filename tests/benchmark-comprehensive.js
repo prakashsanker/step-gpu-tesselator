@@ -390,6 +390,26 @@ function formatRatio(value) {
     return `${value.toFixed(2)}x`;
 }
 
+function speedComparisonFromRatio(ratio) {
+    if (!Number.isFinite(ratio) || ratio <= 0) {
+        return {
+            isFaster: null,
+            magnitude: null,
+            direction: 'n/a',
+            label: 'n/a',
+        };
+    }
+    const isFaster = ratio >= 1;
+    const magnitude = isFaster ? ratio : (1 / ratio);
+    const direction = isFaster ? 'faster' : 'slower';
+    return {
+        isFaster,
+        magnitude,
+        direction,
+        label: `${magnitude.toFixed(2)}x ${direction}`,
+    };
+}
+
 function loadStepFile(relativePath) {
     const fullPath = join(PROJECT_ROOT, relativePath);
     const content = fs.readFileSync(fullPath, 'utf8');
@@ -661,17 +681,16 @@ function printResultRow(result) {
 
     const ours = result.ours.avgMs;
     const ref = result.ref.avgMs;
-    const speed = result.speedup;
-
-    const speedLabel = speed >= 1 ? `${speed.toFixed(2)}x faster` : `${(1 / speed).toFixed(2)}x slower`;
-    const speedColor = speed >= 1 ? 'green' : 'red';
+    const speed = speedComparisonFromRatio(result.speedup);
+    const speedLabel = speed.label;
+    const speedColor = speed.isFaster ? 'green' : 'red';
 
     log(
         `PASS  ${result.name} | ours=${ours.toFixed(1)}ms | ref=${ref.toFixed(1)}ms | ${speedLabel} | tris=${result.ours.triangleCount}/${result.ref.triangleCount}`,
         speedColor,
     );
 
-    if (speed < 1) {
+    if (speed.isFaster === false) {
         const load = summarizeLoadBreakdown(result.ours.phases, ours);
         if (load) {
             const detail = load.topText ? ` | top: ${load.topText}` : '';
@@ -684,19 +703,19 @@ function printResultRow(result) {
 }
 
 function printResultsTable(results) {
-    log('\n' + '-'.repeat(154), 'dim');
+    log('\n' + '-'.repeat(164), 'dim');
     const header = [
         'Model'.padEnd(34),
         'SizeKB'.padStart(8),
         'Ours(ms)'.padStart(10),
         'Ref(ms)'.padStart(10),
-        'Speedup'.padStart(12),
+        'Speed(vsRef)'.padStart(16),
         'OursTris'.padStart(10),
         'RefTris'.padStart(10),
         'TriRatio'.padStart(10),
     ].join(' | ');
     log(header, 'cyan');
-    log('-'.repeat(154), 'dim');
+    log('-'.repeat(164), 'dim');
 
     for (const r of results) {
         if (!r.success) {
@@ -705,7 +724,7 @@ function printResultsTable(results) {
                 ((r.fileSize || 0) / 1024).toFixed(1).padStart(8),
                 'FAILED'.padStart(10),
                 ''.padStart(10),
-                ''.padStart(12),
+                ''.padStart(16),
                 ''.padStart(10),
                 ''.padStart(10),
                 ''.padStart(10),
@@ -714,25 +733,23 @@ function printResultsTable(results) {
             continue;
         }
 
-        const speedStr = r.speedup >= 1
-            ? `${r.speedup.toFixed(2)}x`
-            : `${(1 / r.speedup).toFixed(2)}x`; // slower shown in color
+        const speed = speedComparisonFromRatio(r.speedup);
 
         const row = [
             r.name.padEnd(34),
             (r.fileSize / 1024).toFixed(1).padStart(8),
             r.ours.avgMs.toFixed(1).padStart(10),
             r.ref.avgMs.toFixed(1).padStart(10),
-            speedStr.padStart(12),
+            speed.label.padStart(16),
             String(r.ours.triangleCount).padStart(10),
             String(r.ref.triangleCount).padStart(10),
             (r.triangleRatio ?? 0).toFixed(2).padStart(10),
         ].join(' | ');
 
-        log(row, r.speedup >= 1 ? 'green' : 'red');
+        log(row, speed.isFaster ? 'green' : 'red');
     }
 
-    log('-'.repeat(154), 'dim');
+    log('-'.repeat(164), 'dim');
 }
 
 function printAggregateSummary(results) {
@@ -754,8 +771,10 @@ function printAggregateSummary(results) {
     const speedP90 = percentile(speedups, 90);
 
     log(`  wins vs occt-import-js: ${wins}/${success.length}`, 'cyan');
-    log(`  speedup median: ${formatRatio(speedMedian)}`, speedMedian >= 1 ? 'green' : 'red');
-    log(`  speedup p90: ${formatRatio(speedP90)}`, speedP90 >= 1 ? 'green' : 'red');
+    const medianSpeed = speedComparisonFromRatio(speedMedian);
+    const p90Speed = speedComparisonFromRatio(speedP90);
+    log(`  speedup median: ${medianSpeed.label}`, medianSpeed.isFaster ? 'green' : 'red');
+    log(`  speedup p90: ${p90Speed.label}`, p90Speed.isFaster ? 'green' : 'red');
     log(`  ours avg runtime: ${formatMs(mean(oursTimes))} (p90 ${formatMs(percentile(oursTimes, 90))})`, 'cyan');
     log(`  ref avg runtime: ${formatMs(mean(refTimes))} (p90 ${formatMs(percentile(refTimes, 90))})`, 'cyan');
 }
@@ -867,8 +886,9 @@ function saveElectronicEnclosureTrend(config, result) {
 
     log(`Electronic Enclosure trend saved: ${ENCLOSURE_TREND_PATH}`, 'dim');
     if (!previous) {
+        const baselineSpeed = speedComparisonFromRatio(record.speedup);
         log(
-            `Electronic Enclosure baseline: ours=${record.oursMs.toFixed(1)}ms, ref=${record.refMs.toFixed(1)}ms, speed=${record.speedup.toFixed(3)}x`,
+            `Electronic Enclosure baseline: ours=${record.oursMs.toFixed(1)}ms, ref=${record.refMs.toFixed(1)}ms, speed=${baselineSpeed.label}`,
             'cyan',
         );
         return;
@@ -876,13 +896,22 @@ function saveElectronicEnclosureTrend(config, result) {
 
     const deltaOurs = record.oursMs - previous.oursMs;
     const deltaRef = record.refMs - previous.refMs;
-    const deltaSpeed = record.speedup - previous.speedup;
     const oursDir = deltaOurs <= 0 ? 'faster' : 'slower';
-    const speedDir = deltaSpeed >= 0 ? 'up' : 'down';
     const deltaTri = (record.triRatio ?? 0) - (previous.triRatio ?? 0);
+    const currentSpeed = speedComparisonFromRatio(record.speedup);
+    const previousSpeed = speedComparisonFromRatio(previous.speedup);
+    const speedImprovementRatio = (Number.isFinite(previous.speedup) && previous.speedup > 0)
+        ? (record.speedup / previous.speedup)
+        : null;
+    const speedDeltaText = Number.isFinite(speedImprovementRatio)
+        ? (speedImprovementRatio >= 1
+            ? `improved by ${speedImprovementRatio.toFixed(3)}x`
+            : `regressed by ${(1 / speedImprovementRatio).toFixed(3)}x`)
+        : 'change unavailable';
+    const trendColor = Number.isFinite(speedImprovementRatio) && speedImprovementRatio >= 1 ? 'green' : 'yellow';
     log(
-        `Electronic Enclosure vs previous (${previous.timestamp}): ours ${oursDir} by ${Math.abs(deltaOurs).toFixed(1)}ms, speedup ${speedDir} ${Math.abs(deltaSpeed).toFixed(3)}x, triRatio Δ${deltaTri.toFixed(3)}, ref Δ${deltaRef.toFixed(1)}ms`,
-        deltaOurs <= 0 ? 'green' : 'yellow',
+        `Electronic Enclosure vs previous (${previous.timestamp}): ours ${oursDir} by ${Math.abs(deltaOurs).toFixed(1)}ms, speed ${speedDeltaText} (${currentSpeed.label}, was ${previousSpeed.label}), triRatio Δ${deltaTri.toFixed(3)}, ref Δ${deltaRef.toFixed(1)}ms`,
+        trendColor,
     );
 }
 

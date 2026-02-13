@@ -595,3 +595,59 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
     - per-cell triangle candidate filtering.
 - Expected impact:
   - Better amortization than per-face UV eval alone, especially on large trimmed curved faces (Electronic Enclosure).
+
+### 2026-02-13 M3 Step: GPU Surface-Eval Sync Minimization (Bind-Group Reuse + Copy Elision)
+
+- Optimization implemented:
+  - Reused cached surface-eval bind groups across GPU batches when buffer bindings are unchanged.
+  - Removed redundant full-batch CPU copies on GPU readback:
+    - no intermediate `positionsAll/normalsAll` full-array clone,
+    - direct per-job extraction from mapped ranges before unmap.
+  - Goal: reduce CPU overhead and sync cost in batched UV->3D surface evaluation.
+
+- Validation:
+  - `npm run -s bench:canary`
+    - pass `80/80`, quality gate pass.
+    - wins vs `occt-import-js`: `79/80`
+    - speedup median: `4.75x faster`
+  - `npm run -s bench:representative`
+    - Electronic Enclosure: `7510.2ms` vs ref `3068.3ms` (`2.45x slower`)
+    - VM-001: `191.3ms` vs ref `174.2ms` (`1.10x slower`)
+    - wins vs `occt-import-js`: `4/6`
+    - speedup median: `2.57x faster`
+    - loadStepFile share (Electronic Enclosure): `37.2%` (`2793.5ms / 7510.2ms`)
+
+- Takeaway:
+  - Absolute Electronic Enclosure runtime improved, but relative multiple vs `occt-import-js` remains behind because ref also moved faster in this run.
+  - This confirms GPU sync reductions help, but they are still not the dominant remaining lever.
+  - Next step remains unchanged: move trimmed-grid triangle candidate generation/filtering out of CPU loops.
+
+### 2026-02-13 M3 Step: Zero-Copy GPU Trim Classify -> Triangle Build
+
+- Optimization implemented:
+  - Added a fused GPU path in `src/trim-grid-gpu.ts`:
+    - `classifyAndBuildTrimGridTrianglesGPU(...)`
+  - Runs trim-grid classification and trim-cell triangle generation in one GPU command sequence.
+  - Removes CPU orchestration bounce on this path:
+    - no GPU mask readback to CPU,
+    - no CPU mask upload back to GPU for triangle build.
+  - `src/surface-tessellation.ts` now tries this fused path first for eligible trimmed surfaces.
+  - Existing readback-based classification + triangle build remains as fallback for safety.
+
+- Validation:
+  - `npm run -s bench:canary`
+    - pass `80/80`, quality gate pass.
+    - wins vs `occt-import-js`: `79/80`
+    - speedup median: `5.27x faster`
+  - `npm run -s bench:representative`
+    - Electronic Enclosure: `7892.1ms` vs ref `3500.6ms` (`2.25x slower`)
+    - VM-001: `335.6ms` vs ref `240.8ms` (`1.39x slower`)
+    - wins vs `occt-import-js`: `4/6`
+    - speedup median: `2.17x faster`
+    - loadStepFile share (Electronic Enclosure): `38.9%` (`3066.6ms / 7892.1ms`)
+    - speed-multiple trend: improved from `2.36x slower` to `2.25x slower` on Electronic Enclosure.
+
+- Takeaway:
+  - This removes a real CPU↔GPU orchestration tax and improved the Electronic Enclosure slowdown multiple.
+  - Absolute runtime remained noisy run-to-run; relative multiple is the metric to track.
+  - Remaining gap is still dominated by load path + large non-load curved/trimmed throughput work.
