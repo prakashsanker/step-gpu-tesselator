@@ -78,6 +78,9 @@ const REAL_WORLD_PATH_PATTERNS = [
     /^step-examples\/VM-\d+\.STEP$/i,
     /^step-examples\/external\//i,
 ];
+const CANARY_FORCE_INCLUDE_FILES = new Set([
+    'step-examples/VM-001.STEP',
+]);
 const EXCLUDED_BASENAME_PATTERNS = [
     /rocky_house/i,
     /rotor/i,
@@ -117,6 +120,9 @@ function categorizePath(relativePath) {
 }
 
 function shouldExcludeCanary(relativePath) {
+    if (CANARY_FORCE_INCLUDE_FILES.has(relativePath)) {
+        return null;
+    }
     for (const pattern of REAL_WORLD_PATH_PATTERNS) {
         if (pattern.test(relativePath)) return 'real-world';
     }

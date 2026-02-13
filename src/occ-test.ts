@@ -3263,8 +3263,13 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
               let numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_DEFAULT_SAMPLES__') ?? 16));
 
               if (curveType === 'Circle') {
-                // Angle step ~15 degrees (π/12) => ~24 samples for full circle.
-                const angleStep = readGlobalNumber('__EDGE_CIRCLE_ANGLE_STEP__') ?? (Math.PI / 12);
+                // Keep planar circular boundaries denser so cylinder caps don't become
+                // visibly polygonal after planar tessellation.
+                const defaultAngleStep = face.surfaceType === 'Plane' ? (Math.PI / 36) : (Math.PI / 12);
+                const angleStepKey = face.surfaceType === 'Plane'
+                  ? '__EDGE_CIRCLE_ANGLE_STEP_PLANE__'
+                  : '__EDGE_CIRCLE_ANGLE_STEP__';
+                const angleStep = readGlobalNumber(angleStepKey) ?? defaultAngleStep;
                 numSamples = Math.ceil(Math.abs(paramRange) / angleStep);
               } else if (curveType === 'Ellipse') {
                 numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_ELLIPSE_SAMPLES__') ?? 20));
@@ -5418,12 +5423,26 @@ function splitConeTrimLoopsIntoTwoPatches(
 
   const leftOuter = clipLoopByUHalfPlane(sourceValidation.uvOuter, uSplit, true);
   const rightOuter = clipLoopByUHalfPlane(sourceValidation.uvOuter, uSplit, false);
-  const leftHoles = sourceValidation.uvHoles
-    .map((hole) => clipLoopByUHalfPlane(hole, uSplit, true))
-    .filter((loop) => loop.length >= 3);
-  const rightHoles = sourceValidation.uvHoles
-    .map((hole) => clipLoopByUHalfPlane(hole, uSplit, false))
-    .filter((loop) => loop.length >= 3);
+  const leftHoles: Vec2[][] = [];
+  const rightHoles: Vec2[][] = [];
+  for (const hole of sourceValidation.uvHoles) {
+    const hb = getLoopUBounds(hole);
+    // Preserve non-crossing holes exactly; clipping those can distort hole shape.
+    if (hb.maxU <= uSplit + 1e-9) {
+      leftHoles.push(hole);
+      continue;
+    }
+    if (hb.minU >= uSplit - 1e-9) {
+      rightHoles.push(hole);
+      continue;
+    }
+
+    // Hole crosses split line: clip into both patches.
+    const leftClip = clipLoopByUHalfPlane(hole, uSplit, true);
+    const rightClip = clipLoopByUHalfPlane(hole, uSplit, false);
+    if (leftClip.length >= 3) leftHoles.push(leftClip);
+    if (rightClip.length >= 3) rightHoles.push(rightClip);
+  }
 
   const leftValidation = validateAndSanitizeTrimLoops(leftOuter, leftHoles, {
     minAreaAbs: 1e-7,
@@ -6385,6 +6404,10 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   const enableConeSeamSplit = readGlobalBoolean('__ENABLE_CONE_SEAM_SPLIT__', true);
   const coneSeamSplitFaceIdsRaw = (globalThis as any)?.__CONE_SEAM_SPLIT_FACE_IDS__;
   const coneSeamSplitFaceIds = readFaceIdsFromGlobal('__CONE_SEAM_SPLIT_FACE_IDS__', []);
+  // Default-on for cylinder seam split (trimmed seam-crossing cylinders only).
+  const enableCylinderSeamSplit = readGlobalBoolean('__ENABLE_CYLINDER_SEAM_SPLIT__', true);
+  const cylinderSeamSplitFaceIdsRaw = (globalThis as any)?.__CYLINDER_SEAM_SPLIT_FACE_IDS__;
+  const cylinderSeamSplitFaceIds = readFaceIdsFromGlobal('__CYLINDER_SEAM_SPLIT_FACE_IDS__', []);
   const enableOcctInspiredTrimGraph = readGlobalBoolean('__ENABLE_OCCT_INSPIRED_TRIM_GRAPH__', true);
   const occtInspiredTrimGraphFaceIdsRaw = (globalThis as any)?.__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__;
   const occtInspiredTrimGraphFaceIds = readFaceIdsFromGlobal('__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__', []);
@@ -6548,6 +6571,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
       let coneCrossesSeam = false;
       let coneWrappedOuterForSplit: Vec2[] | null = null;
       let cylinderCrossesSeam = false;
+      let cylinderWrappedOuterForSplit: Vec2[] | null = null;
       let torusCrossesSeam = false;
       let degeneratePeriodicTrim = false;
 
@@ -6801,25 +6825,25 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           }
         }
 
-        // For cylinders with full-circle (U spans ~2π), the UV boundary forms a "seam rectangle":
-        // two circles at different V values connected by seam lines. This causes CDT to fail
-        // because constraint edges that cross the ±π seam cannot be recovered.
-        //
-        // We detect seam boundaries by checking if the boundary has points near BOTH +π AND -π.
-        // The point-in-polygon test is NOT reliable here because the center (0, midV) appears
-        // "inside" in 2D, but the boundary doesn't properly enclose the 3D surface.
+        // For cylinders with full-circle U span, seam-crossing trims need periodic unwrap.
+        // For trimmed faces (holes/slots), prefer continuity unwrap and optional split later.
+        // For non-trimmed full wraps, keep the rectangular fallback for stability.
         if (face.surfaceType === 'Cylinder' && uSpan > 5.5) {
+          const seamProbeOuter = (loops.uvOuterRawWrapped && loops.uvOuterRawWrapped.length >= 3)
+            ? loops.uvOuterRawWrapped
+            : uvOuter;
+
           // Check if boundary crosses the seam (has points near both +π and -π)
-          const nearPosPI = uvOuter.filter(p => p[0] > PI - 0.3).length;
-          const nearNegPI = uvOuter.filter(p => p[0] < -PI + 0.3).length;
+          const nearPosPI = seamProbeOuter.filter(p => p[0] > PI - 0.3).length;
+          const nearNegPI = seamProbeOuter.filter(p => p[0] < -PI + 0.3).length;
           const crossesByCounts = nearPosPI > 2 && nearNegPI > 2;
           const period = 2 * PI;
           const seamJumpThreshold = period * 0.75;
           let maxJump = 0;
           let crossesByJump = false;
-          for (let i = 0; i < uvOuter.length; i++) {
-            const u1 = uvOuter[i][0];
-            const u2 = uvOuter[(i + 1) % uvOuter.length][0];
+          for (let i = 0; i < seamProbeOuter.length; i++) {
+            const u1 = seamProbeOuter[i][0];
+            const u2 = seamProbeOuter[(i + 1) % seamProbeOuter.length][0];
             const jump = Math.abs(u2 - u1);
             maxJump = Math.max(maxJump, jump);
             if (jump > seamJumpThreshold) {
@@ -6830,171 +6854,48 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           cylinderCrossesSeam = crossesSeam;
           if (crossesSeam) {
             avoidFullSurfaceFallback = true;
+            cylinderWrappedOuterForSplit = seamProbeOuter.map(([u, v]): Vec2 => [u, v]);
           }
 
           curveDebugLog(`[tessellateCurvedFace] Cylinder seam check: nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, maxJump=${maxJump.toFixed(3)}, byCounts=${crossesByCounts}, byJump=${crossesByJump}, crossesSeam=${crossesSeam}`);
           curveDebugLog(`[tessellateCurvedFace] Cylinder has ${loops.uvHoles.length} holes`);
 
           if (crossesSeam) {
-            // DETAILED LOGGING: Analyze the actual boundary before replacing
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Analyzing boundary before rectangle replacement`);
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary has ${uvOuter.length} points`);
-
-            // Log first 10 and last 10 points
-            const first10 = uvOuter.slice(0, 10).map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
-            const last10 = uvOuter.slice(-10).map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: First 10 points: ${first10}`);
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Last 10 points: ${last10}`);
-
-            // Find the actual V range at different U positions
-            const pointsNearU0 = uvOuter.filter(p => Math.abs(p[0]) < 0.5);
-            const pointsNearUPosPI = uvOuter.filter(p => p[0] > PI - 0.5);
-            const pointsNearUNegPI = uvOuter.filter(p => p[0] < -PI + 0.5);
-
-            if (pointsNearU0.length > 0) {
-              const vAtU0 = pointsNearU0.map(p => p[1]);
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈0: [${Math.min(...vAtU0).toFixed(2)}, ${Math.max(...vAtU0).toFixed(2)}]`);
+            // Preserve true seam-crossing trim topology by continuity unwrapping
+            // both outer loop and holes; sign-shift can distort hole footprints
+            // when a loop straddles U=0.
+            let unwrappedOuter = unwrapPeriodicLoopU(loops.uvOuter, period);
+            const unwrappedBounds = getLoopUBounds(unwrappedOuter);
+            const outerShiftK = chooseShiftToRange(unwrappedBounds.uMin, unwrappedBounds.uMax, period, 0, period);
+            if (outerShiftK !== 0) {
+              unwrappedOuter = shiftLoopU(unwrappedOuter, outerShiftK * period);
             }
-            if (pointsNearUPosPI.length > 0) {
-              const vAtPosPI = pointsNearUPosPI.map(p => p[1]);
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈+π: [${Math.min(...vAtPosPI).toFixed(2)}, ${Math.max(...vAtPosPI).toFixed(2)}]`);
-            }
-            if (pointsNearUNegPI.length > 0) {
-              const vAtNegPI = pointsNearUNegPI.map(p => p[1]);
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈-π: [${Math.min(...vAtNegPI).toFixed(2)}, ${Math.max(...vAtNegPI).toFixed(2)}]`);
-            }
+            loops.uvOuter = unwrappedOuter;
 
-            // Check if boundary has any points at low V values
-            const pointsBelowV5 = uvOuter.filter(p => p[1] < 5);
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Points with V < 5: ${pointsBelowV5.length}`);
-            if (pointsBelowV5.length > 0 && pointsBelowV5.length < 20) {
-              const lowVPoints = pointsBelowV5.map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Low V points: ${lowVPoints}`);
-            }
+            const shiftedBounds = getLoopUBounds(loops.uvOuter);
+            const outerMidU = meanLoopU(loops.uvOuter);
+            curveDebugLog(
+              `[tessellateCurvedFace] Cylinder unwrapped boundary: U=[${shiftedBounds.uMin.toFixed(3)}, ${shiftedBounds.uMax.toFixed(3)}], ` +
+              `shiftK=${outerShiftK}, meanU=${outerMidU.toFixed(3)}, V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`
+            );
 
-            // Convert some UV points to 3D to see where they actually are
-            // Use the surface to evaluate 3D positions at boundary corners
-            let zVals: number[] = [];  // Declare outside so it's accessible later
-            if (face.occSurface) {
-              try {
-                // Get the actual Geom_Surface from the handle
-                const surfHandle = face.occSurface;
-                const surf = typeof surfHandle.get === 'function' ? surfHandle.get() : surfHandle;
-
-                // Sample a few key UV points and show their 3D coordinates
-                const testPoints: Array<{ label: string; u: number; v: number }> = [
-                  { label: 'vMin at U=0', u: 0, v: vMin },
-                  { label: 'vMax at U=0', u: 0, v: vMax },
-                  { label: 'vMin at U=π', u: PI, v: vMin },
-                  { label: 'vMax at U=π', u: PI, v: vMax },
-                ];
-
-                for (const pt of testPoints) {
-                  // Use Value method which returns a gp_Pnt
-                  const pnt = surf.Value(pt.u, pt.v);
-                  curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: 3D at ${pt.label}: (${pnt.X().toFixed(2)}, ${pnt.Y().toFixed(2)}, ${pnt.Z().toFixed(2)})`);
-                  pnt.delete();
-                }
-
-                // Also check some points at the actual boundary's low V locations
-                if (pointsBelowV5.length > 0) {
-                  const lowestVPoint = pointsBelowV5.reduce((min, p) => p[1] < min[1] ? p : min, pointsBelowV5[0]);
-                  const pnt = surf.Value(lowestVPoint[0], lowestVPoint[1]);
-                  curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: 3D at lowest V boundary point (U=${lowestVPoint[0].toFixed(2)}, V=${lowestVPoint[1].toFixed(2)}): (${pnt.X().toFixed(2)}, ${pnt.Y().toFixed(2)}, ${pnt.Z().toFixed(2)})`);
-                  pnt.delete();
-                }
-
-                // Sample 3D points across the ACTUAL boundary to see the range of X, Y, Z values
-                const xVals: number[] = [];
-                const yVals: number[] = [];
-                const sampleStep = Math.max(1, Math.floor(uvOuter.length / 30)); // Sample ~30 points
-                for (let i = 0; i < uvOuter.length; i += sampleStep) {
-                  const [u, v] = uvOuter[i];
-                  const pnt = surf.Value(u, v);
-                  xVals.push(pnt.X());
-                  yVals.push(pnt.Y());
-                  zVals.push(pnt.Z());
-                  pnt.delete();
-                }
-                curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary 3D ranges: X=[${Math.min(...xVals).toFixed(2)}, ${Math.max(...xVals).toFixed(2)}], Y=[${Math.min(...yVals).toFixed(2)}, ${Math.max(...yVals).toFixed(2)}], Z=[${Math.min(...zVals).toFixed(2)}, ${Math.max(...zVals).toFixed(2)}]`);
-              } catch (e) {
-                curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Could not evaluate 3D points: ${e}`);
-              }
-            }
-
-            // Log what the rectangle will be
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Rectangle will be: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: This fills ${(vMax - vMin).toFixed(2)} units of V`);
-
-            // Decide whether to use rectangle or preserve actual boundary
-            // Check if the boundary's 3D extent matches what a rectangle would produce
-            // by comparing the Z range of the boundary to the V span
-            let useRectangle = true;
-            if (face.occSurface && zVals && zVals.length > 0) {
-              const zRange = Math.max(...zVals) - Math.min(...zVals);
-              const vRange = vMax - vMin;
-              // If Z range is much smaller than V range, the boundary is trimmed
-              // and we should preserve it rather than using a rectangle
-              const zToVRatio = zRange / vRange;
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Z range=${zRange.toFixed(2)}, V range=${vRange.toFixed(2)}, ratio=${zToVRatio.toFixed(3)}`);
-
-              // If Z range is less than 50% of V range, boundary is significantly trimmed
-              if (zToVRatio < 0.5) {
-                useRectangle = false;
-                curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary is trimmed (ratio < 0.5) - will preserve actual boundary`);
-              }
-            }
-
-            if (useRectangle) {
-              // The boundary crosses the ±π seam. CDT constraint recovery will fail on edges
-              // that span the seam. Use a rectangular boundary in [0, 2π] range instead.
-              curveDebugLog(`[tessellateCurvedFace] Full cylinder crosses seam - using rectangular UV boundary`);
-
-              const rectBoundary: Vec2[] = [
-                [0, vMin],
-                [2 * PI, vMin],
-                [2 * PI, vMax],
-                [0, vMax]
-              ];
-
-              loops.uvOuter = rectBoundary;
-              curveDebugLog(`[tessellateCurvedFace] Using rectangular boundary: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
-            } else {
-              // Boundary is trimmed - preserve actual shape but shift U to [0, 2π]
-              curveDebugLog(`[tessellateCurvedFace] Trimmed cylinder - shifting U to [0, 2π], preserving actual boundary`);
-
-              // Shift U coordinates from [-π, π] to [0, 2π] for continuous boundary
-              const shiftedOuter = uvOuter.map(([u, v]): Vec2 => {
-                if (u < 0) {
-                  return [u + 2 * PI, v];
-                }
-                return [u, v];
-              });
-
-              // Log boundary before and after shift
-              const beforeUs = uvOuter.slice(0, 5).map(p => p[0].toFixed(2)).join(', ');
-              const afterUs = shiftedOuter.slice(0, 5).map(p => p[0].toFixed(2)).join(', ');
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: U shift: before=[${beforeUs}...], after=[${afterUs}...]`);
-
-              loops.uvOuter = shiftedOuter;
-
-              const shiftedUMin = Math.min(...shiftedOuter.map(p => p[0]));
-              const shiftedUMax = Math.max(...shiftedOuter.map(p => p[0]));
-              curveDebugLog(`[tessellateCurvedFace] Shifted boundary: U=[${shiftedUMin.toFixed(3)}, ${shiftedUMax.toFixed(3)}], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
-            }
-
-            // Shift holes to [0, 2π] range to match the outer boundary
             if (loops.uvHoles.length > 0) {
               loops.uvHoles = loops.uvHoles.map((hole, h) => {
-                const shiftedHole = hole.map(([u, v]): Vec2 => {
-                  if (u < 0) {
-                    return [u + 2 * PI, v];
-                  }
-                  return [u, v];
-                });
-                const holeUs = shiftedHole.map(p => p[0]);
-                curveDebugLog(`[tessellateCurvedFace] Hole ${h} shifted to [0, 2π]: U=[${Math.min(...holeUs).toFixed(3)}, ${Math.max(...holeUs).toFixed(3)}]`);
-                return shiftedHole;
+                let alignedHole = unwrapPeriodicLoopU(hole, period);
+                if (outerShiftK !== 0) {
+                  alignedHole = shiftLoopU(alignedHole, outerShiftK * period);
+                }
+                const holeMidU = meanLoopU(alignedHole);
+                const alignK = Math.round((outerMidU - holeMidU) / period);
+                if (alignK !== 0) {
+                  alignedHole = shiftLoopU(alignedHole, alignK * period);
+                }
+                const holeBounds = getLoopUBounds(alignedHole);
+                curveDebugLog(
+                  `[tessellateCurvedFace] Cylinder hole ${h} unwrapped: ` +
+                  `U=[${holeBounds.uMin.toFixed(3)}, ${holeBounds.uMax.toFixed(3)}], alignK=${alignK}`
+                );
+                return alignedHole;
               });
             }
           }
@@ -7042,6 +6943,36 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
       }
 
       if (surface) {
+        const isNoHoleCylinderSurface =
+          face.surfaceType === 'Cylinder' &&
+          surface.type === 'CYLINDRICAL_SURFACE' &&
+          loops.uvHoles.length === 0 &&
+          loops.uvOuter.length >= 3;
+        if (isNoHoleCylinderSurface) {
+          // For no-hole cylinders, use the dedicated cylindrical patch tessellator.
+          // This avoids coarse square-grid artifacts from generic trimmed-surface meshing.
+          const uBounds = getLoopUBounds(loops.uvOuter);
+          const vBounds = getLoopComponentBounds(loops.uvOuter, 1);
+          const uSpanLocal = uBounds.uMax - uBounds.uMin;
+          const vSpanLocal = vBounds.max - vBounds.min;
+          const defaultUSamples = uSpanLocal > 5.5 ? 64 : 48;
+          const defaultVSamples = Math.max(3, Math.min(12, Math.ceil(vSpanLocal / 2)));
+          const numUSamples = Math.max(16, Math.floor(readGlobalNumber('__CYLINDER_PATCH_U_SAMPLES__') ?? defaultUSamples));
+          const numVSamples = Math.max(2, Math.floor(readGlobalNumber('__CYLINDER_PATCH_V_SAMPLES__') ?? defaultVSamples));
+          const mesh = await tessellateCylinder(
+            surface,
+            uBounds.uMin,
+            uBounds.uMax,
+            vBounds.min,
+            vBounds.max,
+            numUSamples,
+            numVSamples
+          );
+          tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
+          tessellationProfile.tessellateCurvedFace.calls++;
+          return tessellatedMeshToVerticesAndTriangles(mesh);
+        }
+
         const gridDensity = chooseTrimGridDensity(face, loops.uvOuter, loops.uvHoles);
 
         // For cylinders, compute 3D bounding box from boundary edges to filter
@@ -7070,6 +7001,45 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         let occBuildClassifier: any | undefined;
         let usedOccBuildClassifier = false;
         let trimmedBuildOptions: TrimmedSurfaceBuildOptions | undefined;
+
+        const isCylinderSurfaceForTrim = face.surfaceType === 'Cylinder' && surface.type === 'CYLINDRICAL_SURFACE';
+        if (isCylinderSurfaceForTrim) {
+          const period = Math.PI * 2;
+          const uBounds = getLoopUBounds(loops.uvOuter);
+          const vBounds = getLoopComponentBounds(loops.uvOuter, 1);
+          const uSpan = Math.max(1e-6, uBounds.uMax - uBounds.uMin);
+          const vSpan = Math.max(1e-6, vBounds.max - vBounds.min);
+
+          const fullUSamples = Math.max(32, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_FULL__') ?? 64));
+          const minUSamples = Math.max(16, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_MIN__') ?? 32));
+          const maxUSamples = Math.max(minUSamples, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_MAX__') ?? 128));
+          const minUSamplesWithHoles = Math.max(minUSamples, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_HOLES_MIN__') ?? 48));
+          let gridDensityU = Math.round(fullUSamples * (uSpan / period));
+          if (loops.uvHoles.length > 0) {
+            gridDensityU = Math.max(gridDensityU, minUSamplesWithHoles);
+          }
+          gridDensityU = Math.max(minUSamples, Math.min(maxUSamples, gridDensityU));
+
+          const vStep = Math.max(0.2, readGlobalNumber('__CYLINDER_TRIM_V_STEP__') ?? 2.0);
+          const minVDensity = Math.max(4, Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_MIN__') ?? 8));
+          const maxVDensity = Math.max(minVDensity, Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_MAX__') ?? 24));
+          let gridDensityV = Math.ceil(vSpan / vStep);
+          if (loops.uvHoles.length > 0) {
+            gridDensityV = Math.max(gridDensityV, Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_HOLES_MIN__') ?? 10));
+          }
+          gridDensityV = Math.max(minVDensity, Math.min(maxVDensity, gridDensityV));
+
+          trimmedBuildOptions = {
+            ...trimmedBuildOptions,
+            // Cylinder trims are best represented by anisotropic UV grids.
+            gridDensityU,
+            gridDensityV,
+            // Keep the OCCT-inspired cylinder hole path enabled by default.
+            // This is the known-stable visual mode (with slight corner curvature).
+            preferGridForHoles: true,
+          };
+        }
+
         const useOccPrimaryBuildForKnownFace = isKnownLidFace && !!face.occFace;
         if (useOccPrimaryBuildForKnownFace && oc?.BRepTopAdaptor_FClass2d && oc?.gp_Pnt2d_3 && oc?.TopAbs_State) {
           try {
@@ -7091,6 +7061,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             };
             const maxOutSamples = 1;
             trimmedBuildOptions = {
+              ...trimmedBuildOptions,
               uvInsideTest: classifyInside,
               keepTriangle: (samples) => {
                 let outCount = 0;
@@ -7114,17 +7085,70 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           }
         }
 
+        const simplifySeamPatch = (
+          patch: { uvOuter: Vec2[]; uvHoles: Vec2[][] },
+          mode: 'cone' | 'cylinder'
+        ) => {
+          const defaultOuterPts = mode === 'cone' ? 192 : 256;
+          const defaultHolePts = mode === 'cone' ? 32 : 64;
+          const defaultAreaErr = mode === 'cone' ? 0.03 : 0.02;
+          const defaultAreaErrNoHoles = mode === 'cone' ? 0.08 : 0.06;
+          const keyPrefix = mode === 'cone' ? '__CONE_TRIM' : '__CYLINDER_TRIM';
+
+          const maxOuterPts = Math.max(64, Math.floor(readGlobalNumber(`${keyPrefix}_MAX_OUTER_PTS__`) ?? defaultOuterPts));
+          const maxHolePts = Math.max(12, Math.floor(readGlobalNumber(`${keyPrefix}_MAX_HOLE_PTS__`) ?? defaultHolePts));
+          const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber(`${keyPrefix}_MAX_AREA_ERR_RATIO__`) ?? defaultAreaErr);
+          const maxOuterAreaErrorNoHoles = Math.max(
+            maxAreaErrorRatio,
+            readGlobalNumber(`${keyPrefix}_MAX_AREA_ERR_RATIO_NO_HOLES__`) ?? defaultAreaErrNoHoles
+          );
+
+          const outerAreaErrRatio = patch.uvHoles.length === 0 ? maxOuterAreaErrorNoHoles : maxAreaErrorRatio;
+          const simplifiedOuter = simplifyLoopForMeshing(patch.uvOuter, maxOuterPts, outerAreaErrRatio);
+          const simplifiedHoles = patch.uvHoles
+            .map((hole) => simplifyLoopForMeshing(hole, maxHolePts, maxAreaErrorRatio))
+            .filter((hole) => hole.length >= 3);
+          const validation = validateAndSanitizeTrimLoops(simplifiedOuter, simplifiedHoles, {
+            minAreaAbs: 1e-7,
+            maxHoleToOuterRatio: 0.98,
+            failOnHoleOutside: true,
+            failOnHugeHole: true,
+          });
+          if (validation.ok) {
+            return { uvOuter: validation.uvOuter, uvHoles: validation.uvHoles };
+          }
+          return patch;
+        };
+
         const isConeSeamSplitFaceEnabled =
           coneSeamSplitFaceIdsRaw == null || coneSeamSplitFaceIds.has(face.faceIndex);
+        const isCylinderSeamSplitFaceEnabled =
+          cylinderSeamSplitFaceIdsRaw == null || cylinderSeamSplitFaceIds.has(face.faceIndex);
+        const cylinderOuterBounds = getLoopUBounds(loops.uvOuter);
+        const cylinderOuterUSpan = cylinderOuterBounds.uMax - cylinderOuterBounds.uMin;
+        const cylinderLikelyPeriodic = face.surfaceType === 'Cylinder' && cylinderOuterUSpan > 5.5;
         const shouldTryConeSeamSplit =
           face.surfaceType === 'Cone' &&
           enableConeSeamSplit &&
           isConeSeamSplitFaceEnabled &&
           loops.uvOuter.length >= 3 &&
           loops.uvHoles.length > 0;
+        const shouldTryCylinderSeamSplit =
+          face.surfaceType === 'Cylinder' &&
+          enableCylinderSeamSplit &&
+          isCylinderSeamSplitFaceEnabled &&
+          cylinderCrossesSeam &&
+          loops.uvOuter.length >= 3 &&
+          loops.uvHoles.length > 0;
         const coneSplitSourceOuter =
           (coneWrappedOuterForSplit && coneWrappedOuterForSplit.length >= 3)
             ? coneWrappedOuterForSplit
+            : ((loops.uvOuterRawWrapped && loops.uvOuterRawWrapped.length >= 3)
+              ? loops.uvOuterRawWrapped
+              : loops.uvOuter);
+        const cylinderSplitSourceOuter =
+          (cylinderWrappedOuterForSplit && cylinderWrappedOuterForSplit.length >= 3)
+            ? cylinderWrappedOuterForSplit
             : ((loops.uvOuterRawWrapped && loops.uvOuterRawWrapped.length >= 3)
               ? loops.uvOuterRawWrapped
               : loops.uvOuter);
@@ -7141,42 +7165,34 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             `outerPts=${loops.uvOuter.length}, holes=${loops.uvHoles.length})`
           );
         }
+        if (
+          face.surfaceType === 'Cylinder' &&
+          enableCylinderSeamSplit &&
+          isCylinderSeamSplitFaceEnabled &&
+          !shouldTryCylinderSeamSplit
+        ) {
+          console.log(
+            `[cylinder-seam-split] face ${face.faceIndex} ${face.surfaceType}: skipped ` +
+            `(crossesSeam=${cylinderCrossesSeam}, likelyPeriodic=${cylinderLikelyPeriodic}, wrappedOuter=${!!cylinderWrappedOuterForSplit}, ` +
+            `rawOuter=${!!loops.uvOuterRawWrapped}, ` +
+            `outerPts=${loops.uvOuter.length}, holes=${loops.uvHoles.length})`
+          );
+        }
 
         let mesh;
         try {
-          if (shouldTryConeSeamSplit) {
+          if (shouldTryConeSeamSplit || shouldTryCylinderSeamSplit) {
+            const splitLabel = shouldTryConeSeamSplit ? 'cone-seam-split' : 'cylinder-seam-split';
+            const splitModeName: 'cone' | 'cylinder' = shouldTryConeSeamSplit ? 'cone' : 'cylinder';
+            const splitSourceOuter = shouldTryConeSeamSplit ? coneSplitSourceOuter : cylinderSplitSourceOuter;
             const splitResult = splitConeTrimLoopsIntoTwoPatches(
-              coneSplitSourceOuter,
+              splitSourceOuter,
               loops.uvOuter,
               loops.uvHoles
             );
             if (splitResult.ok && splitResult.leftPatch && splitResult.rightPatch && splitResult.uSplit != null) {
-              const simplifyConePatch = (patch: { uvOuter: Vec2[]; uvHoles: Vec2[][] }) => {
-                const maxOuterPts = Math.max(64, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_OUTER_PTS__') ?? 192));
-                const maxHolePts = Math.max(12, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_HOLE_PTS__') ?? 32));
-                const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber('__CONE_TRIM_MAX_AREA_ERR_RATIO__') ?? 0.03);
-                const maxOuterAreaErrorNoHoles = Math.max(
-                  maxAreaErrorRatio,
-                  readGlobalNumber('__CONE_TRIM_MAX_AREA_ERR_RATIO_NO_HOLES__') ?? 0.08
-                );
-                const outerAreaErrRatio = patch.uvHoles.length === 0 ? maxOuterAreaErrorNoHoles : maxAreaErrorRatio;
-                const simplifiedOuter = simplifyLoopForMeshing(patch.uvOuter, maxOuterPts, outerAreaErrRatio);
-                const simplifiedHoles = patch.uvHoles
-                  .map((hole) => simplifyLoopForMeshing(hole, maxHolePts, maxAreaErrorRatio))
-                  .filter((hole) => hole.length >= 3);
-                const validation = validateAndSanitizeTrimLoops(simplifiedOuter, simplifiedHoles, {
-                  minAreaAbs: 1e-7,
-                  maxHoleToOuterRatio: 0.98,
-                  failOnHoleOutside: true,
-                  failOnHugeHole: true,
-                });
-                if (validation.ok) {
-                  return { uvOuter: validation.uvOuter, uvHoles: validation.uvHoles };
-                }
-                return patch;
-              };
-              const leftPatch = simplifyConePatch(splitResult.leftPatch);
-              const rightPatch = simplifyConePatch(splitResult.rightPatch);
+              const leftPatch = simplifySeamPatch(splitResult.leftPatch, splitModeName);
+              const rightPatch = simplifySeamPatch(splitResult.rightPatch, splitModeName);
               const patchMeshes: TessellatedMeshLike[] = [];
               patchMeshes.push(
                 await tessellateTrimmedSurface(
@@ -7200,7 +7216,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
               );
               mesh = mergeTessellatedMeshes(patchMeshes);
               console.log(
-                `[cone-seam-split] face ${face.faceIndex} ${face.surfaceType}: split at U=${splitResult.uSplit.toFixed(3)} ` +
+                `[${splitLabel}] face ${face.faceIndex} ${face.surfaceType}: split at U=${splitResult.uSplit.toFixed(3)} ` +
                 `mode=${splitResult.splitMode ?? 'unknown'} ` +
                 `left(outer=${leftPatch.uvOuter.length}, holes=${leftPatch.uvHoles.length}) ` +
                 `right(outer=${rightPatch.uvOuter.length}, holes=${rightPatch.uvHoles.length}) ` +
@@ -7209,7 +7225,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
               );
             } else {
               console.warn(
-                `[cone-seam-split] face ${face.faceIndex} ${face.surfaceType}: split unavailable/failed (${splitResult.reason ?? 'unknown'}), using single trimmed tessellation`
+                `[${splitLabel}] face ${face.faceIndex} ${face.surfaceType}: split unavailable/failed (${splitResult.reason ?? 'unknown'}), using single trimmed tessellation`
               );
               mesh = await tessellateTrimmedSurface(surface, loops.uvOuter, gridDensity, loops.uvHoles, bbox3d, trimmedBuildOptions);
             }

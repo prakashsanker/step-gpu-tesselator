@@ -99,6 +99,11 @@ export interface TrimmedSurfaceBuildOptions {
     keepTriangle?: (samples: ReadonlyArray<[number, number]>) => boolean;
     // If false, only emit full quad triangles (skip partial boundary quads).
     allowPartialCellTriangles?: boolean;
+    // Optional anisotropic grid density overrides for trimmed-grid tessellation.
+    gridDensityU?: number;
+    gridDensityV?: number;
+    // If true, skip CDT-with-holes and use the trimmed grid path even when holes exist.
+    preferGridForHoles?: boolean;
     // Optional label used in logs.
     logLabel?: string;
 }
@@ -471,6 +476,9 @@ export async function tessellateTrimmedSurface(
     const useCustomUvInside = typeof buildOptions?.uvInsideTest === 'function';
     const keepTriangle = buildOptions?.keepTriangle;
     const allowPartialCellTriangles = buildOptions?.allowPartialCellTriangles ?? true;
+    const gridDensityU = Math.max(4, Math.floor(buildOptions?.gridDensityU ?? gridDensity));
+    const gridDensityV = Math.max(2, Math.floor(buildOptions?.gridDensityV ?? gridDensity));
+    const preferGridForHoles = buildOptions?.preferGridForHoles ?? false;
     const buildLabel = buildOptions?.logLabel ?? 'default';
 
     // Debug: log continuous boundary bounds
@@ -503,7 +511,7 @@ export async function tessellateTrimmedSurface(
     // ===== Use CDT with holes for proper hole support =====
     // CDT (Constrained Delaunay Triangulation) with cavity-based constraint recovery
     // ensures hole boundary edges are preserved in the triangulation
-    if (continuousHoles.length > 0) {
+    if (continuousHoles.length > 0 && !preferGridForHoles) {
         trimDebugLog(`[tessellateTrimmedSurface] Using CDT with ${continuousHoles.length} holes`);
 
         // If boundary is sparse (e.g., just 4 rectangle corners), densify it
@@ -515,7 +523,7 @@ export async function tessellateTrimmedSurface(
                 const p1 = continuousBoundary[i];
                 const p2 = continuousBoundary[(i + 1) % continuousBoundary.length];
                 // Add points along this edge
-                const edgePoints = Math.max(8, gridDensity);
+                const edgePoints = Math.max(8, gridDensityU, gridDensityV);
                 for (let t = 0; t < edgePoints; t++) {
                     const u = p1[0] + (p2[0] - p1[0]) * (t / edgePoints);
                     const v = p1[1] + (p2[1] - p1[1]) * (t / edgePoints);
@@ -599,8 +607,8 @@ export async function tessellateTrimmedSurface(
     }
 
     // Create a grid of UV vertices
-    const du = (uMax - uMin) / gridDensity;
-    const dv = (vMax - vMin) / gridDensity;
+    const du = (uMax - uMin) / gridDensityU;
+    const dv = (vMax - vMin) / gridDensityV;
 
     const uvVertices: Vec2[] = [];
     const vertexGrid: (number | null)[][] = []; // Maps grid position to vertex index
@@ -656,9 +664,9 @@ export async function tessellateTrimmedSurface(
 
     let bbox3dFilteredCount = 0;
 
-    for (let j = 0; j <= gridDensity; j++) {
+    for (let j = 0; j <= gridDensityV; j++) {
         vertexGrid[j] = [];
-        for (let i = 0; i <= gridDensity; i++) {
+        for (let i = 0; i <= gridDensityU; i++) {
             const u = uMin + i * du;
             const v = vMin + j * dv;
 
@@ -852,8 +860,8 @@ export async function tessellateTrimmedSurface(
         }
     };
 
-    for (let j = 0; j < gridDensity; j++) {
-        for (let i = 0; i < gridDensity; i++) {
+    for (let j = 0; j < gridDensityV; j++) {
+        for (let i = 0; i < gridDensityU; i++) {
             const v00 = vertexGrid[j][i];
             const v10 = vertexGrid[j][i + 1];
             const v01 = vertexGrid[j + 1][i];
