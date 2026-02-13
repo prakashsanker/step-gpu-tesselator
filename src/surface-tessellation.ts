@@ -15,6 +15,7 @@
 
 import { constrainedDelaunayTriangulation, cdtWithHoles } from "./cdt-gpu";
 import { triangulateWithHoles } from "./triangulate-fast";
+import { classifyTrimGridGPU } from "./trim-grid-gpu";
 import { evaluateSurface, surfaceNormal } from "./surfaces";
 import { evaluateSurfaceMeshGPU } from "./surface-eval-gpu";
 import { createRectangularUVBoundary } from "./uv-extraction";
@@ -122,6 +123,11 @@ function readTrimNumber(key: string): number | null {
         return null;
     }
     return raw;
+}
+
+function readTrimBoolean(key: string, fallback: boolean): boolean {
+    const raw = (globalThis as any)?.[key];
+    return typeof raw === "boolean" ? raw : fallback;
 }
 
 /**
@@ -698,6 +704,36 @@ export async function tessellateTrimmedSurface(
         ? perfDisableNearBoundaryDefault
         : perfDisableNearBoundaryRaw === true;
     const skipNearBoundaryChecks = preferGeometryOnlyLoad && uvHoles.length === 0 && perfDisableNearBoundary;
+    const enableGpuTrimGridClassification = readTrimBoolean("__ENABLE_GPU_TRIM_GRID_CLASSIFICATION__", true);
+    const totalGridPoints = (gridDensityU + 1) * (gridDensityV + 1);
+    const gpuGridMinPoints = Math.max(
+        512,
+        Math.floor(readTrimNumber("__GPU_TRIM_GRID_MIN_POINTS__") ?? 2048)
+    );
+    const canUseGpuTrimGridClassification =
+        enableGpuTrimGridClassification &&
+        !useCustomUvInside &&
+        totalGridPoints >= gpuGridMinPoints;
+    let gpuTrimMask: Uint32Array | null = null;
+    if (canUseGpuTrimGridClassification) {
+        gpuTrimMask = await classifyTrimGridGPU({
+            boundary: continuousBoundary,
+            holes: continuousHoles,
+            gridDensityU,
+            gridDensityV,
+            uMin,
+            vMin,
+            du,
+            dv,
+            boundaryTolerance,
+            useNearBoundary: !skipNearBoundaryChecks,
+        });
+        if (gpuTrimMask) {
+            trimDebugLog(
+                `[tessellateTrimmedSurface] GPU trim classification enabled for ${totalGridPoints} grid points`
+            );
+        }
+    }
 
     // 3D bbox tolerance - keep tight to avoid protrusions
     // For horizontal cylinders, even 0.5 tolerance can create visible artifacts
@@ -718,23 +754,28 @@ export async function tessellateTrimmedSurface(
         for (let i = 0; i <= gridDensityU; i++) {
             const u = uMin + i * du;
             const v = vMin + j * dv;
-
-            // Check if this point is inside the continuous boundary and outside holes.
-            // For selected OCC paths, use the classifier as the source of truth.
-            const insideBoundary = useCustomUvInside
-                ? !!buildOptions!.uvInsideTest!(u, v)
-                : isPointInPolygon([u, v], continuousBoundary);
-            const nearBoundary = useCustomUvInside
-                ? false
-                : (skipNearBoundaryChecks
+            const maskIdx = j * (gridDensityU + 1) + i;
+            let includePoint = false;
+            if (gpuTrimMask) {
+                includePoint = gpuTrimMask[maskIdx] !== 0;
+            } else {
+                // Check if this point is inside the continuous boundary and outside holes.
+                // For selected OCC paths, use the classifier as the source of truth.
+                const insideBoundary = useCustomUvInside
+                    ? !!buildOptions!.uvInsideTest!(u, v)
+                    : isPointInPolygon([u, v], continuousBoundary);
+                const nearBoundary = useCustomUvInside
                     ? false
-                    : isNearBoundary([u, v], continuousBoundary, boundaryTolerance));
-            const insideHole = useCustomUvInside
-                ? false
-                : continuousHoles.some(hole => isPointInPolygon([u, v], hole));
+                    : (skipNearBoundaryChecks
+                        ? false
+                        : isNearBoundary([u, v], continuousBoundary, boundaryTolerance));
+                const insideHole = useCustomUvInside
+                    ? false
+                    : continuousHoles.some(hole => isPointInPolygon([u, v], hole));
+                includePoint = (insideBoundary || nearBoundary) && !insideHole;
+            }
 
-            // Include points that are inside OR very close to the boundary
-            if ((insideBoundary || nearBoundary) && !insideHole) {
+            if (includePoint) {
                 // If 3D bbox is provided, also check if the 3D position is within bounds
                 // This is crucial for horizontal cylinders where UV polygon spans full U
                 // but we only want the portion of the surface within the 3D boundary

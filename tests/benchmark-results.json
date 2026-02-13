@@ -1,12 +1,12 @@
 {
-  "timestamp": "2026-02-13T06:53:58.998Z",
-  "suite": "representative",
-  "suiteDescription": "Real-world performance gate including electronic enclosure",
+  "timestamp": "2026-02-13T07:00:51.562Z",
+  "suite": "canary",
+  "suiteDescription": "All non-real-world STEP files (larger stability gate)",
   "config": {
     "benchmarkRuns": 1,
     "warmupRuns": 0,
-    "timeoutMs": 360000,
-    "modelCount": 6,
+    "timeoutMs": 300000,
+    "modelCount": 80,
     "prewarm": true
   },
   "excluded": [
@@ -21,313 +21,4259 @@
     {
       "path": "step-examples/complex/rotor-201nal.step",
       "reason": "Timeout (too slow for routine perf loop)"
+    },
+    {
+      "path": "step-examples/Electronic Enclousre.STEP",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/VM-002.STEP",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/VM-004.STEP",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/c2-holes/2.2-projection/tilted-triangle-no-plane.step",
+      "reason": "known-broken"
+    },
+    {
+      "path": "step-examples/c3-curves/rotor.step",
+      "reason": "requested-exclusion"
+    },
+    {
+      "path": "step-examples/complex/air.step",
+      "reason": "known-broken"
+    },
+    {
+      "path": "step-examples/complex/nissan.step",
+      "reason": "known-broken"
+    },
+    {
+      "path": "step-examples/complex/rocky_house.step",
+      "reason": "requested-exclusion"
+    },
+    {
+      "path": "step-examples/complex/rocky_house_car.step",
+      "reason": "requested-exclusion"
+    },
+    {
+      "path": "step-examples/complex/rocky_house_roof.step",
+      "reason": "requested-exclusion"
+    },
+    {
+      "path": "step-examples/complex/rocky_house_sofa.step",
+      "reason": "requested-exclusion"
+    },
+    {
+      "path": "step-examples/complex/rocky_house_table.step",
+      "reason": "requested-exclusion"
+    },
+    {
+      "path": "step-examples/complex/rocky_house_terrain.step",
+      "reason": "requested-exclusion"
+    },
+    {
+      "path": "step-examples/complex/rotor-201nal.step",
+      "reason": "requested-exclusion"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/as1-ac-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/as1-ec-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/as1-md-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/as1-tc-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/as1-ug-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/d2-db-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/f1-db-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/io1-ac-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/io1-ca-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/io1-ec-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/io1-md-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/io1-tc-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap214/io1-ug-214.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap224/ap224_995277945.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap224/ap224_995288709.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap224/ap224_995315479.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap224/ap224_995602415.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap224/ap224_997423743.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools-ap224/ap224_997865309.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools/123Block_Color.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools/123Block_Dimension.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools/123Block_Short_Note.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools/boxy_with_cylindricity.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools/boxy_with_diamsize.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools/boxy_with_flatness.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools/boxy_with_limitsandfits.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools/boxy_with_linearsize.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools/boxy_with_perp.stp",
+      "reason": "real-world"
+    },
+    {
+      "path": "step-examples/external/steptools/boxy_with_surfacetex.stp",
+      "reason": "real-world"
     }
   ],
   "results": [
     {
-      "name": "Electronic Enclosure",
-      "path": "step-examples/Electronic Enclousre.STEP",
-      "category": "enclosure",
-      "fileSize": 4990243,
-      "success": true,
-      "ours": {
-        "avgMs": 8413.425000011921,
-        "p50Ms": 8413.425000011921,
-        "p90Ms": 8413.425000011921,
-        "maxMs": 8413.425000011921,
-        "runs": [
-          8413.425000011921
-        ],
-        "phases": {
-          "loadStepFile": 3038.925000011921,
-          "loadStepFile_initOC": 0.019999980926513672,
-          "loadStepFile_createDoc": 0,
-          "loadStepFile_readFile": 1055.7099999785423,
-          "loadStepFile_transfer": 1978.7649999856949,
-          "loadStepFile_getTools": 0,
-          "loadStepFile_oneShape": 0.08000004291534424,
-          "loadStepFile_fsWrite": 0.9799999594688416,
-          "loadStepFile_fsCleanup": 0,
-          "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 215.01499998569489,
-          "tessellateOCCShape": 5152.155000030994,
-          "tessellatePlanarFace": 95.96499997377396,
-          "tessellateCurvedFace": 11282.894998550415,
-          "earClipping": 90.25500023365021,
-          "computeNormals": 7.675000011920929,
-          "meshAssembly": 10.245000004768372
-        },
-        "vertexCount": 89817,
-        "triangleCount": 142856
-      },
-      "ref": {
-        "avgMs": 3253.375,
-        "p50Ms": 3253.375,
-        "p90Ms": 3253.375,
-        "maxMs": 3253.375,
-        "runs": [
-          3253.375
-        ],
-        "vertexCount": 32049,
-        "triangleCount": 39148
-      },
-      "speedup": 0.3866885364753819,
-      "triangleRatio": 3.649126392152856,
-      "warnings": []
-    },
-    {
-      "name": "VM-001",
+      "name": "VM-001.STEP",
       "path": "step-examples/VM-001.STEP",
-      "category": "industry",
+      "category": "VM-001.STEP",
       "fileSize": 336737,
       "success": true,
       "ours": {
-        "avgMs": 266.7950000166893,
-        "p50Ms": 266.7950000166893,
-        "p90Ms": 266.7950000166893,
-        "maxMs": 266.7950000166893,
+        "avgMs": 287.9200000166893,
+        "p50Ms": 287.9200000166893,
+        "p90Ms": 287.9200000166893,
+        "maxMs": 287.9200000166893,
         "runs": [
-          266.7950000166893
+          287.9200000166893
         ],
         "phases": {
-          "loadStepFile": 212.49499994516373,
-          "loadStepFile_initOC": 0.029999971389770508,
+          "loadStepFile": 219.66499996185303,
+          "loadStepFile_initOC": 0.004999995231628418,
           "loadStepFile_createDoc": 0,
-          "loadStepFile_readFile": 111.58499997854233,
-          "loadStepFile_transfer": 95.14499998092651,
+          "loadStepFile_readFile": 83.78500002622604,
+          "loadStepFile_transfer": 134.2049999833107,
           "loadStepFile_getTools": 0,
-          "loadStepFile_oneShape": 0.07500004768371582,
-          "loadStepFile_fsWrite": 1.1550000309944153,
+          "loadStepFile_oneShape": 0.04500001668930054,
+          "loadStepFile_fsWrite": 0.25,
           "loadStepFile_fsCleanup": 0,
           "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 13.459999978542328,
-          "tessellateOCCShape": 40.08499997854233,
-          "tessellatePlanarFace": 4.860000133514404,
-          "tessellateCurvedFace": 79.49000024795532,
-          "earClipping": 3.280000150203705,
-          "computeNormals": 4.149999976158142,
-          "meshAssembly": 4.2049999833106995
+          "extractFacesWithEdges": 18.94999998807907,
+          "tessellateOCCShape": 48.10000002384186,
+          "tessellatePlanarFace": 3.2799999713897705,
+          "tessellateCurvedFace": 138.93999993801117,
+          "earClipping": 2.3450000286102295,
+          "computeNormals": 1.2099999785423279,
+          "meshAssembly": 1.399999976158142
         },
         "vertexCount": 2992,
         "triangleCount": 3313
       },
       "ref": {
-        "avgMs": 250.18000000715256,
-        "p50Ms": 250.18000000715256,
-        "p90Ms": 250.18000000715256,
-        "maxMs": 250.18000000715256,
+        "avgMs": 360.6950000524521,
+        "p50Ms": 360.6950000524521,
+        "p90Ms": 360.6950000524521,
+        "maxMs": 360.6950000524521,
         "runs": [
-          250.18000000715256
+          360.6950000524521
         ],
         "vertexCount": 3328,
         "triangleCount": 3116
       },
-      "speedup": 0.9377237204276789,
+      "speedup": 1.2527611837716879,
       "triangleRatio": 1.0632220795892169,
       "warnings": []
     },
     {
-      "name": "VM-002",
-      "path": "step-examples/VM-002.STEP",
-      "category": "industry",
-      "fileSize": 43126,
+      "name": "benchmark/plate-large-10x10.step",
+      "path": "step-examples/benchmark/plate-large-10x10.step",
+      "category": "benchmark",
+      "fileSize": 77399,
       "success": true,
       "ours": {
-        "avgMs": 22.375,
-        "p50Ms": 22.375,
-        "p90Ms": 22.375,
-        "maxMs": 22.375,
+        "avgMs": 60.87999999523163,
+        "p50Ms": 60.87999999523163,
+        "p90Ms": 60.87999999523163,
+        "maxMs": 60.87999999523163,
         "runs": [
-          22.375
+          60.87999999523163
         ],
         "phases": {
-          "loadStepFile": 20.25499999523163,
-          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile": 58.58500003814697,
+          "loadStepFile_initOC": 0.005000054836273193,
           "loadStepFile_createDoc": 0,
-          "loadStepFile_readFile": 10.459999978542328,
-          "loadStepFile_transfer": 9.194999992847443,
-          "loadStepFile_getTools": 0,
-          "loadStepFile_oneShape": 0.020000040531158447,
-          "loadStepFile_fsWrite": 0.06000000238418579,
-          "loadStepFile_fsCleanup": 0,
-          "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 0.9399999976158142,
-          "tessellateOCCShape": 0.9100000262260437,
-          "tessellatePlanarFace": 0.11499994993209839,
-          "tessellateCurvedFace": 0.4750000238418579,
-          "earClipping": 0.0549999475479126,
-          "computeNormals": 0.0350000262260437,
-          "meshAssembly": 0.05500000715255737
-        },
-        "vertexCount": 106,
-        "triangleCount": 86
-      },
-      "ref": {
-        "avgMs": 107.28999996185303,
-        "p50Ms": 107.28999996185303,
-        "p90Ms": 107.28999996185303,
-        "maxMs": 107.28999996185303,
-        "runs": [
-          107.28999996185303
-        ],
-        "vertexCount": 3043,
-        "triangleCount": 5750
-      },
-      "speedup": 4.795083797177789,
-      "triangleRatio": 0.014956521739130434,
-      "warnings": []
-    },
-    {
-      "name": "Raw Material",
-      "path": "step-examples/complex/raw-material.step",
-      "category": "complex",
-      "fileSize": 39877,
-      "success": true,
-      "ours": {
-        "avgMs": 21.52000004053116,
-        "p50Ms": 21.52000004053116,
-        "p90Ms": 21.52000004053116,
-        "maxMs": 21.52000004053116,
-        "runs": [
-          21.52000004053116
-        ],
-        "phases": {
-          "loadStepFile": 19.024999976158142,
-          "loadStepFile_initOC": 0.004999995231628418,
-          "loadStepFile_createDoc": 0,
-          "loadStepFile_readFile": 9.715000033378601,
-          "loadStepFile_transfer": 8.90499997138977,
-          "loadStepFile_getTools": 0,
-          "loadStepFile_oneShape": 0.020000040531158447,
-          "loadStepFile_fsWrite": 0.06000000238418579,
-          "loadStepFile_fsCleanup": 0,
-          "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 1.2450000047683716,
-          "tessellateOCCShape": 0.9799999594688416,
-          "tessellatePlanarFace": 0.09999996423721313,
-          "tessellateCurvedFace": 0.7649999260902405,
-          "earClipping": 0.0549999475479126,
-          "computeNormals": 0.014999985694885254,
-          "meshAssembly": 0.039999961853027344
-        },
-        "vertexCount": 500,
-        "triangleCount": 688
-      },
-      "ref": {
-        "avgMs": 38.705000042915344,
-        "p50Ms": 38.705000042915344,
-        "p90Ms": 38.705000042915344,
-        "maxMs": 38.705000042915344,
-        "runs": [
-          38.705000042915344
-        ],
-        "vertexCount": 368,
-        "triangleCount": 332
-      },
-      "speedup": 1.7985594781606713,
-      "triangleRatio": 2.072289156626506,
-      "warnings": []
-    },
-    {
-      "name": "Conical Surface (complex)",
-      "path": "step-examples/complex/conical-surface.step",
-      "category": "complex",
-      "fileSize": 9390,
-      "success": true,
-      "ours": {
-        "avgMs": 12.650000035762787,
-        "p50Ms": 12.650000035762787,
-        "p90Ms": 12.650000035762787,
-        "maxMs": 12.650000035762787,
-        "runs": [
-          12.650000035762787
-        ],
-        "phases": {
-          "loadStepFile": 9.394999980926514,
-          "loadStepFile_initOC": 0.004999995231628418,
-          "loadStepFile_createDoc": 0,
-          "loadStepFile_readFile": 5.160000026226044,
-          "loadStepFile_transfer": 3.740000009536743,
-          "loadStepFile_getTools": 0,
-          "loadStepFile_oneShape": 0.10500001907348633,
-          "loadStepFile_fsWrite": 0.06499999761581421,
-          "loadStepFile_fsCleanup": 0,
-          "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 0.7249999642372131,
-          "tessellateOCCShape": 2.2950000166893005,
-          "tessellatePlanarFace": 0.07499998807907104,
-          "tessellateCurvedFace": 3.419999897480011,
-          "earClipping": 0.06000000238418579,
-          "computeNormals": 0.02499997615814209,
-          "meshAssembly": 0.050000011920928955
-        },
-        "vertexCount": 864,
-        "triangleCount": 1452
-      },
-      "ref": {
-        "avgMs": 34.060000002384186,
-        "p50Ms": 34.060000002384186,
-        "p90Ms": 34.060000002384186,
-        "maxMs": 34.060000002384186,
-        "runs": [
-          34.060000002384186
-        ],
-        "vertexCount": 1012,
-        "triangleCount": 1318
-      },
-      "speedup": 2.6924901111536155,
-      "triangleRatio": 1.1016691957511382,
-      "warnings": []
-    },
-    {
-      "name": "Pipe With Porthole (trim)",
-      "path": "step-examples/c6-trimmed/pipe-with-porthole.step",
-      "category": "trimmed",
-      "fileSize": 5434,
-      "success": true,
-      "ours": {
-        "avgMs": 5.805000007152557,
-        "p50Ms": 5.805000007152557,
-        "p90Ms": 5.805000007152557,
-        "maxMs": 5.805000007152557,
-        "runs": [
-          5.805000007152557
-        ],
-        "phases": {
-          "loadStepFile": 4.735000014305115,
-          "loadStepFile_initOC": 0,
-          "loadStepFile_createDoc": 0,
-          "loadStepFile_readFile": 2.0450000762939453,
-          "loadStepFile_transfer": 2.3199999928474426,
+          "loadStepFile_readFile": 35.7600000500679,
+          "loadStepFile_transfer": 19.680000007152557,
           "loadStepFile_getTools": 0,
           "loadStepFile_oneShape": 0.04000002145767212,
+          "loadStepFile_fsWrite": 2.709999978542328,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 1.4800000190734863,
+          "tessellateOCCShape": 0.44999998807907104,
+          "tessellatePlanarFace": 0.25999999046325684,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.19999998807907104,
+          "computeNormals": 0.014999985694885254,
+          "meshAssembly": 0.029999971389770508
+        },
+        "vertexCount": 106,
+        "triangleCount": 172
+      },
+      "ref": {
+        "avgMs": 59.78999996185303,
+        "p50Ms": 59.78999996185303,
+        "p90Ms": 59.78999996185303,
+        "maxMs": 59.78999996185303,
+        "runs": [
+          59.78999996185303
+        ],
+        "vertexCount": 106,
+        "triangleCount": 172
+      },
+      "speedup": 0.9820959258629439,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "benchmark/plate-medium-5x5.step",
+      "path": "step-examples/benchmark/plate-medium-5x5.step",
+      "category": "benchmark",
+      "fileSize": 21336,
+      "success": true,
+      "ours": {
+        "avgMs": 20.490000009536743,
+        "p50Ms": 20.490000009536743,
+        "p90Ms": 20.490000009536743,
+        "maxMs": 20.490000009536743,
+        "runs": [
+          20.490000009536743
+        ],
+        "phases": {
+          "loadStepFile": 18.764999985694885,
+          "loadStepFile_initOC": 0,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 6.969999969005585,
+          "loadStepFile_transfer": 11.384999990463257,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.020000040531158447,
+          "loadStepFile_fsWrite": 0.06999999284744263,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 1.1950000524520874,
+          "tessellateOCCShape": 0.25999999046325684,
+          "tessellatePlanarFace": 0.13999998569488525,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.0899999737739563,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.02499997615814209
+        },
+        "vertexCount": 79,
+        "triangleCount": 127
+      },
+      "ref": {
+        "avgMs": 48.54000002145767,
+        "p50Ms": 48.54000002145767,
+        "p90Ms": 48.54000002145767,
+        "maxMs": 48.54000002145767,
+        "runs": [
+          48.54000002145767
+        ],
+        "vertexCount": 79,
+        "triangleCount": 127
+      },
+      "speedup": 2.3689604684658616,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "benchmark/plate-small-2x2.step",
+      "path": "step-examples/benchmark/plate-small-2x2.step",
+      "category": "benchmark",
+      "fileSize": 6817,
+      "success": true,
+      "ours": {
+        "avgMs": 5.629999995231628,
+        "p50Ms": 5.629999995231628,
+        "p90Ms": 5.629999995231628,
+        "maxMs": 5.629999995231628,
+        "runs": [
+          5.629999995231628
+        ],
+        "phases": {
+          "loadStepFile": 4.875,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.2649999856948853,
+          "loadStepFile_transfer": 2.1700000166893005,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.125,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.3199999928474426,
+          "tessellateOCCShape": 0.14500004053115845,
+          "tessellatePlanarFace": 0.04000002145767212,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.025000035762786865,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.01500004529953003
+        },
+        "vertexCount": 16,
+        "triangleCount": 22
+      },
+      "ref": {
+        "avgMs": 32.06999999284744,
+        "p50Ms": 32.06999999284744,
+        "p90Ms": 32.06999999284744,
+        "maxMs": 32.06999999284744,
+        "runs": [
+          32.06999999284744
+        ],
+        "vertexCount": 16,
+        "triangleCount": 22
+      },
+      "speedup": 5.696269985792074,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "benchmark/plate-xlarge-20x20.step",
+      "path": "step-examples/benchmark/plate-xlarge-20x20.step",
+      "category": "benchmark",
+      "fileSize": 307519,
+      "success": true,
+      "ours": {
+        "avgMs": 104.67500001192093,
+        "p50Ms": 104.67500001192093,
+        "p90Ms": 104.67500001192093,
+        "maxMs": 104.67500001192093,
+        "runs": [
+          104.67500001192093
+        ],
+        "phases": {
+          "loadStepFile": 102.43999999761581,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 80.65499997138977,
+          "loadStepFile_transfer": 21.12999999523163,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.034999966621398926,
+          "loadStepFile_fsWrite": 0.1499999761581421,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 1.3650000095367432,
+          "tessellateOCCShape": 0.3149999976158142,
+          "tessellatePlanarFace": 0.1950000524520874,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.17000001668930054,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.025000035762786865
+        },
+        "vertexCount": 106,
+        "triangleCount": 172
+      },
+      "ref": {
+        "avgMs": 153.73499995470047,
+        "p50Ms": 153.73499995470047,
+        "p90Ms": 153.73499995470047,
+        "maxMs": 153.73499995470047,
+        "runs": [
+          153.73499995470047
+        ],
+        "vertexCount": 106,
+        "triangleCount": 172
+      },
+      "speedup": 1.4686887980625014,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "benchmark/plate-xxlarge-30x30.step",
+      "path": "step-examples/benchmark/plate-xxlarge-30x30.step",
+      "category": "benchmark",
+      "fileSize": 703683,
+      "success": true,
+      "ours": {
+        "avgMs": 230.13000005483627,
+        "p50Ms": 230.13000005483627,
+        "p90Ms": 230.13000005483627,
+        "maxMs": 230.13000005483627,
+        "runs": [
+          230.13000005483627
+        ],
+        "phases": {
+          "loadStepFile": 227.13499999046326,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 189.37000006437302,
+          "loadStepFile_transfer": 37.18000000715256,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.02499997615814209,
+          "loadStepFile_fsWrite": 0.13999998569488525,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 1.5300000309944153,
+          "tessellateOCCShape": 0.625,
+          "tessellatePlanarFace": 0.44999998807907104,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.4150000214576721,
+          "computeNormals": 0.04000002145767212,
+          "meshAssembly": 0.06499999761581421
+        },
+        "vertexCount": 138,
+        "triangleCount": 101
+      },
+      "ref": {
+        "avgMs": 209.71499997377396,
+        "p50Ms": 209.71499997377396,
+        "p90Ms": 209.71499997377396,
+        "maxMs": 209.71499997377396,
+        "runs": [
+          209.71499997377396
+        ],
+        "vertexCount": 102,
+        "triangleCount": 132
+      },
+      "speedup": 0.9112892709503422,
+      "triangleRatio": 0.7651515151515151,
+      "warnings": []
+    },
+    {
+      "name": "benchmark/simple-square.step",
+      "path": "step-examples/benchmark/simple-square.step",
+      "category": "benchmark",
+      "fileSize": 2504,
+      "success": true,
+      "ours": {
+        "avgMs": 10.569999992847443,
+        "p50Ms": 10.569999992847443,
+        "p90Ms": 10.569999992847443,
+        "maxMs": 10.569999992847443,
+        "runs": [
+          10.569999992847443
+        ],
+        "phases": {
+          "loadStepFile": 10.055000007152557,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 8.744999945163727,
+          "loadStepFile_transfer": 0.9100000262260437,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
           "loadStepFile_fsWrite": 0.05500000715255737,
           "loadStepFile_fsCleanup": 0,
           "loadStepFile_colorParsing": 0,
-          "extractFacesWithEdges": 0.3399999737739563,
-          "tessellateOCCShape": 0.4649999737739563,
+          "extractFacesWithEdges": 0.1850000023841858,
+          "tessellateOCCShape": 0.125,
+          "tessellatePlanarFace": 0.039999961853027344,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.02499997615814209,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "ref": {
+        "avgMs": 26.844999969005585,
+        "p50Ms": 26.844999969005585,
+        "p90Ms": 26.844999969005585,
+        "maxMs": 26.844999969005585,
+        "runs": [
+          26.844999969005585
+        ],
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "speedup": 2.539735098124048,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/concave/almost_collinear_pentagon.step",
+      "path": "step-examples/c1-triangulation/concave/almost_collinear_pentagon.step",
+      "category": "c1-triangulation",
+      "fileSize": 4150,
+      "success": true,
+      "ours": {
+        "avgMs": 4.5,
+        "p50Ms": 4.5,
+        "p90Ms": 4.5,
+        "maxMs": 4.5,
+        "runs": [
+          4.5
+        ],
+        "phases": {
+          "loadStepFile": 3.76500004529953,
+          "loadStepFile_initOC": 0.020000040531158447,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.824999988079071,
+          "loadStepFile_transfer": 0.550000011920929,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.9950000047683716,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.1899999976158142,
+          "tessellateOCCShape": 0.29500001668930054,
           "tessellatePlanarFace": 0,
-          "tessellateCurvedFace": 0.6100000143051147,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 0,
+        "triangleCount": 0
+      },
+      "ref": {
+        "avgMs": 24.625,
+        "p50Ms": 24.625,
+        "p90Ms": 24.625,
+        "maxMs": 24.625,
+        "runs": [
+          24.625
+        ],
+        "vertexCount": 0,
+        "triangleCount": 0
+      },
+      "speedup": 5.472222222222222,
+      "triangleRatio": null,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/concave/arrow.step",
+      "path": "step-examples/c1-triangulation/concave/arrow.step",
+      "category": "c1-triangulation",
+      "fileSize": 4267,
+      "success": true,
+      "ours": {
+        "avgMs": 5.5,
+        "p50Ms": 5.5,
+        "p90Ms": 5.5,
+        "maxMs": 5.5,
+        "runs": [
+          5.5
+        ],
+        "phases": {
+          "loadStepFile": 3.6600000262260437,
+          "loadStepFile_initOC": 0.019999980926513672,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.7950000166893005,
+          "loadStepFile_transfer": 1.3700000047683716,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.11000001430511475,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.20499998331069946,
+          "tessellateOCCShape": 0.13499999046325684,
+          "tessellatePlanarFace": 0.030000030994415283,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.020000040531158447
+        },
+        "vertexCount": 7,
+        "triangleCount": 5
+      },
+      "ref": {
+        "avgMs": 24.689999997615814,
+        "p50Ms": 24.689999997615814,
+        "p90Ms": 24.689999997615814,
+        "maxMs": 24.689999997615814,
+        "runs": [
+          24.689999997615814
+        ],
+        "vertexCount": 7,
+        "triangleCount": 5
+      },
+      "speedup": 4.48909090865742,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/concave/ccw-pentagon-concave.step",
+      "path": "step-examples/c1-triangulation/concave/ccw-pentagon-concave.step",
+      "category": "c1-triangulation",
+      "fileSize": 3817,
+      "success": true,
+      "ours": {
+        "avgMs": 4.764999985694885,
+        "p50Ms": 4.764999985694885,
+        "p90Ms": 4.764999985694885,
+        "maxMs": 4.764999985694885,
+        "runs": [
+          4.764999985694885
+        ],
+        "phases": {
+          "loadStepFile": 4.180000007152557,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.5899999737739563,
+          "loadStepFile_transfer": 0.8250000476837158,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 0.06000000238418579,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.19999998807907104,
+          "tessellateOCCShape": 0.12000000476837158,
+          "tessellatePlanarFace": 0.02499997615814209,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.009999990463256836,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 5,
+        "triangleCount": 3
+      },
+      "ref": {
+        "avgMs": 25.834999978542328,
+        "p50Ms": 25.834999978542328,
+        "p90Ms": 25.834999978542328,
+        "maxMs": 25.834999978542328,
+        "runs": [
+          25.834999978542328
+        ],
+        "vertexCount": 5,
+        "triangleCount": 3
+      },
+      "speedup": 5.421825824995208,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/concave/concave_pentagon_single_reflex.step",
+      "path": "step-examples/c1-triangulation/concave/concave_pentagon_single_reflex.step",
+      "category": "c1-triangulation",
+      "fileSize": 4014,
+      "success": true,
+      "ours": {
+        "avgMs": 9.330000042915344,
+        "p50Ms": 9.330000042915344,
+        "p90Ms": 9.330000042915344,
+        "maxMs": 9.330000042915344,
+        "runs": [
+          9.330000042915344
+        ],
+        "phases": {
+          "loadStepFile": 8.314999997615814,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.1799999475479126,
+          "loadStepFile_transfer": 0.4750000238418579,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 5.189999997615814,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.29500001668930054,
+          "tessellateOCCShape": 0.32499998807907104,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 0,
+        "triangleCount": 0
+      },
+      "ref": {
+        "avgMs": 90.80500000715256,
+        "p50Ms": 90.80500000715256,
+        "p90Ms": 90.80500000715256,
+        "maxMs": 90.80500000715256,
+        "runs": [
+          90.80500000715256
+        ],
+        "vertexCount": 0,
+        "triangleCount": 0
+      },
+      "speedup": 9.73258302138,
+      "triangleRatio": null,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/concave/cw-pentagon-concave.step",
+      "path": "step-examples/c1-triangulation/concave/cw-pentagon-concave.step",
+      "category": "c1-triangulation",
+      "fileSize": 3813,
+      "success": true,
+      "ours": {
+        "avgMs": 11.474999964237213,
+        "p50Ms": 11.474999964237213,
+        "p90Ms": 11.474999964237213,
+        "maxMs": 11.474999964237213,
+        "runs": [
+          11.474999964237213
+        ],
+        "phases": {
+          "loadStepFile": 10.785000026226044,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 8.429999947547913,
+          "loadStepFile_transfer": 1.4500000476837158,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.06000000238418579,
+          "loadStepFile_fsWrite": 0.19499999284744263,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.26499998569488525,
+          "tessellateOCCShape": 0.14500004053115845,
+          "tessellatePlanarFace": 0.0350000262260437,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.019999980926513672,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.01500004529953003
+        },
+        "vertexCount": 5,
+        "triangleCount": 3
+      },
+      "ref": {
+        "avgMs": 38.23499995470047,
+        "p50Ms": 38.23499995470047,
+        "p90Ms": 38.23499995470047,
+        "maxMs": 38.23499995470047,
+        "runs": [
+          38.23499995470047
+        ],
+        "vertexCount": 5,
+        "triangleCount": 3
+      },
+      "speedup": 3.3320261502277133,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/concave/l-shape.step",
+      "path": "step-examples/c1-triangulation/concave/l-shape.step",
+      "category": "c1-triangulation",
+      "fileSize": 4018,
+      "success": true,
+      "ours": {
+        "avgMs": 4.5950000286102295,
+        "p50Ms": 4.5950000286102295,
+        "p90Ms": 4.5950000286102295,
+        "maxMs": 4.5950000286102295,
+        "runs": [
+          4.5950000286102295
+        ],
+        "phases": {
+          "loadStepFile": 3.8949999809265137,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.8700000047683716,
+          "loadStepFile_transfer": 1.590000033378601,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.050000011920928955,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.27000004053115845,
+          "tessellateOCCShape": 0.12999999523162842,
+          "tessellatePlanarFace": 0.029999971389770508,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.009999990463256836,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 6,
+        "triangleCount": 4
+      },
+      "ref": {
+        "avgMs": 32.77999997138977,
+        "p50Ms": 32.77999997138977,
+        "p90Ms": 32.77999997138977,
+        "maxMs": 32.77999997138977,
+        "runs": [
+          32.77999997138977
+        ],
+        "vertexCount": 6,
+        "triangleCount": 4
+      },
+      "speedup": 7.133841081020444,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/convex/ccw-square.step",
+      "path": "step-examples/c1-triangulation/convex/ccw-square.step",
+      "category": "c1-triangulation",
+      "fileSize": 3716,
+      "success": true,
+      "ours": {
+        "avgMs": 5.930000007152557,
+        "p50Ms": 5.930000007152557,
+        "p90Ms": 5.930000007152557,
+        "maxMs": 5.930000007152557,
+        "runs": [
+          5.930000007152557
+        ],
+        "phases": {
+          "loadStepFile": 5.319999992847443,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.7050000429153442,
+          "loadStepFile_transfer": 0.875,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 2.2899999618530273,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.1850000023841858,
+          "tessellateOCCShape": 0.11499994993209839,
+          "tessellatePlanarFace": 0.025000035762786865,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.009999990463256836,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "ref": {
+        "avgMs": 24.34500002861023,
+        "p50Ms": 24.34500002861023,
+        "p90Ms": 24.34500002861023,
+        "maxMs": 24.34500002861023,
+        "runs": [
+          24.34500002861023
+        ],
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "speedup": 4.105396289923465,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/convex/convex-heptagon.step",
+      "path": "step-examples/c1-triangulation/convex/convex-heptagon.step",
+      "category": "c1-triangulation",
+      "fileSize": 4459,
+      "success": true,
+      "ours": {
+        "avgMs": 4.615000009536743,
+        "p50Ms": 4.615000009536743,
+        "p90Ms": 4.615000009536743,
+        "maxMs": 4.615000009536743,
+        "runs": [
+          4.615000009536743
+        ],
+        "phases": {
+          "loadStepFile": 4.019999980926514,
+          "loadStepFile_initOC": 0,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 3.125,
+          "loadStepFile_transfer": 0.5199999809265137,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.04000002145767212,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.19000005722045898,
+          "tessellateOCCShape": 0.17500001192092896,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0,
+          "computeNormals": 0,
+          "meshAssembly": 0.01500004529953003
+        },
+        "vertexCount": 0,
+        "triangleCount": 0
+      },
+      "ref": {
+        "avgMs": 21.07499998807907,
+        "p50Ms": 21.07499998807907,
+        "p90Ms": 21.07499998807907,
+        "maxMs": 21.07499998807907,
+        "runs": [
+          21.07499998807907
+        ],
+        "vertexCount": 0,
+        "triangleCount": 0
+      },
+      "speedup": 4.566630540526173,
+      "triangleRatio": null,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/convex/convex_pentagon_simple.step",
+      "path": "step-examples/c1-triangulation/convex/convex_pentagon_simple.step",
+      "category": "c1-triangulation",
+      "fileSize": 3970,
+      "success": true,
+      "ours": {
+        "avgMs": 3.064999997615814,
+        "p50Ms": 3.064999997615814,
+        "p90Ms": 3.064999997615814,
+        "maxMs": 3.064999997615814,
+        "runs": [
+          3.064999997615814
+        ],
+        "phases": {
+          "loadStepFile": 2.5149999856948853,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.6949999928474426,
+          "loadStepFile_transfer": 0.3850000500679016,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 0.06499999761581421,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.18000000715255737,
+          "tessellateOCCShape": 0.13499999046325684,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0,
+          "computeNormals": 0,
+          "meshAssembly": 0.004999995231628418
+        },
+        "vertexCount": 0,
+        "triangleCount": 0
+      },
+      "ref": {
+        "avgMs": 29.625,
+        "p50Ms": 29.625,
+        "p90Ms": 29.625,
+        "maxMs": 29.625,
+        "runs": [
+          29.625
+        ],
+        "vertexCount": 0,
+        "triangleCount": 0
+      },
+      "speedup": 9.665579126605069,
+      "triangleRatio": null,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/convex/cw-square.step",
+      "path": "step-examples/c1-triangulation/convex/cw-square.step",
+      "category": "c1-triangulation",
+      "fileSize": 3712,
+      "success": true,
+      "ours": {
+        "avgMs": 4.60999995470047,
+        "p50Ms": 4.60999995470047,
+        "p90Ms": 4.60999995470047,
+        "maxMs": 4.60999995470047,
+        "runs": [
+          4.60999995470047
+        ],
+        "phases": {
+          "loadStepFile": 4.019999980926514,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.9249999523162842,
+          "loadStepFile_transfer": 1.0400000214576721,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.7100000381469727,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.21000003814697266,
+          "tessellateOCCShape": 0.12000000476837158,
+          "tessellatePlanarFace": 0.019999980926513672,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.009999990463256836,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "ref": {
+        "avgMs": 26.185000002384186,
+        "p50Ms": 26.185000002384186,
+        "p90Ms": 26.185000002384186,
+        "maxMs": 26.185000002384186,
+        "runs": [
+          26.185000002384186
+        ],
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "speedup": 5.680043440279281,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/convex/hexagon.step",
+      "path": "step-examples/c1-triangulation/convex/hexagon.step",
+      "category": "c1-triangulation",
+      "fileSize": 4641,
+      "success": true,
+      "ours": {
+        "avgMs": 4.834999978542328,
+        "p50Ms": 4.834999978542328,
+        "p90Ms": 4.834999978542328,
+        "maxMs": 4.834999978542328,
+        "runs": [
+          4.834999978542328
+        ],
+        "phases": {
+          "loadStepFile": 2.9049999713897705,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.6200000047683716,
+          "loadStepFile_transfer": 0.8799999952316284,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 0.06000000238418579,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 1.550000011920929,
+          "tessellateOCCShape": 0.12999999523162842,
+          "tessellatePlanarFace": 0.02499997615814209,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.009999990463256836,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 6,
+        "triangleCount": 4
+      },
+      "ref": {
+        "avgMs": 32.144999980926514,
+        "p50Ms": 32.144999980926514,
+        "p90Ms": 32.144999980926514,
+        "maxMs": 32.144999980926514,
+        "runs": [
+          32.144999980926514
+        ],
+        "vertexCount": 6,
+        "triangleCount": 4
+      },
+      "speedup": 6.648397130007371,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/convex/octagon.step",
+      "path": "step-examples/c1-triangulation/convex/octagon.step",
+      "category": "c1-triangulation",
+      "fileSize": 4710,
+      "success": true,
+      "ours": {
+        "avgMs": 5.680000007152557,
+        "p50Ms": 5.680000007152557,
+        "p90Ms": 5.680000007152557,
+        "maxMs": 5.680000007152557,
+        "runs": [
+          5.680000007152557
+        ],
+        "phases": {
+          "loadStepFile": 4.375,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.0300000309944153,
+          "loadStepFile_transfer": 1.6399999856948853,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.025000035762786865,
+          "loadStepFile_fsWrite": 0.12000000476837158,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.6850000023841858,
+          "tessellateOCCShape": 0.1850000023841858,
+          "tessellatePlanarFace": 0.050000011920928955,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.025000035762786865,
+          "computeNormals": 0.010000050067901611,
+          "meshAssembly": 0.025000035762786865
+        },
+        "vertexCount": 8,
+        "triangleCount": 6
+      },
+      "ref": {
+        "avgMs": 23.125,
+        "p50Ms": 23.125,
+        "p90Ms": 23.125,
+        "maxMs": 23.125,
+        "runs": [
+          23.125
+        ],
+        "vertexCount": 7,
+        "triangleCount": 5
+      },
+      "speedup": 4.071302811774608,
+      "triangleRatio": 1.2,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/convex/square.step",
+      "path": "step-examples/c1-triangulation/convex/square.step",
+      "category": "c1-triangulation",
+      "fileSize": 4538,
+      "success": true,
+      "ours": {
+        "avgMs": 5.314999997615814,
+        "p50Ms": 5.314999997615814,
+        "p90Ms": 5.314999997615814,
+        "maxMs": 5.314999997615814,
+        "runs": [
+          5.314999997615814
+        ],
+        "phases": {
+          "loadStepFile": 4.810000002384186,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.550000011920929,
+          "loadStepFile_transfer": 0.6949999928474426,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 2.2649999856948853,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.1850000023841858,
+          "tessellateOCCShape": 0.125,
+          "tessellatePlanarFace": 0.029999971389770508,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.009999990463256836,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "ref": {
+        "avgMs": 23.524999976158142,
+        "p50Ms": 23.524999976158142,
+        "p90Ms": 23.524999976158142,
+        "maxMs": 23.524999976158142,
+        "runs": [
+          23.524999976158142
+        ],
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "speedup": 4.426152396370821,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/convex/tilted-rectangle.step",
+      "path": "step-examples/c1-triangulation/convex/tilted-rectangle.step",
+      "category": "c1-triangulation",
+      "fileSize": 4089,
+      "success": true,
+      "ours": {
+        "avgMs": 4.819999992847443,
+        "p50Ms": 4.819999992847443,
+        "p90Ms": 4.819999992847443,
+        "maxMs": 4.819999992847443,
+        "runs": [
+          4.819999992847443
+        ],
+        "phases": {
+          "loadStepFile": 4.205000042915344,
+          "loadStepFile_initOC": 0.010000050067901611,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.5149999856948853,
+          "loadStepFile_transfer": 2.25,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.034999966621398926,
+          "loadStepFile_fsWrite": 0.05500000715255737,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.2200000286102295,
+          "tessellateOCCShape": 0.11500000953674316,
+          "tessellatePlanarFace": 0.019999980926513672,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.004999995231628418,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "ref": {
+        "avgMs": 20.99500000476837,
+        "p50Ms": 20.99500000476837,
+        "p90Ms": 20.99500000476837,
+        "maxMs": 20.99500000476837,
+        "runs": [
+          20.99500000476837
+        ],
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "speedup": 4.355809136083724,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c1-triangulation/convex/triangle.step",
+      "path": "step-examples/c1-triangulation/convex/triangle.step",
+      "category": "c1-triangulation",
+      "fileSize": 4015,
+      "success": true,
+      "ours": {
+        "avgMs": 4.8299999833106995,
+        "p50Ms": 4.8299999833106995,
+        "p90Ms": 4.8299999833106995,
+        "maxMs": 4.8299999833106995,
+        "runs": [
+          4.8299999833106995
+        ],
+        "phases": {
+          "loadStepFile": 4.160000026226044,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.9799999594688416,
+          "loadStepFile_transfer": 0.75,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.010000050067901611,
+          "loadStepFile_fsWrite": 0.06999999284744263,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.2550000548362732,
+          "tessellateOCCShape": 0.12999999523162842,
+          "tessellatePlanarFace": 0.02499997615814209,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.009999990463256836,
+          "computeNormals": 0,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 3,
+        "triangleCount": 1
+      },
+      "ref": {
+        "avgMs": 32.16499996185303,
+        "p50Ms": 32.16499996185303,
+        "p90Ms": 32.16499996185303,
+        "maxMs": 32.16499996185303,
+        "runs": [
+          32.16499996185303
+        ],
+        "vertexCount": 3,
+        "triangleCount": 1
+      },
+      "speedup": 6.659420304967721,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.2-projection/tilted-hexagon.step",
+      "path": "step-examples/c2-holes/2.2-projection/tilted-hexagon.step",
+      "category": "c2-holes",
+      "fileSize": 4768,
+      "success": true,
+      "ours": {
+        "avgMs": 3.990000009536743,
+        "p50Ms": 3.990000009536743,
+        "p90Ms": 3.990000009536743,
+        "maxMs": 3.990000009536743,
+        "runs": [
+          3.990000009536743
+        ],
+        "phases": {
+          "loadStepFile": 3.399999976158142,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.6050000190734863,
+          "loadStepFile_transfer": 0.8550000190734863,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.6349999904632568,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.24500000476837158,
+          "tessellateOCCShape": 0.12999999523162842,
+          "tessellatePlanarFace": 0.025000035762786865,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.01500004529953003,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 6,
+        "triangleCount": 4
+      },
+      "ref": {
+        "avgMs": 34.89999997615814,
+        "p50Ms": 34.89999997615814,
+        "p90Ms": 34.89999997615814,
+        "maxMs": 34.89999997615814,
+        "runs": [
+          34.89999997615814
+        ],
+        "vertexCount": 6,
+        "triangleCount": 4
+      },
+      "speedup": 8.746867141037974,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.2-projection/tilted-square-45deg.step",
+      "path": "step-examples/c2-holes/2.2-projection/tilted-square-45deg.step",
+      "category": "c2-holes",
+      "fileSize": 3430,
+      "success": true,
+      "ours": {
+        "avgMs": 3.439999997615814,
+        "p50Ms": 3.439999997615814,
+        "p90Ms": 3.439999997615814,
+        "maxMs": 3.439999997615814,
+        "runs": [
+          3.439999997615814
+        ],
+        "phases": {
+          "loadStepFile": 2.8299999833106995,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.4599999785423279,
+          "loadStepFile_transfer": 0.9800000190734863,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.014999985694885254,
+          "loadStepFile_fsWrite": 0.04000002145767212,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.22499996423721313,
+          "tessellateOCCShape": 0.1199999451637268,
+          "tessellatePlanarFace": 0.025000035762786865,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "ref": {
+        "avgMs": 23.910000026226044,
+        "p50Ms": 23.910000026226044,
+        "p90Ms": 23.910000026226044,
+        "maxMs": 23.910000026226044,
+        "runs": [
+          23.910000026226044
+        ],
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "speedup": 6.9505814077899775,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.2-projection/vertical-wall-xz.step",
+      "path": "step-examples/c2-holes/2.2-projection/vertical-wall-xz.step",
+      "category": "c2-holes",
+      "fileSize": 3357,
+      "success": true,
+      "ours": {
+        "avgMs": 3.400000035762787,
+        "p50Ms": 3.400000035762787,
+        "p90Ms": 3.400000035762787,
+        "maxMs": 3.400000035762787,
+        "runs": [
+          3.400000035762787
+        ],
+        "phases": {
+          "loadStepFile": 2.8199999928474426,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.449999988079071,
+          "loadStepFile_transfer": 0.9799999594688416,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.005000054836273193,
+          "loadStepFile_fsWrite": 0.06000000238418579,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.19999998807907104,
+          "tessellateOCCShape": 0.16500002145767212,
+          "tessellatePlanarFace": 0.04500001668930054,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.02499997615814209,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "ref": {
+        "avgMs": 29.780000030994415,
+        "p50Ms": 29.780000030994415,
+        "p90Ms": 29.780000030994415,
+        "maxMs": 29.780000030994415,
+        "runs": [
+          29.780000030994415
+        ],
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "speedup": 8.758823446398376,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.3-winding/both-wrong.step",
+      "path": "step-examples/c2-holes/2.3-winding/both-wrong.step",
+      "category": "c2-holes",
+      "fileSize": 3942,
+      "success": true,
+      "ours": {
+        "avgMs": 5.019999980926514,
+        "p50Ms": 5.019999980926514,
+        "p90Ms": 5.019999980926514,
+        "maxMs": 5.019999980926514,
+        "runs": [
+          5.019999980926514
+        ],
+        "phases": {
+          "loadStepFile": 4.185000002384186,
+          "loadStepFile_initOC": 0.01500004529953003,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.3499999642372131,
+          "loadStepFile_transfer": 1.6949999928474426,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.014999985694885254,
+          "loadStepFile_fsWrite": 0.7849999666213989,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.3250000476837158,
+          "tessellateOCCShape": 0.125,
+          "tessellatePlanarFace": 0.034999966621398926,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 6,
+        "triangleCount": 6
+      },
+      "ref": {
+        "avgMs": 23.935000002384186,
+        "p50Ms": 23.935000002384186,
+        "p90Ms": 23.935000002384186,
+        "maxMs": 23.935000002384186,
+        "runs": [
+          23.935000002384186
+        ],
+        "vertexCount": 6,
+        "triangleCount": 6
+      },
+      "speedup": 4.7679283054432675,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.3-winding/correct-winding.step",
+      "path": "step-examples/c2-holes/2.3-winding/correct-winding.step",
+      "category": "c2-holes",
+      "fileSize": 3962,
+      "success": true,
+      "ours": {
+        "avgMs": 4.884999990463257,
+        "p50Ms": 4.884999990463257,
+        "p90Ms": 4.884999990463257,
+        "maxMs": 4.884999990463257,
+        "runs": [
+          4.884999990463257
+        ],
+        "phases": {
+          "loadStepFile": 4.194999992847443,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.0049999952316284,
+          "loadStepFile_transfer": 1.6200000047683716,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.030000030994415283,
+          "loadStepFile_fsWrite": 0.050000011920928955,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.29499995708465576,
+          "tessellateOCCShape": 0.16499996185302734,
+          "tessellatePlanarFace": 0.04000002145767212,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.019999980926513672,
+          "computeNormals": 0.02499997615814209,
+          "meshAssembly": 0.039999961853027344
+        },
+        "vertexCount": 6,
+        "triangleCount": 6
+      },
+      "ref": {
+        "avgMs": 20.37000000476837,
+        "p50Ms": 20.37000000476837,
+        "p90Ms": 20.37000000476837,
+        "maxMs": 20.37000000476837,
+        "runs": [
+          20.37000000476837
+        ],
+        "vertexCount": 6,
+        "triangleCount": 6
+      },
+      "speedup": 4.169907890386021,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.3-winding/square-cw.step",
+      "path": "step-examples/c2-holes/2.3-winding/square-cw.step",
+      "category": "c2-holes",
+      "fileSize": 3311,
+      "success": true,
+      "ours": {
+        "avgMs": 2.915000021457672,
+        "p50Ms": 2.915000021457672,
+        "p90Ms": 2.915000021457672,
+        "maxMs": 2.915000021457672,
+        "runs": [
+          2.915000021457672
+        ],
+        "phases": {
+          "loadStepFile": 2.440000057220459,
+          "loadStepFile_initOC": 0.014999985694885254,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.3149999976158142,
+          "loadStepFile_transfer": 0.7400000095367432,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.07999998331069946,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.17500001192092896,
+          "tessellateOCCShape": 0.11000001430511475,
+          "tessellatePlanarFace": 0.025000035762786865,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.01500004529953003,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.004999995231628418
+        },
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "ref": {
+        "avgMs": 25.55000001192093,
+        "p50Ms": 25.55000001192093,
+        "p90Ms": 25.55000001192093,
+        "maxMs": 25.55000001192093,
+        "runs": [
+          25.55000001192093
+        ],
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "speedup": 8.765008515898542,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.3-winding/square-with-ccw-hole.step",
+      "path": "step-examples/c2-holes/2.3-winding/square-with-ccw-hole.step",
+      "category": "c2-holes",
+      "fileSize": 3982,
+      "success": true,
+      "ours": {
+        "avgMs": 6.610000014305115,
+        "p50Ms": 6.610000014305115,
+        "p90Ms": 6.610000014305115,
+        "maxMs": 6.610000014305115,
+        "runs": [
+          6.610000014305115
+        ],
+        "phases": {
+          "loadStepFile": 5.774999976158142,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.7350000143051147,
+          "loadStepFile_transfer": 1.25,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 2.449999988079071,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.2900000214576721,
+          "tessellateOCCShape": 0.1549999713897705,
+          "tessellatePlanarFace": 0.0350000262260437,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.020000040531158447,
+          "computeNormals": 0,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 6,
+        "triangleCount": 6
+      },
+      "ref": {
+        "avgMs": 21.84500002861023,
+        "p50Ms": 21.84500002861023,
+        "p90Ms": 21.84500002861023,
+        "maxMs": 21.84500002861023,
+        "runs": [
+          21.84500002861023
+        ],
+        "vertexCount": 6,
+        "triangleCount": 6
+      },
+      "speedup": 3.3048411469491827,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.4-topology/hole-outside-outer.step",
+      "path": "step-examples/c2-holes/2.4-topology/hole-outside-outer.step",
+      "category": "c2-holes",
+      "fileSize": 3974,
+      "success": true,
+      "ours": {
+        "avgMs": 4.014999985694885,
+        "p50Ms": 4.014999985694885,
+        "p90Ms": 4.014999985694885,
+        "maxMs": 4.014999985694885,
+        "runs": [
+          4.014999985694885
+        ],
+        "phases": {
+          "loadStepFile": 3.3550000190734863,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.625,
+          "loadStepFile_transfer": 1.399999976158142,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0,
+          "loadStepFile_fsWrite": 0.04500001668930054,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.20499998331069946,
+          "tessellateOCCShape": 0.2749999761581421,
+          "tessellatePlanarFace": 0.02499997615814209,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0,
+          "meshAssembly": 0.004999995231628418
+        },
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "ref": {
+        "avgMs": 29.450000047683716,
+        "p50Ms": 29.450000047683716,
+        "p90Ms": 29.450000047683716,
+        "maxMs": 29.450000047683716,
+        "runs": [
+          29.450000047683716
+        ],
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "speedup": 7.3349938113603095,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.4-topology/holes-intersect.step",
+      "path": "step-examples/c2-holes/2.4-topology/holes-intersect.step",
+      "category": "c2-holes",
+      "fileSize": 4626,
+      "success": true,
+      "ours": {
+        "avgMs": 4.835000038146973,
+        "p50Ms": 4.835000038146973,
+        "p90Ms": 4.835000038146973,
+        "maxMs": 4.835000038146973,
+        "runs": [
+          4.835000038146973
+        ],
+        "phases": {
+          "loadStepFile": 4.125,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.8499999642372131,
+          "loadStepFile_transfer": 1.75,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.01500004529953003,
+          "loadStepFile_fsWrite": 0.10500001907348633,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.33000004291534424,
+          "tessellateOCCShape": 0.12999999523162842,
+          "tessellatePlanarFace": 0.039999961853027344,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.019999980926513672,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 10,
+        "triangleCount": 8
+      },
+      "ref": {
+        "avgMs": 21.5450000166893,
+        "p50Ms": 21.5450000166893,
+        "p90Ms": 21.5450000166893,
+        "maxMs": 21.5450000166893,
+        "runs": [
+          21.5450000166893
+        ],
+        "vertexCount": 10,
+        "triangleCount": 12
+      },
+      "speedup": 4.456049606350465,
+      "triangleRatio": 0.6666666666666666,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.4-topology/self-intersecting-outer.step",
+      "path": "step-examples/c2-holes/2.4-topology/self-intersecting-outer.step",
+      "category": "c2-holes",
+      "fileSize": 3330,
+      "success": true,
+      "ours": {
+        "avgMs": 4.4799999594688416,
+        "p50Ms": 4.4799999594688416,
+        "p90Ms": 4.4799999594688416,
+        "maxMs": 4.4799999594688416,
+        "runs": [
+          4.4799999594688416
+        ],
+        "phases": {
+          "loadStepFile": 3.9449999928474426,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.3799999952316284,
+          "loadStepFile_transfer": 1.465000033378601,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 0.7350000143051147,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.17000001668930054,
+          "tessellateOCCShape": 0.15500003099441528,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0,
+          "computeNormals": 0,
+          "meshAssembly": 0.004999995231628418
+        },
+        "vertexCount": 0,
+        "triangleCount": 0
+      },
+      "ref": {
+        "avgMs": 26.99500000476837,
+        "p50Ms": 26.99500000476837,
+        "p90Ms": 26.99500000476837,
+        "maxMs": 26.99500000476837,
+        "runs": [
+          26.99500000476837
+        ],
+        "vertexCount": 0,
+        "triangleCount": 0
+      },
+      "speedup": 6.02566969843655,
+      "triangleRatio": null,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.4-topology/valid-square-with-hole.step",
+      "path": "step-examples/c2-holes/2.4-topology/valid-square-with-hole.step",
+      "category": "c2-holes",
+      "fileSize": 3990,
+      "success": true,
+      "ours": {
+        "avgMs": 5.389999985694885,
+        "p50Ms": 5.389999985694885,
+        "p90Ms": 5.389999985694885,
+        "maxMs": 5.389999985694885,
+        "runs": [
+          5.389999985694885
+        ],
+        "phases": {
+          "loadStepFile": 3.8549999594688416,
+          "loadStepFile_initOC": 0,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.5999999642372131,
+          "loadStepFile_transfer": 1.574999988079071,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.16500002145767212,
+          "loadStepFile_fsWrite": 0.050000011920928955,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.36000001430511475,
+          "tessellateOCCShape": 0.9300000071525574,
+          "tessellatePlanarFace": 0.07999998331069946,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.04499995708465576,
+          "computeNormals": 0.01500004529953003,
+          "meshAssembly": 0.0350000262260437
+        },
+        "vertexCount": 6,
+        "triangleCount": 6
+      },
+      "ref": {
+        "avgMs": 33.3400000333786,
+        "p50Ms": 33.3400000333786,
+        "p90Ms": 33.3400000333786,
+        "maxMs": 33.3400000333786,
+        "runs": [
+          33.3400000333786
+        ],
+        "vertexCount": 6,
+        "triangleCount": 6
+      },
+      "speedup": 6.185528779566475,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/concentric-squares.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/concentric-squares.step",
+      "category": "c2-holes",
+      "fileSize": 4357,
+      "success": true,
+      "ours": {
+        "avgMs": 3.8199999928474426,
+        "p50Ms": 3.8199999928474426,
+        "p90Ms": 3.8199999928474426,
+        "maxMs": 3.8199999928474426,
+        "runs": [
+          3.8199999928474426
+        ],
+        "phases": {
+          "loadStepFile": 3.175000011920929,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.5449999570846558,
+          "loadStepFile_transfer": 1.2149999737739563,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.01500004529953003,
+          "loadStepFile_fsWrite": 0.0700000524520874,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.25999999046325684,
+          "tessellateOCCShape": 0.13999998569488525,
+          "tessellatePlanarFace": 0.04000002145767212,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.019999980926513672,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 8,
+        "triangleCount": 8
+      },
+      "ref": {
+        "avgMs": 23.054999947547913,
+        "p50Ms": 23.054999947547913,
+        "p90Ms": 23.054999947547913,
+        "maxMs": 23.054999947547913,
+        "runs": [
+          23.054999947547913
+        ],
+        "vertexCount": 8,
+        "triangleCount": 8
+      },
+      "speedup": 6.035340311705768,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/hexagon-with-3-holes.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/hexagon-with-3-holes.step",
+      "category": "c2-holes",
+      "fileSize": 8143,
+      "success": true,
+      "ours": {
+        "avgMs": 7.924999952316284,
+        "p50Ms": 7.924999952316284,
+        "p90Ms": 7.924999952316284,
+        "maxMs": 7.924999952316284,
+        "runs": [
+          7.924999952316284
+        ],
+        "phases": {
+          "loadStepFile": 7.264999985694885,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 3.550000011920929,
+          "loadStepFile_transfer": 2.459999978542328,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.7900000214576721,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.30000001192092896,
+          "tessellateOCCShape": 0.13999998569488525,
+          "tessellatePlanarFace": 0.04000002145767212,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.02499997615814209,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 15,
+        "triangleCount": 19
+      },
+      "ref": {
+        "avgMs": 22.73499995470047,
+        "p50Ms": 22.73499995470047,
+        "p90Ms": 22.73499995470047,
+        "maxMs": 22.73499995470047,
+        "runs": [
+          22.73499995470047
+        ],
+        "vertexCount": 15,
+        "triangleCount": 19
+      },
+      "speedup": 2.868769727633321,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/hexagon-with-triangle-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/hexagon-with-triangle-hole.step",
+      "category": "c2-holes",
+      "fileSize": 4660,
+      "success": true,
+      "ours": {
+        "avgMs": 4.275000035762787,
+        "p50Ms": 4.275000035762787,
+        "p90Ms": 4.275000035762787,
+        "maxMs": 4.275000035762787,
+        "runs": [
+          4.275000035762787
+        ],
+        "phases": {
+          "loadStepFile": 3.5450000166893005,
+          "loadStepFile_initOC": 0.005000054836273193,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.7200000882148743,
+          "loadStepFile_transfer": 1.3849999904632568,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.039999961853027344,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.32999998331069946,
+          "tessellateOCCShape": 0.15999996662139893,
+          "tessellatePlanarFace": 0.039999961853027344,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.019999980926513672,
+          "computeNormals": 0,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 9,
+        "triangleCount": 9
+      },
+      "ref": {
+        "avgMs": 28.444999992847443,
+        "p50Ms": 28.444999992847443,
+        "p90Ms": 28.444999992847443,
+        "maxMs": 28.444999992847443,
+        "runs": [
+          28.444999992847443
+        ],
+        "vertexCount": 9,
+        "triangleCount": 9
+      },
+      "speedup": 6.6538011122547305,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/l-shape-with-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/l-shape-with-hole.step",
+      "category": "c2-holes",
+      "fileSize": 4622,
+      "success": true,
+      "ours": {
+        "avgMs": 7.129999995231628,
+        "p50Ms": 7.129999995231628,
+        "p90Ms": 7.129999995231628,
+        "maxMs": 7.129999995231628,
+        "runs": [
+          7.129999995231628
+        ],
+        "phases": {
+          "loadStepFile": 5.574999988079071,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 3.509999990463257,
+          "loadStepFile_transfer": 1.5649999976158142,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.020000040531158447,
+          "loadStepFile_fsWrite": 0.06000000238418579,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 1.0799999833106995,
+          "tessellateOCCShape": 0.15000003576278687,
+          "tessellatePlanarFace": 0.0350000262260437,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.020000040531158447
+        },
+        "vertexCount": 9,
+        "triangleCount": 9
+      },
+      "ref": {
+        "avgMs": 22.69999998807907,
+        "p50Ms": 22.69999998807907,
+        "p90Ms": 22.69999998807907,
+        "maxMs": 22.69999998807907,
+        "runs": [
+          22.69999998807907
+        ],
+        "vertexCount": 9,
+        "triangleCount": 9
+      },
+      "speedup": 3.18373071574478,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/octagon-with-square-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/octagon-with-square-hole.step",
+      "category": "c2-holes",
+      "fileSize": 5494,
+      "success": true,
+      "ours": {
+        "avgMs": 5.9049999713897705,
+        "p50Ms": 5.9049999713897705,
+        "p90Ms": 5.9049999713897705,
+        "maxMs": 5.9049999713897705,
+        "runs": [
+          5.9049999713897705
+        ],
+        "phases": {
+          "loadStepFile": 5.064999997615814,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.9950000047683716,
+          "loadStepFile_transfer": 1.73499995470047,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.020000040531158447,
+          "loadStepFile_fsWrite": 0.8450000286102295,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.36500000953674316,
+          "tessellateOCCShape": 0.1850000023841858,
+          "tessellatePlanarFace": 0.05500000715255737,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.0350000262260437,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.0350000262260437
+        },
+        "vertexCount": 12,
+        "triangleCount": 12
+      },
+      "ref": {
+        "avgMs": 28.7849999666214,
+        "p50Ms": 28.7849999666214,
+        "p90Ms": 28.7849999666214,
+        "maxMs": 28.7849999666214,
+        "runs": [
+          28.7849999666214
+        ],
+        "vertexCount": 12,
+        "triangleCount": 12
+      },
+      "speedup": 4.8746824904466015,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/pentagon-with-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/pentagon-with-hole.step",
+      "category": "c2-holes",
+      "fileSize": 4356,
+      "success": true,
+      "ours": {
+        "avgMs": 4.524999976158142,
+        "p50Ms": 4.524999976158142,
+        "p90Ms": 4.524999976158142,
+        "maxMs": 4.524999976158142,
+        "runs": [
+          4.524999976158142
+        ],
+        "phases": {
+          "loadStepFile": 3.7300000190734863,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.925000011920929,
+          "loadStepFile_transfer": 1.4000000357627869,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.029999971389770508,
+          "loadStepFile_fsWrite": 0.06999999284744263,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.3399999737739563,
+          "tessellateOCCShape": 0.16999995708465576,
+          "tessellatePlanarFace": 0.05500000715255737,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.0350000262260437,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 8,
+        "triangleCount": 8
+      },
+      "ref": {
+        "avgMs": 19.62000000476837,
+        "p50Ms": 19.62000000476837,
+        "p90Ms": 19.62000000476837,
+        "maxMs": 19.62000000476837,
+        "runs": [
+          19.62000000476837
+        ],
+        "vertexCount": 8,
+        "triangleCount": 8
+      },
+      "speedup": 4.335911626109295,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/rectangle-with-6-holes.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/rectangle-with-6-holes.step",
+      "category": "c2-holes",
+      "fileSize": 8922,
+      "success": true,
+      "ours": {
+        "avgMs": 6.514999985694885,
+        "p50Ms": 6.514999985694885,
+        "p90Ms": 6.514999985694885,
+        "maxMs": 6.514999985694885,
+        "runs": [
+          6.514999985694885
+        ],
+        "phases": {
+          "loadStepFile": 5.7299999594688416,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.5399999618530273,
+          "loadStepFile_transfer": 2.689999997615814,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.05500000715255737,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.375,
+          "tessellateOCCShape": 0.16999995708465576,
+          "tessellatePlanarFace": 0.06499999761581421,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.030000030994415283,
+          "computeNormals": 0,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 22,
+        "triangleCount": 24
+      },
+      "ref": {
+        "avgMs": 27.110000014305115,
+        "p50Ms": 27.110000014305115,
+        "p90Ms": 27.110000014305115,
+        "maxMs": 27.110000014305115,
+        "runs": [
+          27.110000014305115
+        ],
+        "vertexCount": 22,
+        "triangleCount": 32
+      },
+      "speedup": 4.161166550089191,
+      "triangleRatio": 0.75,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/square-with-4-holes.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/square-with-4-holes.step",
+      "category": "c2-holes",
+      "fileSize": 7625,
+      "success": true,
+      "ours": {
+        "avgMs": 6.919999957084656,
+        "p50Ms": 6.919999957084656,
+        "p90Ms": 6.919999957084656,
+        "maxMs": 6.919999957084656,
+        "runs": [
+          6.919999957084656
+        ],
+        "phases": {
+          "loadStepFile": 5.980000019073486,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.4950000047683716,
+          "loadStepFile_transfer": 2.0800000429153442,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.9449999928474426,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.4950000047683716,
+          "tessellateOCCShape": 0.1499999761581421,
+          "tessellatePlanarFace": 0.04500001668930054,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.019999980926513672,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.019999980926513672
+        },
+        "vertexCount": 16,
+        "triangleCount": 18
+      },
+      "ref": {
+        "avgMs": 22.57499998807907,
+        "p50Ms": 22.57499998807907,
+        "p90Ms": 22.57499998807907,
+        "maxMs": 22.57499998807907,
+        "runs": [
+          22.57499998807907
+        ],
+        "vertexCount": 16,
+        "triangleCount": 22
+      },
+      "speedup": 3.2622832555030463,
+      "triangleRatio": 0.8181818181818182,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/square-with-arrow-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/square-with-arrow-hole.step",
+      "category": "c2-holes",
+      "fileSize": 5194,
+      "success": true,
+      "ours": {
+        "avgMs": 4.619999945163727,
+        "p50Ms": 4.619999945163727,
+        "p90Ms": 4.619999945163727,
+        "maxMs": 4.619999945163727,
+        "runs": [
+          4.619999945163727
+        ],
+        "phases": {
+          "loadStepFile": 3.9649999737739563,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.6850000023841858,
+          "loadStepFile_transfer": 1.8949999809265137,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.020000040531158447,
+          "loadStepFile_fsWrite": 0.029999971389770508,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.2849999666213989,
+          "tessellateOCCShape": 0.14499998092651367,
+          "tessellatePlanarFace": 0.034999966621398926,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.019999980926513672,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 13,
+        "triangleCount": 13
+      },
+      "ref": {
+        "avgMs": 31.97999995946884,
+        "p50Ms": 31.97999995946884,
+        "p90Ms": 31.97999995946884,
+        "maxMs": 31.97999995946884,
+        "runs": [
+          31.97999995946884
+        ],
+        "vertexCount": 13,
+        "triangleCount": 13
+      },
+      "speedup": 6.922077995465325,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/square-with-diamond-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/square-with-diamond-hole.step",
+      "category": "c2-holes",
+      "fileSize": 4198,
+      "success": true,
+      "ours": {
+        "avgMs": 3.7699999809265137,
+        "p50Ms": 3.7699999809265137,
+        "p90Ms": 3.7699999809265137,
+        "maxMs": 3.7699999809265137,
+        "runs": [
+          3.7699999809265137
+        ],
+        "phases": {
+          "loadStepFile": 3.1600000262260437,
+          "loadStepFile_initOC": 0.010000050067901611,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.5349999070167542,
+          "loadStepFile_transfer": 1.26500004529953,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.050000011920928955,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.26499998569488525,
+          "tessellateOCCShape": 0.12999999523162842,
+          "tessellatePlanarFace": 0.034999966621398926,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.019999980926513672,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 8,
+        "triangleCount": 8
+      },
+      "ref": {
+        "avgMs": 19.884999990463257,
+        "p50Ms": 19.884999990463257,
+        "p90Ms": 19.884999990463257,
+        "maxMs": 19.884999990463257,
+        "runs": [
+          19.884999990463257
+        ],
+        "vertexCount": 8,
+        "triangleCount": 8
+      },
+      "speedup": 5.274535833174283,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/square-with-right-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/square-with-right-hole.step",
+      "category": "c2-holes",
+      "fileSize": 3990,
+      "success": true,
+      "ours": {
+        "avgMs": 4.274999976158142,
+        "p50Ms": 4.274999976158142,
+        "p90Ms": 4.274999976158142,
+        "maxMs": 4.274999976158142,
+        "runs": [
+          4.274999976158142
+        ],
+        "phases": {
+          "loadStepFile": 3.7350000143051147,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.4950000643730164,
+          "loadStepFile_transfer": 1.1049999594688416,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.7900000214576721,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.19499999284744263,
+          "tessellateOCCShape": 0.12000000476837158,
+          "tessellatePlanarFace": 0.02499997615814209,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 7,
+        "triangleCount": 7
+      },
+      "ref": {
+        "avgMs": 23.5100000500679,
+        "p50Ms": 23.5100000500679,
+        "p90Ms": 23.5100000500679,
+        "maxMs": 23.5100000500679,
+        "runs": [
+          23.5100000500679
+        ],
+        "vertexCount": 7,
+        "triangleCount": 7
+      },
+      "speedup": 5.499415247060626,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/square-with-square-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/square-with-square-hole.step",
+      "category": "c2-holes",
+      "fileSize": 4194,
+      "success": true,
+      "ours": {
+        "avgMs": 4.209999978542328,
+        "p50Ms": 4.209999978542328,
+        "p90Ms": 4.209999978542328,
+        "maxMs": 4.209999978542328,
+        "runs": [
+          4.209999978542328
+        ],
+        "phases": {
+          "loadStepFile": 3.275000035762787,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.7400000095367432,
+          "loadStepFile_transfer": 1.1650000214576721,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.06000000238418579,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.23500001430511475,
+          "tessellateOCCShape": 0.125,
+          "tessellatePlanarFace": 0.029999971389770508,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 8,
+        "triangleCount": 8
+      },
+      "ref": {
+        "avgMs": 20.134999990463257,
+        "p50Ms": 20.134999990463257,
+        "p90Ms": 20.134999990463257,
+        "maxMs": 20.134999990463257,
+        "runs": [
+          20.134999990463257
+        ],
+        "vertexCount": 8,
+        "triangleCount": 8
+      },
+      "speedup": 4.782660354652735,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/square-with-three-holes.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/square-with-three-holes.step",
+      "category": "c2-holes",
+      "fileSize": 5325,
+      "success": true,
+      "ours": {
+        "avgMs": 5.1450000405311584,
+        "p50Ms": 5.1450000405311584,
+        "p90Ms": 5.1450000405311584,
+        "maxMs": 5.1450000405311584,
+        "runs": [
+          5.1450000405311584
+        ],
+        "phases": {
+          "loadStepFile": 4.425000011920929,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.1299999952316284,
+          "loadStepFile_transfer": 1.8650000095367432,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.014999985694885254,
+          "loadStepFile_fsWrite": 0.04999995231628418,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.3049999475479126,
+          "tessellateOCCShape": 0.1499999761581421,
+          "tessellatePlanarFace": 0.04499995708465576,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.02499997615814209,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 13,
+        "triangleCount": 17
+      },
+      "ref": {
+        "avgMs": 20.259999990463257,
+        "p50Ms": 20.259999990463257,
+        "p90Ms": 20.259999990463257,
+        "maxMs": 20.259999990463257,
+        "runs": [
+          20.259999990463257
+        ],
+        "vertexCount": 13,
+        "triangleCount": 17
+      },
+      "speedup": 3.9378036600310033,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/square-with-triangle-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/square-with-triangle-hole.step",
+      "category": "c2-holes",
+      "fileSize": 5495,
+      "success": true,
+      "ours": {
+        "avgMs": 4.365000009536743,
+        "p50Ms": 4.365000009536743,
+        "p90Ms": 4.365000009536743,
+        "maxMs": 4.365000009536743,
+        "runs": [
+          4.365000009536743
+        ],
+        "phases": {
+          "loadStepFile": 3.814999997615814,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.7750000357627869,
+          "loadStepFile_transfer": 1.0450000166893005,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 0.675000011920929,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.19999998807907104,
+          "tessellateOCCShape": 0.1300000548362732,
+          "tessellatePlanarFace": 0.030000030994415283,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0.005000054836273193,
+          "meshAssembly": 0.010000050067901611
+        },
+        "vertexCount": 7,
+        "triangleCount": 7
+      },
+      "ref": {
+        "avgMs": 19.5,
+        "p50Ms": 19.5,
+        "p90Ms": 19.5,
+        "maxMs": 19.5,
+        "runs": [
+          19.5
+        ],
+        "vertexCount": 7,
+        "triangleCount": 7
+      },
+      "speedup": 4.467353942129666,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/square-with-two-holes.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/square-with-two-holes.step",
+      "category": "c2-holes",
+      "fileSize": 5020,
+      "success": true,
+      "ours": {
+        "avgMs": 4.0950000286102295,
+        "p50Ms": 4.0950000286102295,
+        "p90Ms": 4.0950000286102295,
+        "maxMs": 4.0950000286102295,
+        "runs": [
+          4.0950000286102295
+        ],
+        "phases": {
+          "loadStepFile": 3.524999976158142,
+          "loadStepFile_initOC": 0,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.6150000095367432,
+          "loadStepFile_transfer": 1.5450000166893005,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.039999961853027344,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.25,
+          "tessellateOCCShape": 0.13499999046325684,
+          "tessellatePlanarFace": 0.0350000262260437,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.020000040531158447,
+          "computeNormals": 0,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 10,
+        "triangleCount": 10
+      },
+      "ref": {
+        "avgMs": 33.88499999046326,
+        "p50Ms": 33.88499999046326,
+        "p90Ms": 33.88499999046326,
+        "maxMs": 33.88499999046326,
+        "runs": [
+          33.88499999046326
+        ],
+        "vertexCount": 10,
+        "triangleCount": 12
+      },
+      "speedup": 8.274725214583997,
+      "triangleRatio": 0.8333333333333334,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/star-with-center-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/star-with-center-hole.step",
+      "category": "c2-holes",
+      "fileSize": 6062,
+      "success": true,
+      "ours": {
+        "avgMs": 7.629999995231628,
+        "p50Ms": 7.629999995231628,
+        "p90Ms": 7.629999995231628,
+        "maxMs": 7.629999995231628,
+        "runs": [
+          7.629999995231628
+        ],
+        "phases": {
+          "loadStepFile": 6.689999997615814,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 3.8799999952316284,
+          "loadStepFile_transfer": 2.009999990463257,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.01500004529953003,
+          "loadStepFile_fsWrite": 0.05500000715255737,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.3450000286102295,
+          "tessellateOCCShape": 0.1600000262260437,
+          "tessellatePlanarFace": 0.04500001668930054,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.020000040531158447,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.01500004529953003
+        },
+        "vertexCount": 14,
+        "triangleCount": 14
+      },
+      "ref": {
+        "avgMs": 105.75,
+        "p50Ms": 105.75,
+        "p90Ms": 105.75,
+        "maxMs": 105.75,
+        "runs": [
+          105.75
+        ],
+        "vertexCount": 14,
+        "triangleCount": 14
+      },
+      "speedup": 13.859764097783552,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/thin-rectangle-with-slot.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/thin-rectangle-with-slot.step",
+      "category": "c2-holes",
+      "fileSize": 4381,
+      "success": true,
+      "ours": {
+        "avgMs": 5.060000002384186,
+        "p50Ms": 5.060000002384186,
+        "p90Ms": 5.060000002384186,
+        "maxMs": 5.060000002384186,
+        "runs": [
+          5.060000002384186
+        ],
+        "phases": {
+          "loadStepFile": 3.1549999713897705,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.4799999594688416,
+          "loadStepFile_transfer": 1.2700000405311584,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.029999971389770508,
+          "loadStepFile_fsWrite": 0.04500001668930054,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.6049999594688416,
+          "tessellateOCCShape": 0.19999998807907104,
+          "tessellatePlanarFace": 0.06499999761581421,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.030000030994415283,
+          "computeNormals": 0,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 8,
+        "triangleCount": 8
+      },
+      "ref": {
+        "avgMs": 21.394999980926514,
+        "p50Ms": 21.394999980926514,
+        "p90Ms": 21.394999980926514,
+        "maxMs": 21.394999980926514,
+        "runs": [
+          21.394999980926514
+        ],
+        "vertexCount": 8,
+        "triangleCount": 8
+      },
+      "speedup": 4.228260863803469,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c2-holes/2.5-triangulation/triangle-with-triangle-hole.step",
+      "path": "step-examples/c2-holes/2.5-triangulation/triangle-with-triangle-hole.step",
+      "category": "c2-holes",
+      "fileSize": 3850,
+      "success": true,
+      "ours": {
+        "avgMs": 4.064999997615814,
+        "p50Ms": 4.064999997615814,
+        "p90Ms": 4.064999997615814,
+        "maxMs": 4.064999997615814,
+        "runs": [
+          4.064999997615814
+        ],
+        "phases": {
+          "loadStepFile": 3.310000002384186,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.5300000309944153,
+          "loadStepFile_transfer": 1.1899999976158142,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.10500001907348633,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.23500001430511475,
+          "tessellateOCCShape": 0.13499999046325684,
+          "tessellatePlanarFace": 0.0350000262260437,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.01500004529953003,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 6,
+        "triangleCount": 6
+      },
+      "ref": {
+        "avgMs": 48.37000000476837,
+        "p50Ms": 48.37000000476837,
+        "p90Ms": 48.37000000476837,
+        "maxMs": 48.37000000476837,
+        "runs": [
+          48.37000000476837
+        ],
+        "vertexCount": 6,
+        "triangleCount": 6
+      },
+      "speedup": 11.899138999541975,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c3-curves/quarter-circle.step",
+      "path": "step-examples/c3-curves/quarter-circle.step",
+      "category": "c3-curves",
+      "fileSize": 3468,
+      "success": true,
+      "ours": {
+        "avgMs": 2.935000002384186,
+        "p50Ms": 2.935000002384186,
+        "p90Ms": 2.935000002384186,
+        "maxMs": 2.935000002384186,
+        "runs": [
+          2.935000002384186
+        ],
+        "phases": {
+          "loadStepFile": 2.3700000047683716,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.2700000405311584,
+          "loadStepFile_transfer": 0.7450000047683716,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 0.04000002145767212,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.22999995946884155,
+          "tessellateOCCShape": 0.12999999523162842,
+          "tessellatePlanarFace": 0.029999971389770508,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.01500004529953003
+        },
+        "vertexCount": 8,
+        "triangleCount": 6
+      },
+      "ref": {
+        "avgMs": 18.50499999523163,
+        "p50Ms": 18.50499999523163,
+        "p90Ms": 18.50499999523163,
+        "maxMs": 18.50499999523163,
+        "runs": [
+          18.50499999523163
+        ],
+        "vertexCount": 33,
+        "triangleCount": 31
+      },
+      "speedup": 6.304940368040708,
+      "triangleRatio": 0.1935483870967742,
+      "warnings": []
+    },
+    {
+      "name": "c3-curves/rounded-cube.step",
+      "path": "step-examples/c3-curves/rounded-cube.step",
+      "category": "c3-curves",
+      "fileSize": 20531,
+      "success": true,
+      "ours": {
+        "avgMs": 14.25,
+        "p50Ms": 14.25,
+        "p90Ms": 14.25,
+        "maxMs": 14.25,
+        "runs": [
+          14.25
+        ],
+        "phases": {
+          "loadStepFile": 12.915000021457672,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 6.634999990463257,
+          "loadStepFile_transfer": 5.860000014305115,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.019999980926513672,
+          "loadStepFile_fsWrite": 0.050000011920928955,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.6050000190734863,
+          "tessellateOCCShape": 0.4750000238418579,
+          "tessellatePlanarFace": 0.08499997854232788,
+          "tessellateCurvedFace": 0.17500001192092896,
+          "earClipping": 0.02499997615814209,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.02499997615814209
+        },
+        "vertexCount": 54,
+        "triangleCount": 44
+      },
+      "ref": {
+        "avgMs": 27.75,
+        "p50Ms": 27.75,
+        "p90Ms": 27.75,
+        "maxMs": 27.75,
+        "runs": [
+          27.75
+        ],
+        "vertexCount": 98,
+        "triangleCount": 84
+      },
+      "speedup": 1.9473684210526316,
+      "triangleRatio": 0.5238095238095238,
+      "warnings": []
+    },
+    {
+      "name": "c4-multiface/pyramid.step",
+      "path": "step-examples/c4-multiface/pyramid.step",
+      "category": "c4-multiface",
+      "fileSize": 6383,
+      "success": true,
+      "ours": {
+        "avgMs": 7.580000042915344,
+        "p50Ms": 7.580000042915344,
+        "p90Ms": 7.580000042915344,
+        "maxMs": 7.580000042915344,
+        "runs": [
+          7.580000042915344
+        ],
+        "phases": {
+          "loadStepFile": 6.764999985694885,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.399999976158142,
+          "loadStepFile_transfer": 1.925000011920929,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 2.090000033378601,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.36000001430511475,
+          "tessellateOCCShape": 0.20999997854232788,
+          "tessellatePlanarFace": 0.034999966621398926,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 16,
+        "triangleCount": 6
+      },
+      "ref": {
+        "avgMs": 24.22000002861023,
+        "p50Ms": 24.22000002861023,
+        "p90Ms": 24.22000002861023,
+        "maxMs": 24.22000002861023,
+        "runs": [
+          24.22000002861023
+        ],
+        "vertexCount": 16,
+        "triangleCount": 6
+      },
+      "speedup": 3.195250645314637,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c4-multiface/tetrahedron.step",
+      "path": "step-examples/c4-multiface/tetrahedron.step",
+      "category": "c4-multiface",
+      "fileSize": 5471,
+      "success": true,
+      "ours": {
+        "avgMs": 5.310000002384186,
+        "p50Ms": 5.310000002384186,
+        "p90Ms": 5.310000002384186,
+        "maxMs": 5.310000002384186,
+        "runs": [
+          5.310000002384186
+        ],
+        "phases": {
+          "loadStepFile": 4.620000004768372,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.7450000643730164,
+          "loadStepFile_transfer": 2.5149999856948853,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.04500001668930054,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.32499998807907104,
+          "tessellateOCCShape": 0.18000000715255737,
+          "tessellatePlanarFace": 0.02500009536743164,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.005000054836273193,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 12,
+        "triangleCount": 4
+      },
+      "ref": {
+        "avgMs": 22.084999978542328,
+        "p50Ms": 22.084999978542328,
+        "p90Ms": 22.084999978542328,
+        "maxMs": 22.084999978542328,
+        "runs": [
+          22.084999978542328
+        ],
+        "vertexCount": 12,
+        "triangleCount": 4
+      },
+      "speedup": 4.159133704072727,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c4-multiface/triangular-prism.step",
+      "path": "step-examples/c4-multiface/triangular-prism.step",
+      "category": "c4-multiface",
+      "fileSize": 6753,
+      "success": true,
+      "ours": {
+        "avgMs": 5.375,
+        "p50Ms": 5.375,
+        "p90Ms": 5.375,
+        "maxMs": 5.375,
+        "runs": [
+          5.375
+        ],
+        "phases": {
+          "loadStepFile": 4.5450000166893005,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.0950000286102295,
+          "loadStepFile_transfer": 2.034999966621399,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.014999985694885254,
+          "loadStepFile_fsWrite": 0.06000000238418579,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.38499999046325684,
+          "tessellateOCCShape": 0.2200000286102295,
+          "tessellatePlanarFace": 0.0549999475479126,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.019999980926513672,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.01500004529953003
+        },
+        "vertexCount": 18,
+        "triangleCount": 8
+      },
+      "ref": {
+        "avgMs": 21.0349999666214,
+        "p50Ms": 21.0349999666214,
+        "p90Ms": 21.0349999666214,
+        "maxMs": 21.0349999666214,
+        "runs": [
+          21.0349999666214
+        ],
+        "vertexCount": 18,
+        "triangleCount": 8
+      },
+      "speedup": 3.913488365883051,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c4-multiface/two-triangles.step",
+      "path": "step-examples/c4-multiface/two-triangles.step",
+      "category": "c4-multiface",
+      "fileSize": 4346,
+      "success": true,
+      "ours": {
+        "avgMs": 3.7100000381469727,
+        "p50Ms": 3.7100000381469727,
+        "p90Ms": 3.7100000381469727,
+        "maxMs": 3.7100000381469727,
+        "runs": [
+          3.7100000381469727
+        ],
+        "phases": {
+          "loadStepFile": 3.199999988079071,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.4249999523162842,
+          "loadStepFile_transfer": 0.8400000333786011,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0,
+          "loadStepFile_fsWrite": 0.6650000214576721,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.19999998807907104,
+          "tessellateOCCShape": 0.13999998569488525,
+          "tessellatePlanarFace": 0.02499997615814209,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.004999995231628418,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.019999980926513672
+        },
+        "vertexCount": 6,
+        "triangleCount": 2
+      },
+      "ref": {
+        "avgMs": 19.32499998807907,
+        "p50Ms": 19.32499998807907,
+        "p90Ms": 19.32499998807907,
+        "maxMs": 19.32499998807907,
+        "runs": [
+          19.32499998807907
+        ],
+        "vertexCount": 6,
+        "triangleCount": 2
+      },
+      "speedup": 5.208894821934098,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c4-multiface/unit-box.step",
+      "path": "step-examples/c4-multiface/unit-box.step",
+      "category": "c4-multiface",
+      "fileSize": 7032,
+      "success": true,
+      "ours": {
+        "avgMs": 6.6049999594688416,
+        "p50Ms": 6.6049999594688416,
+        "p90Ms": 6.6049999594688416,
+        "maxMs": 6.6049999594688416,
+        "runs": [
+          6.6049999594688416
+        ],
+        "phases": {
+          "loadStepFile": 5.509999990463257,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.0600000619888306,
+          "loadStepFile_transfer": 3.0199999809265137,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.050000011920928955,
+          "loadStepFile_fsWrite": 0.04499995708465576,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.5400000214576721,
+          "tessellateOCCShape": 0.2850000262260437,
+          "tessellatePlanarFace": 0.07999992370605469,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.029999971389770508,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.019999980926513672
+        },
+        "vertexCount": 24,
+        "triangleCount": 8
+      },
+      "ref": {
+        "avgMs": 22.569999992847443,
+        "p50Ms": 22.569999992847443,
+        "p90Ms": 22.569999992847443,
+        "maxMs": 22.569999992847443,
+        "runs": [
+          22.569999992847443
+        ],
+        "vertexCount": 17,
+        "triangleCount": 7
+      },
+      "speedup": 3.417108271210719,
+      "triangleRatio": 1.1428571428571428,
+      "warnings": []
+    },
+    {
+      "name": "c4-multiface/wedge.step",
+      "path": "step-examples/c4-multiface/wedge.step",
+      "category": "c4-multiface",
+      "fileSize": 6692,
+      "success": true,
+      "ours": {
+        "avgMs": 5.824999988079071,
+        "p50Ms": 5.824999988079071,
+        "p90Ms": 5.824999988079071,
+        "maxMs": 5.824999988079071,
+        "runs": [
+          5.824999988079071
+        ],
+        "phases": {
+          "loadStepFile": 4.894999980926514,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.399999976158142,
+          "loadStepFile_transfer": 2.0950000286102295,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.019999980926513672,
+          "loadStepFile_fsWrite": 0.050000011920928955,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.38999998569488525,
+          "tessellateOCCShape": 0.20999997854232788,
+          "tessellatePlanarFace": 0.050000011920928955,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.020000040531158447,
+          "computeNormals": 0,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 18,
+        "triangleCount": 8
+      },
+      "ref": {
+        "avgMs": 22.669999957084656,
+        "p50Ms": 22.669999957084656,
+        "p90Ms": 22.669999957084656,
+        "maxMs": 22.669999957084656,
+        "runs": [
+          22.669999957084656
+        ],
+        "vertexCount": 18,
+        "triangleCount": 8
+      },
+      "speedup": 3.891845494159497,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c4-surfaces/cone.step",
+      "path": "step-examples/c4-surfaces/cone.step",
+      "category": "c4-surfaces",
+      "fileSize": 2723,
+      "success": true,
+      "ours": {
+        "avgMs": 9.189999997615814,
+        "p50Ms": 9.189999997615814,
+        "p90Ms": 9.189999997615814,
+        "maxMs": 9.189999997615814,
+        "runs": [
+          9.189999997615814
+        ],
+        "phases": {
+          "loadStepFile": 5.024999976158142,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.4049999713897705,
+          "loadStepFile_transfer": 2.709999978542328,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.5850000381469727,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.5949999690055847,
+          "tessellateOCCShape": 3.340000033378601,
+          "tessellatePlanarFace": 0.02499997615814209,
+          "tessellateCurvedFace": 3.0049999952316284,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0.030000030994415283,
+          "meshAssembly": 0.06499999761581421
+        },
+        "vertexCount": 689,
+        "triangleCount": 1260
+      },
+      "ref": {
+        "avgMs": 31.919999957084656,
+        "p50Ms": 31.919999957084656,
+        "p90Ms": 31.919999957084656,
+        "maxMs": 31.919999957084656,
+        "runs": [
+          31.919999957084656
+        ],
+        "vertexCount": 1012,
+        "triangleCount": 1841
+      },
+      "speedup": 3.473340583826523,
+      "triangleRatio": 0.6844106463878327,
+      "warnings": []
+    },
+    {
+      "name": "c4-surfaces/cylinder.step",
+      "path": "step-examples/c4-surfaces/cylinder.step",
+      "category": "c4-surfaces",
+      "fileSize": 3067,
+      "success": true,
+      "ours": {
+        "avgMs": 5.2049999833106995,
+        "p50Ms": 5.2049999833106995,
+        "p90Ms": 5.2049999833106995,
+        "maxMs": 5.2049999833106995,
+        "runs": [
+          5.2049999833106995
+        ],
+        "phases": {
+          "loadStepFile": 3.990000009536743,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.5299999713897705,
+          "loadStepFile_transfer": 2.074999988079071,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.014999985694885254,
+          "loadStepFile_fsWrite": 0.039999961853027344,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.32999998331069946,
+          "tessellateOCCShape": 0.5850000381469727,
+          "tessellatePlanarFace": 0.06499993801116943,
+          "tessellateCurvedFace": 0.3349999785423279,
+          "earClipping": 0.039999961853027344,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.025000035762786865
+        },
+        "vertexCount": 70,
+        "triangleCount": 64
+      },
+      "ref": {
+        "avgMs": 23.009999990463257,
+        "p50Ms": 23.009999990463257,
+        "p90Ms": 23.009999990463257,
+        "maxMs": 23.009999990463257,
+        "runs": [
+          23.009999990463257
+        ],
+        "vertexCount": 286,
+        "triangleCount": 280
+      },
+      "speedup": 4.420749291881358,
+      "triangleRatio": 0.22857142857142856,
+      "warnings": []
+    },
+    {
+      "name": "c4-surfaces/sphere.step",
+      "path": "step-examples/c4-surfaces/sphere.step",
+      "category": "c4-surfaces",
+      "fileSize": 2318,
+      "success": true,
+      "ours": {
+        "avgMs": 4.694999992847443,
+        "p50Ms": 4.694999992847443,
+        "p90Ms": 4.694999992847443,
+        "maxMs": 4.694999992847443,
+        "runs": [
+          4.694999992847443
+        ],
+        "phases": {
+          "loadStepFile": 3.5049999952316284,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.1649999618530273,
+          "loadStepFile_transfer": 1.9800000190734863,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.04500001668930054,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.4300000071525574,
+          "tessellateOCCShape": 0.5849999785423279,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.4649999737739563,
+          "earClipping": 0,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 25,
+        "triangleCount": 32
+      },
+      "ref": {
+        "avgMs": 32.68000000715256,
+        "p50Ms": 32.68000000715256,
+        "p90Ms": 32.68000000715256,
+        "maxMs": 32.68000000715256,
+        "runs": [
+          32.68000000715256
+        ],
+        "vertexCount": 1543,
+        "triangleCount": 3004
+      },
+      "speedup": 6.960596391254232,
+      "triangleRatio": 0.010652463382157125,
+      "warnings": []
+    },
+    {
+      "name": "c4-surfaces/torus.step",
+      "path": "step-examples/c4-surfaces/torus.step",
+      "category": "c4-surfaces",
+      "fileSize": 2427,
+      "success": true,
+      "ours": {
+        "avgMs": 6.235000014305115,
+        "p50Ms": 6.235000014305115,
+        "p90Ms": 6.235000014305115,
+        "maxMs": 6.235000014305115,
+        "runs": [
+          6.235000014305115
+        ],
+        "phases": {
+          "loadStepFile": 3.8700000047683716,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.0949999690055847,
+          "loadStepFile_transfer": 1.7549999952316284,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 0.7149999737739563,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.4399999976158142,
+          "tessellateOCCShape": 1.7049999833106995,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 1.3050000071525574,
+          "earClipping": 0,
+          "computeNormals": 0.039999961853027344,
+          "meshAssembly": 0.08499997854232788
+        },
+        "vertexCount": 780,
+        "triangleCount": 1444
+      },
+      "ref": {
+        "avgMs": 46.11999994516373,
+        "p50Ms": 46.11999994516373,
+        "p90Ms": 46.11999994516373,
+        "maxMs": 46.11999994516373,
+        "runs": [
+          46.11999994516373
+        ],
+        "vertexCount": 2997,
+        "triangleCount": 5760
+      },
+      "speedup": 7.396952660681551,
+      "triangleRatio": 0.25069444444444444,
+      "warnings": []
+    },
+    {
+      "name": "c5-bspline/bspline-bowl.step",
+      "path": "step-examples/c5-bspline/bspline-bowl.step",
+      "category": "c5-bspline",
+      "fileSize": 2730,
+      "success": true,
+      "ours": {
+        "avgMs": 18.569999992847443,
+        "p50Ms": 18.569999992847443,
+        "p90Ms": 18.569999992847443,
+        "maxMs": 18.569999992847443,
+        "runs": [
+          18.569999992847443
+        ],
+        "phases": {
+          "loadStepFile": 17.164999961853027,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.149999976158142,
+          "loadStepFile_transfer": 15.47000002861023,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.029999971389770508,
+          "loadStepFile_fsWrite": 0.04500001668930054,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.3400000333786011,
+          "tessellateOCCShape": 0.7949999570846558,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.6299999952316284,
           "earClipping": 0,
           "computeNormals": 0.014999985694885254,
+          "meshAssembly": 0.019999980926513672
+        },
+        "vertexCount": 16,
+        "triangleCount": 18
+      },
+      "ref": {
+        "avgMs": 38.1599999666214,
+        "p50Ms": 38.1599999666214,
+        "p90Ms": 38.1599999666214,
+        "maxMs": 38.1599999666214,
+        "runs": [
+          38.1599999666214
+        ],
+        "vertexCount": 115,
+        "triangleCount": 116
+      },
+      "speedup": 2.054927301094205,
+      "triangleRatio": 0.15517241379310345,
+      "warnings": []
+    },
+    {
+      "name": "c5-bspline/bspline-dome.step",
+      "path": "step-examples/c5-bspline/bspline-dome.step",
+      "category": "c5-bspline",
+      "fileSize": 2710,
+      "success": true,
+      "ours": {
+        "avgMs": 5.019999980926514,
+        "p50Ms": 5.019999980926514,
+        "p90Ms": 5.019999980926514,
+        "maxMs": 5.019999980926514,
+        "runs": [
+          5.019999980926514
+        ],
+        "phases": {
+          "loadStepFile": 3.800000011920929,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.35999995470047,
+          "loadStepFile_transfer": 2.0049999952316284,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 0.050000011920928955,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.26499998569488525,
+          "tessellateOCCShape": 0.7649999856948853,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.6449999809265137,
+          "earClipping": 0,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 16,
+        "triangleCount": 18
+      },
+      "ref": {
+        "avgMs": 38.514999985694885,
+        "p50Ms": 38.514999985694885,
+        "p90Ms": 38.514999985694885,
+        "maxMs": 38.514999985694885,
+        "runs": [
+          38.514999985694885
+        ],
+        "vertexCount": 1519,
+        "triangleCount": 3032
+      },
+      "speedup": 7.672310783273426,
+      "triangleRatio": 0.005936675461741424,
+      "warnings": []
+    },
+    {
+      "name": "c5-bspline/bspline-saddle.step",
+      "path": "step-examples/c5-bspline/bspline-saddle.step",
+      "category": "c5-bspline",
+      "fileSize": 3153,
+      "success": true,
+      "ours": {
+        "avgMs": 5.024999976158142,
+        "p50Ms": 5.024999976158142,
+        "p90Ms": 5.024999976158142,
+        "maxMs": 5.024999976158142,
+        "runs": [
+          5.024999976158142
+        ],
+        "phases": {
+          "loadStepFile": 4.010000050067902,
+          "loadStepFile_initOC": 0.010000050067901611,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.5550000667572021,
+          "loadStepFile_transfer": 1.3649999499320984,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.005000054836273193,
+          "loadStepFile_fsWrite": 0.7849999666213989,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.19499999284744263,
+          "tessellateOCCShape": 0.5450000166893005,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.4300000071525574,
+          "earClipping": 0,
+          "computeNormals": 0,
+          "meshAssembly": 0.004999995231628418
+        },
+        "vertexCount": 13,
+        "triangleCount": 12
+      },
+      "ref": {
+        "avgMs": 27.330000042915344,
+        "p50Ms": 27.330000042915344,
+        "p90Ms": 27.330000042915344,
+        "maxMs": 27.330000042915344,
+        "runs": [
+          27.330000042915344
+        ],
+        "vertexCount": 622,
+        "triangleCount": 1238
+      },
+      "speedup": 5.438806004494842,
+      "triangleRatio": 0.009693053311793215,
+      "warnings": []
+    },
+    {
+      "name": "c5-bspline/bspline-wave.step",
+      "path": "step-examples/c5-bspline/bspline-wave.step",
+      "category": "c5-bspline",
+      "fileSize": 3136,
+      "success": true,
+      "ours": {
+        "avgMs": 4.699999988079071,
+        "p50Ms": 4.699999988079071,
+        "p90Ms": 4.699999988079071,
+        "maxMs": 4.699999988079071,
+        "runs": [
+          4.699999988079071
+        ],
+        "phases": {
+          "loadStepFile": 3.5450000166893005,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.1800000071525574,
+          "loadStepFile_transfer": 2.009999990463257,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.019999980926513672,
+          "loadStepFile_fsWrite": 0.0350000262260437,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.3100000023841858,
+          "tessellateOCCShape": 0.5999999642372131,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.48499995470046997,
+          "earClipping": 0,
+          "computeNormals": 0,
+          "meshAssembly": 0.004999995231628418
+        },
+        "vertexCount": 10,
+        "triangleCount": 8
+      },
+      "ref": {
+        "avgMs": 21.4549999833107,
+        "p50Ms": 21.4549999833107,
+        "p90Ms": 21.4549999833107,
+        "maxMs": 21.4549999833107,
+        "runs": [
+          21.4549999833107
+        ],
+        "vertexCount": 4,
+        "triangleCount": 2
+      },
+      "speedup": 4.564893625048611,
+      "triangleRatio": 4,
+      "warnings": []
+    },
+    {
+      "name": "c5-bspline/simple-bspline-surface.step",
+      "path": "step-examples/c5-bspline/simple-bspline-surface.step",
+      "category": "c5-bspline",
+      "fileSize": 2688,
+      "success": true,
+      "ours": {
+        "avgMs": 18.155000030994415,
+        "p50Ms": 18.155000030994415,
+        "p90Ms": 18.155000030994415,
+        "maxMs": 18.155000030994415,
+        "runs": [
+          18.155000030994415
+        ],
+        "phases": {
+          "loadStepFile": 16.99500000476837,
+          "loadStepFile_initOC": 0.010000050067901611,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.050000011920929,
+          "loadStepFile_transfer": 15.600000023841858,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.019999980926513672,
+          "loadStepFile_fsWrite": 0.039999961853027344,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.29500001668930054,
+          "tessellateOCCShape": 0.6499999761581421,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.5299999713897705,
+          "earClipping": 0,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 16,
+        "triangleCount": 18
+      },
+      "ref": {
+        "avgMs": 38.110000014305115,
+        "p50Ms": 38.110000014305115,
+        "p90Ms": 38.110000014305115,
+        "maxMs": 38.110000014305115,
+        "runs": [
+          38.110000014305115
+        ],
+        "vertexCount": 115,
+        "triangleCount": 116
+      },
+      "speedup": 2.0991462379092978,
+      "triangleRatio": 0.15517241379310345,
+      "warnings": []
+    },
+    {
+      "name": "c6-trimmed/cylinder-two-holes.step",
+      "path": "step-examples/c6-trimmed/cylinder-two-holes.step",
+      "category": "c6-trimmed",
+      "fileSize": 6980,
+      "success": true,
+      "ours": {
+        "avgMs": 9.660000026226044,
+        "p50Ms": 9.660000026226044,
+        "p90Ms": 9.660000026226044,
+        "maxMs": 9.660000026226044,
+        "runs": [
+          9.660000026226044
+        ],
+        "phases": {
+          "loadStepFile": 6.945000052452087,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 3.125,
+          "loadStepFile_transfer": 2.625,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.019999980926513672,
+          "loadStepFile_fsWrite": 0.824999988079071,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.48000001907348633,
+          "tessellateOCCShape": 1.9950000047683716,
+          "tessellatePlanarFace": 0.0350000262260437,
+          "tessellateCurvedFace": 1.7649999856948853,
+          "earClipping": 0.020000040531158447,
+          "computeNormals": 0.009999990463256836,
+          "meshAssembly": 0.02499997615814209
+        },
+        "vertexCount": 202,
+        "triangleCount": 278
+      },
+      "ref": {
+        "avgMs": 25.235000014305115,
+        "p50Ms": 25.235000014305115,
+        "p90Ms": 25.235000014305115,
+        "maxMs": 25.235000014305115,
+        "runs": [
+          25.235000014305115
+        ],
+        "vertexCount": 350,
+        "triangleCount": 348
+      },
+      "speedup": 2.612318834968357,
+      "triangleRatio": 0.7988505747126436,
+      "warnings": []
+    },
+    {
+      "name": "c6-trimmed/cylinder-with-hole.step",
+      "path": "step-examples/c6-trimmed/cylinder-with-hole.step",
+      "category": "c6-trimmed",
+      "fileSize": 5182,
+      "success": true,
+      "ours": {
+        "avgMs": 6.379999995231628,
+        "p50Ms": 6.379999995231628,
+        "p90Ms": 6.379999995231628,
+        "maxMs": 6.379999995231628,
+        "runs": [
+          6.379999995231628
+        ],
+        "phases": {
+          "loadStepFile": 4.925000011920929,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.1649999618530273,
+          "loadStepFile_transfer": 2.26500004529953,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.009999990463256836,
+          "loadStepFile_fsWrite": 0.04000002145767212,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.39499998092651367,
+          "tessellateOCCShape": 0.8499999642372131,
+          "tessellatePlanarFace": 0.030000030994415283,
+          "tessellateCurvedFace": 0.6349999904632568,
+          "earClipping": 0.009999990463256836,
+          "computeNormals": 0.02499997615814209,
+          "meshAssembly": 0.039999961853027344
+        },
+        "vertexCount": 209,
+        "triangleCount": 304
+      },
+      "ref": {
+        "avgMs": 22.64000004529953,
+        "p50Ms": 22.64000004529953,
+        "p90Ms": 22.64000004529953,
+        "maxMs": 22.64000004529953,
+        "runs": [
+          22.64000004529953
+        ],
+        "vertexCount": 312,
+        "triangleCount": 308
+      },
+      "speedup": 3.548589351445223,
+      "triangleRatio": 0.987012987012987,
+      "warnings": []
+    },
+    {
+      "name": "c6-trimmed/full-cylinder-window.step",
+      "path": "step-examples/c6-trimmed/full-cylinder-window.step",
+      "category": "c6-trimmed",
+      "fileSize": 5170,
+      "success": true,
+      "ours": {
+        "avgMs": 6.245000004768372,
+        "p50Ms": 6.245000004768372,
+        "p90Ms": 6.245000004768372,
+        "maxMs": 6.245000004768372,
+        "runs": [
+          6.245000004768372
+        ],
+        "phases": {
+          "loadStepFile": 4.230000019073486,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.840000033378601,
+          "loadStepFile_transfer": 1.9599999785423279,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.030000030994415283,
+          "loadStepFile_fsWrite": 0.04500001668930054,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.5199999809265137,
+          "tessellateOCCShape": 1.2200000286102295,
+          "tessellatePlanarFace": 0.0350000262260437,
+          "tessellateCurvedFace": 1,
+          "earClipping": 0.01500004529953003,
+          "computeNormals": 0.014999985694885254,
           "meshAssembly": 0.029999971389770508
+        },
+        "vertexCount": 203,
+        "triangleCount": 288
+      },
+      "ref": {
+        "avgMs": 24.240000009536743,
+        "p50Ms": 24.240000009536743,
+        "p90Ms": 24.240000009536743,
+        "maxMs": 24.240000009536743,
+        "runs": [
+          24.240000009536743
+        ],
+        "vertexCount": 324,
+        "triangleCount": 320
+      },
+      "speedup": 3.8815052027267067,
+      "triangleRatio": 0.9,
+      "warnings": []
+    },
+    {
+      "name": "c6-trimmed/half-cylinder.step",
+      "path": "step-examples/c6-trimmed/half-cylinder.step",
+      "category": "c6-trimmed",
+      "fileSize": 2570,
+      "success": true,
+      "ours": {
+        "avgMs": 3.699999988079071,
+        "p50Ms": 3.699999988079071,
+        "p90Ms": 3.699999988079071,
+        "maxMs": 3.699999988079071,
+        "runs": [
+          3.699999988079071
+        ],
+        "phases": {
+          "loadStepFile": 3.0049999952316284,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.1350000500679016,
+          "loadStepFile_transfer": 0.8349999785423279,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 0.7099999785423279,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.2149999737739563,
+          "tessellateOCCShape": 0.2200000286102295,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.13499999046325684,
+          "earClipping": 0,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 20,
+        "triangleCount": 18
+      },
+      "ref": {
+        "avgMs": 19.834999978542328,
+        "p50Ms": 19.834999978542328,
+        "p90Ms": 19.834999978542328,
+        "maxMs": 19.834999978542328,
+        "runs": [
+          19.834999978542328
+        ],
+        "vertexCount": 80,
+        "triangleCount": 78
+      },
+      "speedup": 5.36081082228329,
+      "triangleRatio": 0.23076923076923078,
+      "warnings": []
+    },
+    {
+      "name": "c6-trimmed/pipe-with-porthole.step",
+      "path": "step-examples/c6-trimmed/pipe-with-porthole.step",
+      "category": "c6-trimmed",
+      "fileSize": 5434,
+      "success": true,
+      "ours": {
+        "avgMs": 5.7299999594688416,
+        "p50Ms": 5.7299999594688416,
+        "p90Ms": 5.7299999594688416,
+        "maxMs": 5.7299999594688416,
+        "runs": [
+          5.7299999594688416
+        ],
+        "phases": {
+          "loadStepFile": 4.5,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.9649999737739563,
+          "loadStepFile_transfer": 2.050000011920929,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.025000035762786865,
+          "loadStepFile_fsWrite": 0.06999999284744263,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.4249999523162842,
+          "tessellateOCCShape": 0.5149999856948853,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.6899999976158142,
+          "earClipping": 0,
+          "computeNormals": 0.014999985694885254,
+          "meshAssembly": 0.0350000262260437
         },
         "vertexCount": 214,
         "triangleCount": 352
       },
       "ref": {
-        "avgMs": 27.610000014305115,
-        "p50Ms": 27.610000014305115,
-        "p90Ms": 27.610000014305115,
-        "maxMs": 27.610000014305115,
+        "avgMs": 25.764999985694885,
+        "p50Ms": 25.764999985694885,
+        "p90Ms": 25.764999985694885,
+        "maxMs": 25.764999985694885,
         "runs": [
-          27.610000014305115
+          25.764999985694885
         ],
         "vertexCount": 10,
         "triangleCount": 8
       },
-      "speedup": 4.756244613313661,
+      "speedup": 4.496509627913373,
       "triangleRatio": 44,
+      "warnings": []
+    },
+    {
+      "name": "c6-trimmed/quarter-cylinder-hole.step",
+      "path": "step-examples/c6-trimmed/quarter-cylinder-hole.step",
+      "category": "c6-trimmed",
+      "fileSize": 5386,
+      "success": true,
+      "ours": {
+        "avgMs": 4.660000026226044,
+        "p50Ms": 4.660000026226044,
+        "p90Ms": 4.660000026226044,
+        "maxMs": 4.660000026226044,
+        "runs": [
+          4.660000026226044
+        ],
+        "phases": {
+          "loadStepFile": 3.324999988079071,
+          "loadStepFile_initOC": 0,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 1.800000011920929,
+          "loadStepFile_transfer": 1.1850000023841858,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.004999995231628418,
+          "loadStepFile_fsWrite": 0.04000002145767212,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.25999999046325684,
+          "tessellateOCCShape": 0.8849999904632568,
+          "tessellatePlanarFace": 0,
+          "tessellateCurvedFace": 0.6899999976158142,
+          "earClipping": 0,
+          "computeNormals": 0.019999980926513672,
+          "meshAssembly": 0.039999961853027344
+        },
+        "vertexCount": 340,
+        "triangleCount": 580
+      },
+      "ref": {
+        "avgMs": 20.694999992847443,
+        "p50Ms": 20.694999992847443,
+        "p90Ms": 20.694999992847443,
+        "maxMs": 20.694999992847443,
+        "runs": [
+          20.694999992847443
+        ],
+        "vertexCount": 64,
+        "triangleCount": 64
+      },
+      "speedup": 4.440987097935176,
+      "triangleRatio": 9.0625,
+      "warnings": []
+    },
+    {
+      "name": "c8-solids/colored-solid.step",
+      "path": "step-examples/c8-solids/colored-solid.step",
+      "category": "c8-solids",
+      "fileSize": 10236,
+      "success": true,
+      "ours": {
+        "avgMs": 9.384999990463257,
+        "p50Ms": 9.384999990463257,
+        "p90Ms": 9.384999990463257,
+        "maxMs": 9.384999990463257,
+        "runs": [
+          9.384999990463257
+        ],
+        "phases": {
+          "loadStepFile": 8.490000009536743,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 4.110000014305115,
+          "loadStepFile_transfer": 3.4049999713897705,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.020000040531158447,
+          "loadStepFile_fsWrite": 0.6600000262260437,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.42500001192092896,
+          "tessellateOCCShape": 0.23500001430511475,
+          "tessellatePlanarFace": 0.04999995231628418,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.009999990463256836,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.014999985694885254
+        },
+        "vertexCount": 24,
+        "triangleCount": 12
+      },
+      "ref": {
+        "avgMs": 22.944999992847443,
+        "p50Ms": 22.944999992847443,
+        "p90Ms": 22.944999992847443,
+        "maxMs": 22.944999992847443,
+        "runs": [
+          22.944999992847443
+        ],
+        "vertexCount": 24,
+        "triangleCount": 12
+      },
+      "speedup": 2.44485881898385,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c8-solids/simple-cube.step",
+      "path": "step-examples/c8-solids/simple-cube.step",
+      "category": "c8-solids",
+      "fileSize": 9587,
+      "success": true,
+      "ours": {
+        "avgMs": 7.385000050067902,
+        "p50Ms": 7.385000050067902,
+        "p90Ms": 7.385000050067902,
+        "maxMs": 7.385000050067902,
+        "runs": [
+          7.385000050067902
+        ],
+        "phases": {
+          "loadStepFile": 6.514999985694885,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.5899999737739563,
+          "loadStepFile_transfer": 3.5950000286102295,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.014999985694885254,
+          "loadStepFile_fsWrite": 0.050000011920928955,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.42000001668930054,
+          "tessellateOCCShape": 0.23000001907348633,
+          "tessellatePlanarFace": 0.05500000715255737,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.020000040531158447,
+          "computeNormals": 0.004999995231628418,
+          "meshAssembly": 0.009999990463256836
+        },
+        "vertexCount": 24,
+        "triangleCount": 12
+      },
+      "ref": {
+        "avgMs": 21.2950000166893,
+        "p50Ms": 21.2950000166893,
+        "p90Ms": 21.2950000166893,
+        "maxMs": 21.2950000166893,
+        "runs": [
+          21.2950000166893
+        ],
+        "vertexCount": 24,
+        "triangleCount": 12
+      },
+      "speedup": 2.883547714599339,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "c8-solids/tetrahedron.step",
+      "path": "step-examples/c8-solids/tetrahedron.step",
+      "category": "c8-solids",
+      "fileSize": 6569,
+      "success": true,
+      "ours": {
+        "avgMs": 5.399999976158142,
+        "p50Ms": 5.399999976158142,
+        "p90Ms": 5.399999976158142,
+        "maxMs": 5.399999976158142,
+        "runs": [
+          5.399999976158142
+        ],
+        "phases": {
+          "loadStepFile": 4.629999995231628,
+          "loadStepFile_initOC": 0.009999990463256836,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 2.055000066757202,
+          "loadStepFile_transfer": 2.189999997615814,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.014999985694885254,
+          "loadStepFile_fsWrite": 0.04500001668930054,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.2850000262260437,
+          "tessellateOCCShape": 0.23000001907348633,
+          "tessellatePlanarFace": 0.04499995708465576,
+          "tessellateCurvedFace": 0,
+          "earClipping": 0.014999985694885254,
+          "computeNormals": 0.010000050067901611,
+          "meshAssembly": 0.020000040531158447
+        },
+        "vertexCount": 12,
+        "triangleCount": 4
+      },
+      "ref": {
+        "avgMs": 23.32499998807907,
+        "p50Ms": 23.32499998807907,
+        "p90Ms": 23.32499998807907,
+        "maxMs": 23.32499998807907,
+        "runs": [
+          23.32499998807907
+        ],
+        "vertexCount": 12,
+        "triangleCount": 4
+      },
+      "speedup": 4.319444461307898,
+      "triangleRatio": 1,
+      "warnings": []
+    },
+    {
+      "name": "complex/conical-surface.step",
+      "path": "step-examples/complex/conical-surface.step",
+      "category": "complex",
+      "fileSize": 9390,
+      "success": true,
+      "ours": {
+        "avgMs": 12.944999992847443,
+        "p50Ms": 12.944999992847443,
+        "p90Ms": 12.944999992847443,
+        "maxMs": 12.944999992847443,
+        "runs": [
+          12.944999992847443
+        ],
+        "phases": {
+          "loadStepFile": 7.230000019073486,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 3.5,
+          "loadStepFile_transfer": 2.740000009536743,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.014999985694885254,
+          "loadStepFile_fsWrite": 0.6899999976158142,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 2.23499995470047,
+          "tessellateOCCShape": 3.2549999952316284,
+          "tessellatePlanarFace": 0.08499997854232788,
+          "tessellateCurvedFace": 5.300000011920929,
+          "earClipping": 0.039999961853027344,
+          "computeNormals": 0.0350000262260437,
+          "meshAssembly": 0.07999998331069946
+        },
+        "vertexCount": 864,
+        "triangleCount": 1452
+      },
+      "ref": {
+        "avgMs": 32.72999995946884,
+        "p50Ms": 32.72999995946884,
+        "p90Ms": 32.72999995946884,
+        "maxMs": 32.72999995946884,
+        "runs": [
+          32.72999995946884
+        ],
+        "vertexCount": 1012,
+        "triangleCount": 1318
+      },
+      "speedup": 2.5283893377793194,
+      "triangleRatio": 1.1016691957511382,
+      "warnings": []
+    },
+    {
+      "name": "complex/cube.step",
+      "path": "step-examples/complex/cube.step",
+      "category": "complex",
+      "fileSize": 9390,
+      "success": true,
+      "ours": {
+        "avgMs": 9.620000004768372,
+        "p50Ms": 9.620000004768372,
+        "p90Ms": 9.620000004768372,
+        "maxMs": 9.620000004768372,
+        "runs": [
+          9.620000004768372
+        ],
+        "phases": {
+          "loadStepFile": 6.694999992847443,
+          "loadStepFile_initOC": 0.004999995231628418,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 3.4649999737739563,
+          "loadStepFile_transfer": 2.849999964237213,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.010000050067901611,
+          "loadStepFile_fsWrite": 0.050000011920928955,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 0.6850000023841858,
+          "tessellateOCCShape": 2.025000035762787,
+          "tessellatePlanarFace": 0.050000011920928955,
+          "tessellateCurvedFace": 3.1200000047683716,
+          "earClipping": 0.025000035762786865,
+          "computeNormals": 0.04000002145767212,
+          "meshAssembly": 0.08000004291534424
+        },
+        "vertexCount": 864,
+        "triangleCount": 1452
+      },
+      "ref": {
+        "avgMs": 35.480000019073486,
+        "p50Ms": 35.480000019073486,
+        "p90Ms": 35.480000019073486,
+        "maxMs": 35.480000019073486,
+        "runs": [
+          35.480000019073486
+        ],
+        "vertexCount": 1012,
+        "triangleCount": 1318
+      },
+      "speedup": 3.688149688304264,
+      "triangleRatio": 1.1016691957511382,
+      "warnings": []
+    },
+    {
+      "name": "complex/raw-material.step",
+      "path": "step-examples/complex/raw-material.step",
+      "category": "complex",
+      "fileSize": 39877,
+      "success": true,
+      "ours": {
+        "avgMs": 22.660000026226044,
+        "p50Ms": 22.660000026226044,
+        "p90Ms": 22.660000026226044,
+        "maxMs": 22.660000026226044,
+        "runs": [
+          22.660000026226044
+        ],
+        "phases": {
+          "loadStepFile": 19.980000019073486,
+          "loadStepFile_initOC": 0.010000050067901611,
+          "loadStepFile_createDoc": 0,
+          "loadStepFile_readFile": 10.819999933242798,
+          "loadStepFile_transfer": 8.715000033378601,
+          "loadStepFile_getTools": 0,
+          "loadStepFile_oneShape": 0.014999985694885254,
+          "loadStepFile_fsWrite": 0.06000000238418579,
+          "loadStepFile_fsCleanup": 0,
+          "loadStepFile_colorParsing": 0,
+          "extractFacesWithEdges": 1.2599999904632568,
+          "tessellateOCCShape": 1.125,
+          "tessellatePlanarFace": 0.16000014543533325,
+          "tessellateCurvedFace": 0.800000011920929,
+          "earClipping": 0.06499999761581421,
+          "computeNormals": 0.014999985694885254,
+          "meshAssembly": 0.050000011920928955
+        },
+        "vertexCount": 500,
+        "triangleCount": 688
+      },
+      "ref": {
+        "avgMs": 40.1700000166893,
+        "p50Ms": 40.1700000166893,
+        "p90Ms": 40.1700000166893,
+        "maxMs": 40.1700000166893,
+        "runs": [
+          40.1700000166893
+        ],
+        "vertexCount": 368,
+        "triangleCount": 332
+      },
+      "speedup": 1.7727272714120776,
+      "triangleRatio": 2.072289156626506,
       "warnings": []
     }
   ]
