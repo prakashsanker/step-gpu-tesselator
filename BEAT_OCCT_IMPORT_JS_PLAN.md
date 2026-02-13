@@ -455,3 +455,47 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 - `scripts/run-beat-occt-baseline.mjs` now accepts:
   - `--bench-suite canary|representative|full`
   - default baseline suite = `representative`
+
+### 2026-02-13 Next Optimization Decision (Post Curved-Face Batching)
+
+- Current optimization in progress:
+  - **Triangle reduction on curved/trimmed faces** (adaptive budgets + anisotropic sampling), starting with Electronic Enclosure and VM-001.
+
+- Why:
+  - Latest representative profile still shows Electronic Enclosure slower than `occt-import-js`.
+  - Runtime split is still dominated by tessellation work after load:
+    - total `7667.5ms`
+    - `loadStepFile`: `2928.0ms` (`38.2%`)
+    - non-load tessellation path: `~4739.5ms` (`61.8%`)
+  - Triangle inflation remains the key multiplier:
+    - Electronic Enclosure triangles: ours `222890` vs ref `39148` (`5.69x`).
+
+- Impact model (estimated):
+  1. GPU parallelization improvements (M3/M4):
+     - Expected: `-0.8s` to `-1.8s` on Electronic Enclosure (`~10-24%` total).
+     - Scope:
+       - larger curved-face dispatch batches
+       - persistent buffers/pipelines
+       - reduced per-face submit/readback/sync
+  2. Triangle-count reduction (new top priority):
+     - Expected: `-1.5s` to `-3.0s` (`~20-40%` total).
+     - Scope:
+       - adaptive deflection/error budgets per face type
+       - anisotropic sampling (boundary-dense, interior-coarse)
+       - primitive-specific caps for cylinder/cone/torus/bspline
+  3. Load-path follow-up (M1.2 continuation):
+     - Expected: `-0.7s` to `-1.4s` (`~9-18%` total).
+     - Scope:
+       - transfer/copy elimination
+       - FS/write-path minimization
+       - stricter perf-mode fast path
+
+- Execution order for next cycle:
+  1. Triangle reduction first (quality-guarded).
+  2. GPU batching/sync minimization second.
+  3. Load-path copy/transfer reduction third.
+
+- Validation cadence for this cycle:
+  - Every step: `npm run -s bench:canary` (80-model canary including VM-001).
+  - Every 2 steps: `npm run -s bench:representative`.
+  - Every 2-3 steps: full correctness gate (`node --experimental-vm-modules tests/run-tests.js`), then AI visual run when needed.
