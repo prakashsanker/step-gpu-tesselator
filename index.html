@@ -168,6 +168,10 @@
     <div class="controls">
         <select id="testFile">
             <option value="">-- Select Test File --</option>
+            <optgroup label="Real-world">
+                <option value="step-examples/Electronic Enclousre.STEP">Electronic Enclosure</option>
+                <option value="step-examples/VM-001.STEP">VM-001</option>
+            </optgroup>
             <optgroup label="Benchmark">
                 <option value="step-examples/benchmark/simple-square.step">simple-square.step</option>
                 <option value="step-examples/benchmark/plate-small-2x2.step">plate-small-2x2.step</option>
@@ -330,6 +334,18 @@
         <button id="runBtn" disabled>Run Comparison</button>
         <button id="captureBtn" disabled>Capture Screenshots</button>
         <input type="text" id="checkpointName" placeholder="checkpoint-0" style="width: 120px;" />
+        <label style="display: inline-flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="localClassifierCandidate" checked />
+            Local Classifier Candidate
+        </label>
+        <label style="display: inline-flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="localClassifierFallback" />
+            OCC Fallback
+        </label>
+        <label style="display: inline-flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="localClassifierStrict" checked />
+            Classifier Only (No OCC)
+        </label>
     </div>
 
     <div class="render-container">
@@ -411,6 +427,30 @@
             const overlay = document.getElementById('transferOverlay');
             if (!overlay) return;
             overlay.classList.remove('visible');
+        }
+
+        function applyLocalClassifierFlagsFromUi() {
+            const candidateBox = document.getElementById('localClassifierCandidate');
+            const fallbackBox = document.getElementById('localClassifierFallback');
+            const strictBox = document.getElementById('localClassifierStrict');
+            const strictOnly = strictBox.checked;
+            const enableCandidate = strictOnly ? true : candidateBox.checked;
+            const enableFallback = strictOnly ? false : fallbackBox.checked;
+
+            if (strictOnly) {
+                candidateBox.checked = true;
+                fallbackBox.checked = false;
+            }
+
+            globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__ = enableCandidate;
+            globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__ = false;
+            globalThis.__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__ = enableFallback;
+            globalThis.__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__ = strictOnly;
+
+            log(
+                `Classifier mode: candidate=${enableCandidate ? 'on' : 'off'}, fallback=${enableFallback ? 'on' : 'off'}, strict=${strictOnly ? 'on' : 'off'}`,
+                'info'
+            );
         }
 
         // Initialize Three.js renderers for each canvas
@@ -585,6 +625,7 @@
             log(`Input ready: ${fileName}`, 'info');
 
             try {
+                applyLocalClassifierFlagsFromUi();
                 log(`Loaded ${(stepContent.length / 1024).toFixed(1)} KB`, 'info');
 
                 // Run our pipeline

@@ -97,6 +97,48 @@ interface TessellatedMesh {
     uvs: Float32Array;         // UV coordinates (for texturing)
 }
 
+export type LocalUvClassifierMode = "shadow" | "candidate";
+
+export interface LocalUvClassifierEdgeInput {
+    points: Vec2[];
+    // Optional max tolerance observed on edge end vertices.
+    vertexToleranceMax?: number;
+    // Hint that this edge should be treated as low-confidence in Stage-A.
+    hasHighVertexTolerance?: boolean;
+    // Hint that edge sampling produced a degenerate chain.
+    isDegenerate?: boolean;
+}
+
+export interface LocalUvClassifierWireInput {
+    loop: Vec2[];
+    orientationBit: 0 | 1;
+    edges?: LocalUvClassifierEdgeInput[];
+    hasBadEdges?: boolean;
+}
+
+export interface LocalUvClassifierSummary {
+    mode: LocalUvClassifierMode;
+    faceIndex?: number;
+    surfaceType?: string;
+    buildLabel?: string;
+    gridPoints: number;
+    occDecisions: number;
+    localInside: number;
+    localOutside: number;
+    localUncertain: number;
+    localFallbackCalls: number;
+    boundaryBandSamples: number;
+    seamProximateSamples: number;
+    mismatchCount: number;
+    effectiveMismatchCount: number;
+    mismatchBoundaryBand: number;
+    mismatchInterior: number;
+    mismatchSeamProximate: number;
+    mismatchNonSeam: number;
+    falseInsideCount: number;
+    falseOutsideCount: number;
+}
+
 export interface TrimmedSurfaceBuildOptions {
     // Optional classifier used as the source of truth for UV inclusion.
     // Return true for points that should be considered inside/on the face.
@@ -113,7 +155,31 @@ export interface TrimmedSurfaceBuildOptions {
     preferGridForHoles?: boolean;
     // Optional label used in logs.
     logLabel?: string;
+    // Optional profiling hook for trimmed-surface sub-phases.
+    recordProfileSample?: (phase: TrimmedSurfaceProfilePhase, elapsedMs: number) => void;
+    // Optional callback to report local-vs-OCC classifier summary (shadow/candidate modes).
+    recordLocalUvClassifierSummary?: (summary: LocalUvClassifierSummary) => void;
+    // Optional wire-level UV loops (typically from OCC pcurves) used by the local classifier.
+    // When provided, these loops are preferred over the trimmed patch loops for shadow/candidate checks.
+    localUvClassifierWires?: LocalUvClassifierWireInput[];
+    // Optional metadata used in classifier summary records.
+    classifierFaceIndex?: number;
+    classifierSurfaceType?: string;
 }
+
+export type TrimmedSurfaceProfilePhase =
+    | "hole_triangulation"
+    | "hole_triangle_gate"
+    | "hole_evaluate_mesh"
+    | "gpu_classify_build"
+    | "gpu_dense_eval"
+    | "gpu_mask_classify"
+    | "gpu_mask_triangles"
+    | "cpu_grid_classify"
+    | "cpu_triangle_build"
+    | "final_evaluate_mesh"
+    | "uvmesh_gpu_eval"
+    | "uvmesh_cpu_eval";
 
 function trimDebugLog(...args: unknown[]): void {
     if ((globalThis as any)?.__TRIM_VERBOSE_LOGS__ === true) {
@@ -136,6 +202,21 @@ function readTrimNumber(key: string): number | null {
 function readTrimBoolean(key: string, fallback: boolean): boolean {
     const raw = (globalThis as any)?.[key];
     return typeof raw === "boolean" ? raw : fallback;
+}
+
+function recordTrimProfileSample(
+    buildOptions: TrimmedSurfaceBuildOptions | undefined,
+    phase: TrimmedSurfaceProfilePhase,
+    elapsedMs: number
+): void {
+    if (!Number.isFinite(elapsedMs) || elapsedMs < 0) {
+        return;
+    }
+    try {
+        buildOptions?.recordProfileSample?.(phase, elapsedMs);
+    } catch {
+        // Profiling hooks are best-effort and must never affect tessellation.
+    }
 }
 
 /**
@@ -500,7 +581,7 @@ export async function tessellateTrimmedSurface(
         continuousBoundary = uvBoundary;
         continuousHoles = uvHoles;
     }
-    const useCustomUvInside = typeof buildOptions?.uvInsideTest === 'function';
+    const useOccUvInside = typeof buildOptions?.uvInsideTest === 'function';
     const keepTriangle = buildOptions?.keepTriangle;
     const allowPartialCellTriangles = buildOptions?.allowPartialCellTriangles ?? true;
     const gridDensityU = Math.max(4, Math.floor(buildOptions?.gridDensityU ?? gridDensity));
@@ -540,6 +621,7 @@ export async function tessellateTrimmedSurface(
     // ensures hole boundary edges are preserved in the triangulation
     if (continuousHoles.length > 0 && !preferGridForHoles) {
         trimDebugLog(`[tessellateTrimmedSurface] Triangulating ${continuousHoles.length} hole loops`);
+        const holeTriangulationStart = performance.now();
 
         // If boundary is sparse (e.g., just 4 rectangle corners), densify it
         // to get better triangulation quality on curved surfaces
@@ -598,6 +680,7 @@ export async function tessellateTrimmedSurface(
             );
         }
         trimDebugLog(`[tessellateTrimmedSurface] Hole triangulation generated ${triangles.length} triangles`);
+        recordTrimProfileSample(buildOptions, "hole_triangulation", performance.now() - holeTriangulationStart);
 
         // Build combined vertex array (boundary + all holes)
         const allVertices: Vec2[] = [...denseBoundary];
@@ -624,6 +707,7 @@ export async function tessellateTrimmedSurface(
 
         const filteredTriangles: [number, number, number][] = [];
         let droppedByGate = 0;
+        const holeTriangleGateStart = performance.now();
         for (const [ia, ib, ic] of triangles) {
             const a = allVertices[ia];
             const b = allVertices[ib];
@@ -641,16 +725,23 @@ export async function tessellateTrimmedSurface(
                 droppedByGate++;
             }
         }
+        recordTrimProfileSample(buildOptions, "hole_triangle_gate", performance.now() - holeTriangleGateStart);
 
         if (filteredTriangles.length === 0) {
             console.warn(`[tessellateTrimmedSurface] Triangle gate rejected all CDT triangles; keeping original CDT output (mode=${buildLabel})`);
-            return evaluateUVMesh(surface, allVertices, triangles);
+            const holeEvalStart = performance.now();
+            const mesh = await evaluateUVMesh(surface, allVertices, triangles, buildOptions?.recordProfileSample);
+            recordTrimProfileSample(buildOptions, "hole_evaluate_mesh", performance.now() - holeEvalStart);
+            return mesh;
         }
 
         if (droppedByGate > 0) {
             trimDebugLog(`[tessellateTrimmedSurface] Triangle gate dropped ${droppedByGate}/${triangles.length} CDT triangles (mode=${buildLabel})`);
         }
-        return evaluateUVMesh(surface, allVertices, filteredTriangles);
+        const holeEvalStart = performance.now();
+        const mesh = await evaluateUVMesh(surface, allVertices, filteredTriangles, buildOptions?.recordProfileSample);
+        recordTrimProfileSample(buildOptions, "hole_evaluate_mesh", performance.now() - holeEvalStart);
+        return mesh;
     }
     // ===== End CDT with holes =====
 
@@ -672,7 +763,7 @@ export async function tessellateTrimmedSurface(
     // OCC-backed UV classifiers can be stateful on first query for a face.
     // Do a single warmup probe so classification is stable without relying on
     // debug-only probe code paths.
-    if (useCustomUvInside) {
+    if (useOccUvInside) {
         const probeU = (uMin + uMax) * 0.5;
         const probeV = (vMin + vMax) * 0.5;
         try {
@@ -728,6 +819,1226 @@ export async function tessellateTrimmedSurface(
         ? perfDisableNearBoundaryDefault
         : perfDisableNearBoundaryRaw === true;
     const skipNearBoundaryChecks = preferGeometryOnlyLoad && uvHoles.length === 0 && perfDisableNearBoundary;
+    const enableLocalUvClassifierCandidate = readTrimBoolean("__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__", false);
+    const enableLocalUvClassifierShadow = readTrimBoolean("__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__", false);
+    const localUvClassifierFallbackToOcc = readTrimBoolean("__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__", true);
+    const localUvClassifierCandidateStrict = readTrimBoolean("__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__", false);
+    const localUvClassifierBandScale = Math.max(
+        0,
+        readTrimNumber("__LOCAL_UV_CLASSIFIER_BOUNDARY_BAND_SCALE__") ?? 1
+    );
+    const localUvBoundaryTolerance = Math.max(0, boundaryTolerance * localUvClassifierBandScale);
+    const localUvSeamTolerance = Math.max(
+        localUvBoundaryTolerance,
+        Math.max(du, dv) * 1.5,
+        1e-4
+    );
+    const enableLocalUvFaceClassifierFallback = readTrimBoolean("__ENABLE_LOCAL_UV_FACE_CLASSIFIER_FALLBACK__", true);
+    const useLocalUvClassifierShadow = useOccUvInside && enableLocalUvClassifierShadow;
+    const useLocalUvClassifierCandidate = useOccUvInside && enableLocalUvClassifierCandidate;
+    const localUvClassifierStats = {
+        inside: 0,
+        outside: 0,
+        uncertain: 0,
+        fallbackCalls: 0,
+        occDecisions: 0,
+        boundaryBandSamples: 0,
+        seamProximateSamples: 0,
+        mismatchCount: 0,
+        effectiveMismatchCount: 0,
+        mismatchBoundaryBand: 0,
+        mismatchInterior: 0,
+        mismatchSeamProximate: 0,
+        mismatchNonSeam: 0,
+        falseInsideCount: 0,
+        falseOutsideCount: 0,
+    };
+
+    type LocalUvDecision = "inside" | "outside" | "uncertain";
+    interface LocalUvClassification {
+        decision: LocalUvDecision;
+        nearBoundaryBand: boolean;
+        seamProximate: boolean;
+    }
+
+    type LoopPointRelation = "inside" | "outside" | "on";
+    interface PreparedLoopClassifier {
+        pointsX: number[];
+        pointsY: number[];
+        pointCount: number;
+        uMin: number;
+        uMax: number;
+        vMin: number;
+        vMax: number;
+        uRange: number;
+        vRange: number;
+        tolUOriginal: number;
+        tolVOriginal: number;
+        tolUNormalized: number;
+        tolVNormalized: number;
+    }
+    const classifierPointEpsilon = Math.max(
+        1e-6,
+        Math.min(5e-3, Math.max(du, dv) * 0.02)
+    );
+
+    const normalizeLoopForClassifier = (loop: Vec2[]): Vec2[] => {
+        const normalized: Vec2[] = [];
+        for (const [u, v] of loop) {
+            if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
+            if (normalized.length === 0) {
+                normalized.push([u, v]);
+                continue;
+            }
+            const [prevU, prevV] = normalized[normalized.length - 1];
+            if (Math.abs(u - prevU) <= classifierPointEpsilon && Math.abs(v - prevV) <= classifierPointEpsilon) {
+                continue;
+            }
+            normalized.push([u, v]);
+        }
+        if (normalized.length > 1) {
+            const [firstU, firstV] = normalized[0];
+            const [lastU, lastV] = normalized[normalized.length - 1];
+            if (
+                Math.abs(firstU - lastU) <= classifierPointEpsilon &&
+                Math.abs(firstV - lastV) <= classifierPointEpsilon
+            ) {
+                normalized.pop();
+            }
+        }
+        return normalized;
+    };
+
+    const normalizeEdgePointsForClassifier = (points: Vec2[]): Vec2[] => {
+        const normalized: Vec2[] = [];
+        for (const [u, v] of points) {
+            if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
+            if (normalized.length === 0) {
+                normalized.push([u, v]);
+                continue;
+            }
+            const [prevU, prevV] = normalized[normalized.length - 1];
+            if (Math.abs(u - prevU) <= classifierPointEpsilon && Math.abs(v - prevV) <= classifierPointEpsilon) {
+                continue;
+            }
+            normalized.push([u, v]);
+        }
+        return normalized;
+    };
+
+    const unwrapLoopPeriodicUForClassifier = (loop: Vec2[], period: number): Vec2[] => {
+        if (loop.length === 0 || !Number.isFinite(period) || period <= 1e-9) {
+            return loop;
+        }
+        const unwrapped: Vec2[] = [[loop[0][0], loop[0][1]]];
+        let prevU = loop[0][0];
+        for (let i = 1; i < loop.length; i++) {
+            const [uRaw, v] = loop[i];
+            let bestU = uRaw;
+            let bestDelta = Math.abs(bestU - prevU);
+            const baseShift = Math.round((prevU - uRaw) / period);
+            for (const offset of [-1, 0, 1]) {
+                const candidateU = uRaw + (baseShift + offset) * period;
+                const candidateDelta = Math.abs(candidateU - prevU);
+                if (candidateDelta < bestDelta) {
+                    bestDelta = candidateDelta;
+                    bestU = candidateU;
+                }
+            }
+            unwrapped.push([bestU, v]);
+            prevU = bestU;
+        }
+        return unwrapped;
+    };
+
+    const transformToNormalized = (value: number, min: number, range: number): number => {
+        return range > 1e-10 ? (value - min) / range : value;
+    };
+
+    const buildPreparedLoopClassifier = (
+        loop: Vec2[],
+        domain: { uMin: number; uMax: number; vMin: number; vMax: number },
+        tolUOriginal: number,
+        tolVOriginal: number
+    ): PreparedLoopClassifier | null => {
+        if (loop.length < 3) return null;
+        const uRange = domain.uMax - domain.uMin;
+        const vRange = domain.vMax - domain.vMin;
+        const pointCount = loop.length;
+        const pointsX = new Array(pointCount + 1);
+        const pointsY = new Array(pointCount + 1);
+        for (let i = 0; i < pointCount; i++) {
+            pointsX[i] = transformToNormalized(loop[i][0], domain.uMin, uRange);
+            pointsY[i] = transformToNormalized(loop[i][1], domain.vMin, vRange);
+        }
+        pointsX[pointCount] = pointsX[0];
+        pointsY[pointCount] = pointsY[0];
+        const tolUNormalized = uRange > 1e-10 ? tolUOriginal / uRange : tolUOriginal;
+        const tolVNormalized = vRange > 1e-10 ? tolVOriginal / vRange : tolVOriginal;
+        return {
+            pointsX,
+            pointsY,
+            pointCount,
+            uMin: domain.uMin,
+            uMax: domain.uMax,
+            vMin: domain.vMin,
+            vMax: domain.vMax,
+            uRange,
+            vRange,
+            tolUOriginal,
+            tolVOriginal,
+            tolUNormalized,
+            tolVNormalized,
+        };
+    };
+
+    const internalWindingInside = (classifier: PreparedLoopClassifier, px: number, py: number): boolean => {
+        let windingNumber = 0;
+        for (let nextIdx = 1; nextIdx <= classifier.pointCount; nextIdx++) {
+            const prevIdx = nextIdx - 1;
+            const x1 = classifier.pointsX[prevIdx];
+            const y1 = classifier.pointsY[prevIdx];
+            const x2 = classifier.pointsX[nextIdx];
+            const y2 = classifier.pointsY[nextIdx];
+            const cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
+            if (y1 <= py) {
+                if (y2 > py && cross > 0) {
+                    windingNumber++;
+                }
+            } else if (y2 <= py && cross < 0) {
+                windingNumber--;
+            }
+        }
+        return windingNumber !== 0;
+    };
+
+    const internalOddEvenWithOnDetection = (
+        classifier: PreparedLoopClassifier,
+        px: number,
+        py: number
+    ): LoopPointRelation => {
+        let windingNumber = 0;
+        const tolU = classifier.tolUNormalized;
+        const tolV = classifier.tolVNormalized;
+        const baseCrossTol = Math.max(tolU, tolV, 1e-9);
+
+        for (let nextIdx = 1; nextIdx <= classifier.pointCount; nextIdx++) {
+            const prevIdx = nextIdx - 1;
+            const x1 = classifier.pointsX[prevIdx];
+            const y1 = classifier.pointsY[prevIdx];
+            const x2 = classifier.pointsX[nextIdx];
+            const y2 = classifier.pointsY[nextIdx];
+
+            const segDx = x2 - x1;
+            const segDy = y2 - y1;
+            const segLenSq = segDx * segDx + segDy * segDy;
+            if (segLenSq > 1e-16) {
+                const t = Math.max(0, Math.min(1, ((px - x1) * segDx + (py - y1) * segDy) / segLenSq));
+                const qx = x1 + t * segDx;
+                const qy = y1 + t * segDy;
+                if (Math.abs(px - qx) <= tolU && Math.abs(py - qy) <= tolV) {
+                    return "on";
+                }
+            } else if (Math.abs(px - x1) <= tolU && Math.abs(py - y1) <= tolV) {
+                return "on";
+            }
+
+            const cross = segDx * (py - y1) - segDy * (px - x1);
+            const crossTol = baseCrossTol * (Math.hypot(segDx, segDy) + 1);
+            if (Math.abs(cross) <= crossTol) {
+                const minX = Math.min(x1, x2) - tolU;
+                const maxX = Math.max(x1, x2) + tolU;
+                const minY = Math.min(y1, y2) - tolV;
+                const maxY = Math.max(y1, y2) + tolV;
+                if (px >= minX && px <= maxX && py >= minY && py <= maxY) {
+                    return "on";
+                }
+            }
+
+            if (y1 <= py) {
+                if (y2 > py && cross > crossTol) {
+                    windingNumber++;
+                }
+            } else if (y2 <= py && cross < -crossTol) {
+                windingNumber--;
+            }
+        }
+
+        const isInside = windingNumber !== 0;
+        if (tolU > 0 || tolV > 0) {
+            const cornerInsideA = internalWindingInside(
+                classifier,
+                px - tolU,
+                py - tolV
+            );
+            const cornerInsideB = internalWindingInside(
+                classifier,
+                px + tolU,
+                py - tolV
+            );
+            const cornerInsideC = internalWindingInside(
+                classifier,
+                px - tolU,
+                py + tolV
+            );
+            const cornerInsideD = internalWindingInside(
+                classifier,
+                px + tolU,
+                py + tolV
+            );
+            if (
+                cornerInsideA !== isInside ||
+                cornerInsideB !== isInside ||
+                cornerInsideC !== isInside ||
+                cornerInsideD !== isInside
+            ) {
+                return "on";
+            }
+        }
+
+        return isInside ? "inside" : "outside";
+    };
+
+    const classifyPointAgainstLoop = (
+        point: Vec2,
+        classifier: PreparedLoopClassifier | null
+    ): LoopPointRelation => {
+        if (!classifier || classifier.pointCount < 3) return "outside";
+        const [u, v] = point;
+        if (
+            u < classifier.uMin - classifier.tolUOriginal ||
+            u > classifier.uMax + classifier.tolUOriginal ||
+            v < classifier.vMin - classifier.tolVOriginal ||
+            v > classifier.vMax + classifier.tolVOriginal
+        ) {
+            return "outside";
+        }
+        const px = transformToNormalized(u, classifier.uMin, classifier.uRange);
+        const py = transformToNormalized(v, classifier.vMin, classifier.vRange);
+        return internalOddEvenWithOnDetection(classifier, px, py);
+    };
+
+    const orientation2D = (a: Vec2, b: Vec2, c: Vec2): number => {
+        return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    };
+
+    const loopsEdgeIntersects = (a1: Vec2, a2: Vec2, b1: Vec2, b2: Vec2, tol: number): boolean => {
+        const onSegment = (p: Vec2, q: Vec2, r: Vec2): boolean => {
+            return (
+                r[0] >= Math.min(p[0], q[0]) - tol &&
+                r[0] <= Math.max(p[0], q[0]) + tol &&
+                r[1] >= Math.min(p[1], q[1]) - tol &&
+                r[1] <= Math.max(p[1], q[1]) + tol
+            );
+        };
+        const o1 = orientation2D(a1, a2, b1);
+        const o2 = orientation2D(a1, a2, b2);
+        const o3 = orientation2D(b1, b2, a1);
+        const o4 = orientation2D(b1, b2, a2);
+        const s1 = Math.abs(o1) <= tol ? 0 : Math.sign(o1);
+        const s2 = Math.abs(o2) <= tol ? 0 : Math.sign(o2);
+        const s3 = Math.abs(o3) <= tol ? 0 : Math.sign(o3);
+        const s4 = Math.abs(o4) <= tol ? 0 : Math.sign(o4);
+        if (s1 * s2 < 0 && s3 * s4 < 0) {
+            return true;
+        }
+        if (s1 === 0 && onSegment(a1, a2, b1)) return true;
+        if (s2 === 0 && onSegment(a1, a2, b2)) return true;
+        if (s3 === 0 && onSegment(b1, b2, a1)) return true;
+        if (s4 === 0 && onSegment(b1, b2, a2)) return true;
+        return false;
+    };
+
+    const hasSelfIntersections = (loop: Vec2[], tol: number): boolean => {
+        const n = loop.length;
+        if (n < 4) return false;
+        for (let i = 0; i < n; i++) {
+            const a1 = loop[i];
+            const a2 = loop[(i + 1) % n];
+            for (let j = i + 1; j < n; j++) {
+                if (j === i) continue;
+                if ((j + 1) % n === i || (i + 1) % n === j) continue;
+                const b1 = loop[j];
+                const b2 = loop[(j + 1) % n];
+                if (loopsEdgeIntersects(a1, a2, b1, b2, tol)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    };
+
+    const computeLoopBounds = (loop: Vec2[]): { uMin: number; uMax: number; vMin: number; vMax: number } => {
+        let uMinLocal = Infinity;
+        let uMaxLocal = -Infinity;
+        let vMinLocal = Infinity;
+        let vMaxLocal = -Infinity;
+        for (const [u, v] of loop) {
+            if (u < uMinLocal) uMinLocal = u;
+            if (u > uMaxLocal) uMaxLocal = u;
+            if (v < vMinLocal) vMinLocal = v;
+            if (v > vMaxLocal) vMaxLocal = v;
+        }
+        return {
+            uMin: uMinLocal,
+            uMax: uMaxLocal,
+            vMin: vMinLocal,
+            vMax: vMaxLocal,
+        };
+    };
+
+    // For local-vs-OCC parity, prefer raw UV loops (before continuity seam rewrites).
+    // OCCT classifiers evaluate wires in their own periodic domains instead of a
+    // globally unwrapped loop.
+    const rawOuterClassifierLoopBase = normalizeLoopForClassifier(uvBoundary);
+    const rawHoleClassifierLoopsBase = uvHoles
+        .map((hole) => normalizeLoopForClassifier(hole))
+        .filter((hole) => hole.length >= 3);
+    const rawOuterClassifierLoop = hasDiscontinuity
+        ? unwrapLoopPeriodicUForClassifier(rawOuterClassifierLoopBase, 2 * PI)
+        : rawOuterClassifierLoopBase;
+    const rawHoleClassifierLoops = hasDiscontinuity
+        ? rawHoleClassifierLoopsBase.map((hole) => unwrapLoopPeriodicUForClassifier(hole, 2 * PI))
+        : rawHoleClassifierLoopsBase;
+    const normalizedOuterClassifierLoop = normalizeLoopForClassifier(continuousBoundary);
+    const fallbackOuterClassifierLoop =
+        normalizedOuterClassifierLoop.length >= 3 ? normalizedOuterClassifierLoop : continuousBoundary;
+    const fallbackHoleClassifierLoops = continuousHoles
+        .map((hole) => normalizeLoopForClassifier(hole))
+        .filter((hole) => hole.length >= 3);
+
+    const defaultOuterClassifierLoop =
+        rawOuterClassifierLoop.length >= 3 ? rawOuterClassifierLoop : fallbackOuterClassifierLoop;
+    const defaultHoleClassifierLoops = rawHoleClassifierLoops.length > 0
+        ? rawHoleClassifierLoops
+        : fallbackHoleClassifierLoops;
+
+    interface ClassifierWireSpec {
+        loop: Vec2[];
+        orientationBit: 0 | 1;
+        edges?: LocalUvClassifierEdgeInput[];
+        hasBadEdges?: boolean;
+    }
+
+    const defaultClassifierWireSpecs: ClassifierWireSpec[] = [];
+    if (defaultOuterClassifierLoop.length >= 3) {
+        defaultClassifierWireSpecs.push({
+            loop: defaultOuterClassifierLoop,
+            orientationBit: 1,
+        });
+    }
+    for (const holeLoop of defaultHoleClassifierLoops) {
+        if (holeLoop.length < 3) continue;
+        defaultClassifierWireSpecs.push({
+            loop: holeLoop,
+            orientationBit: 0,
+        });
+    }
+
+    const customClassifierWireSpecs: ClassifierWireSpec[] = [];
+    const customClassifierWires = buildOptions?.localUvClassifierWires ?? [];
+    for (const wire of customClassifierWires) {
+        if (!wire || !Array.isArray(wire.loop)) continue;
+        const normalizedBase = normalizeLoopForClassifier(wire.loop);
+        const normalizedLoop = hasDiscontinuity
+            ? unwrapLoopPeriodicUForClassifier(normalizedBase, 2 * PI)
+            : normalizedBase;
+        if (normalizedLoop.length < 3) continue;
+        customClassifierWireSpecs.push({
+            loop: normalizedLoop,
+            orientationBit: wire.orientationBit === 0 ? 0 : 1,
+            edges: Array.isArray(wire.edges)
+                ? wire.edges
+                    .map((edge) => {
+                        const pointsBase = normalizeEdgePointsForClassifier(edge?.points ?? []);
+                        const points = hasDiscontinuity
+                            ? unwrapLoopPeriodicUForClassifier(pointsBase, 2 * PI)
+                            : pointsBase;
+                        if (points.length < 2) return null;
+                        return {
+                            points,
+                            vertexToleranceMax:
+                                typeof edge.vertexToleranceMax === "number" && Number.isFinite(edge.vertexToleranceMax)
+                                    ? edge.vertexToleranceMax
+                                    : undefined,
+                            hasHighVertexTolerance: edge.hasHighVertexTolerance === true,
+                            isDegenerate: edge.isDegenerate === true,
+                        } satisfies LocalUvClassifierEdgeInput;
+                    })
+                    .filter((edge): edge is LocalUvClassifierEdgeInput => edge != null)
+                : undefined,
+            hasBadEdges: wire.hasBadEdges === true,
+        });
+    }
+
+    const classifierWireSpecs =
+        customClassifierWireSpecs.length > 0 ? customClassifierWireSpecs : defaultClassifierWireSpecs;
+
+    const loopPerimeter = (loop: Vec2[]): number => {
+        if (loop.length < 2) return 0;
+        let total = 0;
+        for (let i = 0; i < loop.length; i++) {
+            const a = loop[i];
+            const b = loop[(i + 1) % loop.length];
+            total += Math.hypot(b[0] - a[0], b[1] - a[1]);
+        }
+        return total;
+    };
+
+    let outerClassifierLoop = defaultOuterClassifierLoop;
+    const explicitOuterWires = classifierWireSpecs.filter((wire) => wire.orientationBit === 1);
+    const outerCandidates = explicitOuterWires.length > 0 ? explicitOuterWires : classifierWireSpecs;
+    if (outerCandidates.length > 0) {
+        outerClassifierLoop = outerCandidates[0].loop;
+        let bestPerimeter = loopPerimeter(outerClassifierLoop);
+        for (let i = 1; i < outerCandidates.length; i++) {
+            const candidateLoop = outerCandidates[i].loop;
+            const candidatePerimeter = loopPerimeter(candidateLoop);
+            if (candidatePerimeter > bestPerimeter) {
+                bestPerimeter = candidatePerimeter;
+                outerClassifierLoop = candidateLoop;
+            }
+        }
+    }
+    const holeClassifierLoops = classifierWireSpecs
+        .filter((wire) => wire.orientationBit === 0 && wire.loop !== outerClassifierLoop)
+        .map((wire) => wire.loop);
+
+    const outerClassifierBounds = computeLoopBounds(outerClassifierLoop);
+    const outerClassifierUMin = outerClassifierBounds.uMin;
+    const outerClassifierUMax = outerClassifierBounds.uMax;
+
+    let classifierDomainUMin = outerClassifierBounds.uMin;
+    let classifierDomainUMax = outerClassifierBounds.uMax;
+    let classifierDomainVMin = outerClassifierBounds.vMin;
+    let classifierDomainVMax = outerClassifierBounds.vMax;
+    const updateClassifierDomain = (bounds: { uMin: number; uMax: number; vMin: number; vMax: number }): void => {
+        if (bounds.uMin < classifierDomainUMin) classifierDomainUMin = bounds.uMin;
+        if (bounds.uMax > classifierDomainUMax) classifierDomainUMax = bounds.uMax;
+        if (bounds.vMin < classifierDomainVMin) classifierDomainVMin = bounds.vMin;
+        if (bounds.vMax > classifierDomainVMax) classifierDomainVMax = bounds.vMax;
+    };
+    for (const wire of classifierWireSpecs) {
+        updateClassifierDomain(computeLoopBounds(wire.loop));
+    }
+    if (!Number.isFinite(classifierDomainUMin) || !Number.isFinite(classifierDomainVMin)) {
+        classifierDomainUMin = outerClassifierUMin;
+        classifierDomainUMax = outerClassifierUMax;
+        classifierDomainVMin = vMin;
+        classifierDomainVMax = vMax;
+    }
+    const classifierLoopToleranceU = Math.max(1e-7, classifierPointEpsilon);
+    const classifierLoopToleranceV = Math.max(1e-7, classifierPointEpsilon);
+    const classifierPreparationFailed = outerClassifierLoop.length < 3;
+    const outerClassifierUSpan = Math.max(1e-9, outerClassifierUMax - outerClassifierUMin);
+    const periodicEdgeBand = Math.max(
+        localUvBoundaryTolerance * 2,
+        Math.min(
+            outerClassifierUSpan * 0.2,
+            Math.max(
+                0.05,
+                readTrimNumber("__LOCAL_UV_CLASSIFIER_PERIODIC_EDGE_BAND__") ?? 0.2
+            )
+        )
+    );
+    const isNearClassifierUSeam = (uRaw: number): boolean => {
+        if (!hasDiscontinuity) return false;
+        return (
+            uRaw <= outerClassifierUMin + periodicEdgeBand ||
+            uRaw >= outerClassifierUMax - periodicEdgeBand
+        );
+    };
+    const surfaceTypeForClassifier = buildOptions?.classifierSurfaceType ?? "";
+    const useLocalUvTopologicalFallback =
+        enableLocalUvFaceClassifierFallback &&
+        surfaceTypeForClassifier === "Cone" &&
+        useLocalUvClassifierShadow;
+    const classifierLoopsForSafety = classifierWireSpecs.length > 0
+        ? classifierWireSpecs.map((wire) => wire.loop)
+        : [outerClassifierLoop, ...holeClassifierLoops];
+    const coneClassifierDomainUnsafe =
+        surfaceTypeForClassifier === "Cone" &&
+        classifierLoopsForSafety.some((loop) => hasSelfIntersections(loop, classifierPointEpsilon));
+    const localClassifierDomainUnsafe = classifierPreparationFailed || coneClassifierDomainUnsafe;
+
+    const distancePointToLoop = (point: Vec2, loop: Vec2[]): number => {
+        if (loop.length < 2) return Infinity;
+        const [px, py] = point;
+        let minDistSq = Infinity;
+        for (let i = 0; i < loop.length; i++) {
+            const [x1, y1] = loop[i];
+            const [x2, y2] = loop[(i + 1) % loop.length];
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const lenSq = dx * dx + dy * dy;
+            let cx = x1;
+            let cy = y1;
+            if (lenSq > 1e-14) {
+                let t = ((px - x1) * dx + (py - y1) * dy) / lenSq;
+                t = Math.max(0, Math.min(1, t));
+                cx = x1 + t * dx;
+                cy = y1 + t * dy;
+            }
+            const distSq = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+            if (distSq < minDistSq) minDistSq = distSq;
+        }
+        return Math.sqrt(minDistSq);
+    };
+
+    interface LocalClassifierWire {
+        loop: Vec2[];
+        edges: LocalUvClassifierEdgeInput[];
+        prepared: PreparedLoopClassifier;
+        orientationBit: 0 | 1;
+        bounds: { uMin: number; uMax: number; vMin: number; vMax: number };
+        hasBadEdges: boolean;
+    }
+
+    interface LocalUvCandidateEval {
+        decision: LocalUvDecision;
+        nearBoundaryBand: boolean;
+        minBoundaryDistance: number;
+        badWire: boolean;
+    }
+
+    const localClassifierWires: LocalClassifierWire[] = [];
+    const addClassifierWire = (
+        loop: Vec2[],
+        orientationBit: 0 | 1,
+        edges: LocalUvClassifierEdgeInput[] | undefined,
+        hasBadEdgesHint: boolean | undefined
+    ): void => {
+        if (loop.length < 3) return;
+        const bounds = computeLoopBounds(loop);
+        if (!Number.isFinite(bounds.uMin) || !Number.isFinite(bounds.vMin)) return;
+        const prepared = buildPreparedLoopClassifier(
+            loop,
+            bounds,
+            classifierLoopToleranceU,
+            classifierLoopToleranceV
+        );
+        if (!prepared) return;
+        localClassifierWires.push({
+            loop,
+            edges: Array.isArray(edges) ? edges.filter((edge) => Array.isArray(edge.points) && edge.points.length >= 2) : [],
+            prepared,
+            orientationBit,
+            bounds,
+            hasBadEdges:
+                hasBadEdgesHint === true ||
+                (Array.isArray(edges) &&
+                    edges.some((edge) => edge.hasHighVertexTolerance === true || edge.isDegenerate === true)),
+        });
+    };
+    for (const wire of classifierWireSpecs) {
+        addClassifierWire(wire.loop, wire.orientationBit, wire.edges, wire.hasBadEdges);
+    }
+
+    const evaluateLocalUvCandidate = (u: number, v: number): LocalUvCandidateEval => {
+        const point: Vec2 = [u, v];
+        let minBoundaryDistance = Infinity;
+        let forceOutside = false;
+        let badWire = false;
+
+        for (const wire of localClassifierWires) {
+            if (wire.hasBadEdges) {
+                badWire = true;
+            }
+            const relation = classifyPointAgainstLoop(point, wire.prepared);
+            const boundaryDistance = distancePointToLoop(point, wire.loop);
+            if (boundaryDistance < minBoundaryDistance) {
+                minBoundaryDistance = boundaryDistance;
+            }
+            if (relation === "on") {
+                return {
+                    decision: "uncertain",
+                    nearBoundaryBand: true,
+                    minBoundaryDistance,
+                    badWire,
+                };
+            }
+            if (
+                (relation === "inside" && wire.orientationBit === 0) ||
+                (relation === "outside" && wire.orientationBit === 1)
+            ) {
+                forceOutside = true;
+            }
+        }
+
+        const nearBoundaryBand =
+            !skipNearBoundaryChecks &&
+            localUvBoundaryTolerance > classifierPointEpsilon &&
+            minBoundaryDistance <= localUvBoundaryTolerance;
+        if (nearBoundaryBand) {
+            return {
+                decision: "uncertain",
+                nearBoundaryBand: true,
+                minBoundaryDistance,
+                badWire,
+            };
+        }
+
+        return {
+            decision: forceOutside ? "outside" : "inside",
+            nearBoundaryBand: false,
+            minBoundaryDistance,
+            badWire,
+        };
+    };
+
+    const classifyPointAgainstWireByDirection = (
+        point: Vec2,
+        wire: LocalClassifierWire,
+        dir: Vec2,
+        options?: { edgeToleranceScale?: number }
+    ): LoopPointRelation => {
+        const [px, py] = point;
+        const edgeToleranceScale = Math.max(0.01, options?.edgeToleranceScale ?? 1);
+        const tolU = Math.max(
+            1e-8,
+            Math.max(classifierPointEpsilon, wire.prepared.tolUOriginal) * edgeToleranceScale
+        );
+        const tolV = Math.max(
+            1e-8,
+            Math.max(classifierPointEpsilon, wire.prepared.tolVOriginal) * edgeToleranceScale
+        );
+
+        if (
+            px < wire.bounds.uMin - tolU ||
+            px > wire.bounds.uMax + tolU ||
+            py < wire.bounds.vMin - tolV ||
+            py > wire.bounds.vMax + tolV
+        ) {
+            return "outside";
+        }
+
+        const [dx, dy] = dir;
+        const rayLen = Math.hypot(dx, dy);
+        if (rayLen <= 1e-12) {
+            return "outside";
+        }
+        const ux = dx / rayLen;
+        const uy = dy / rayLen;
+        const nx = -uy;
+        const ny = ux;
+        type IntersectionHit = {
+            x: number;
+            transition: 1 | -1;
+            nearVertex: boolean;
+            highTolVertex: boolean;
+        };
+        const hits: IntersectionHit[] = [];
+        const edgeChains = wire.edges.length > 0
+            ? wire.edges
+            : [{ points: wire.loop, vertexToleranceMax: undefined, hasHighVertexTolerance: false, isDegenerate: false }];
+        for (const edge of edgeChains) {
+            const edgePoints = edge.points;
+            if (!Array.isArray(edgePoints) || edgePoints.length < 2) {
+                continue;
+            }
+            const edgeTolRaw =
+                typeof edge.vertexToleranceMax === "number" && Number.isFinite(edge.vertexToleranceMax)
+                    ? edge.vertexToleranceMax
+                    : 0;
+            const edgeTol = Math.max(0, edgeTolRaw);
+            const edgeTolU = Math.max(tolU, edgeTol);
+            const edgeTolV = Math.max(tolV, edgeTol);
+            for (let i = 0; i < edgePoints.length - 1; i++) {
+                const a = edgePoints[i];
+                const b = edgePoints[i + 1];
+                const aRelX = a[0] - px;
+                const aRelY = a[1] - py;
+                const bRelX = b[0] - px;
+                const bRelY = b[1] - py;
+                const ax = aRelX * ux + aRelY * uy;
+                const ay = aRelX * nx + aRelY * ny;
+                const bx = bRelX * ux + bRelY * uy;
+                const by = bRelX * nx + bRelY * ny;
+
+                const segDx = bx - ax;
+                const segDy = by - ay;
+                const segLen2 = segDx * segDx + segDy * segDy;
+                if (segLen2 > 1e-16) {
+                    const t = Math.max(0, Math.min(1, ((-ax) * segDx + (-ay) * segDy) / segLen2));
+                    const qx = ax + t * segDx;
+                    const qy = ay + t * segDy;
+                    if (Math.abs(qx) <= edgeTolU && Math.abs(qy) <= edgeTolV) {
+                        return "on";
+                    }
+                } else if (Math.abs(ax) <= edgeTolU && Math.abs(ay) <= edgeTolV) {
+                    return "on";
+                }
+
+                // Ignore horizontal segments for crossing count.
+                if (Math.abs(by - ay) <= edgeTolV) {
+                    continue;
+                }
+                // Half-open vertical test avoids double counting shared vertices.
+                const y1 = ay;
+                const y2 = by;
+                const crosses =
+                    (y1 <= 0 && y2 > 0) ||
+                    (y2 <= 0 && y1 > 0);
+                if (!crosses) continue;
+
+                const xIntersect = ax + ((-ay) * (bx - ax)) / (by - ay);
+                if (Math.abs(xIntersect) <= edgeTolU) {
+                    return "on";
+                }
+                if (xIntersect > edgeTolU) {
+                    const t = (-ay) / (by - ay);
+                    const nearVertexTol = Math.max(1e-6, edgeTolV / (Math.abs(by - ay) + 1e-9));
+                    const nearVertex = t <= nearVertexTol || t >= 1 - nearVertexTol;
+                    hits.push({
+                        x: xIntersect,
+                        transition: by > ay ? 1 : -1,
+                        nearVertex,
+                        highTolVertex: edge.hasHighVertexTolerance === true,
+                    });
+                }
+            }
+        }
+
+        if (hits.length === 0) {
+            return "outside";
+        }
+        hits.sort((a, b) => a.x - b.x);
+
+        const closestBandTol = Math.max(tolU * 8, 1e-6);
+        const hitBundles: IntersectionHit[][] = [];
+        for (const hit of hits) {
+            const last = hitBundles[hitBundles.length - 1];
+            if (!last || Math.abs(hit.x - last[0].x) > closestBandTol) {
+                hitBundles.push([hit]);
+            } else {
+                last.push(hit);
+            }
+        }
+        const isUnstableBundle = (bundle: IntersectionHit[]): boolean =>
+            bundle.length > 0 && bundle.every((hit) => hit.nearVertex && hit.highTolVertex);
+
+        // OCCT CheckSkip analogue:
+        // if the leading intersection bundle is entirely unstable (high-tolerance
+        // near-vertex), bridge to the next bundle before classification.
+        let bundleIndex = 0;
+        while (bundleIndex < hitBundles.length - 1 && isUnstableBundle(hitBundles[bundleIndex])) {
+            bundleIndex++;
+        }
+        const closestHits = hitBundles[bundleIndex] ?? hitBundles[0];
+
+        // OCCT-style "skip bridge" analogue:
+        // near-vertex hits from high-tolerance vertices are often unstable; prefer
+        // robust crossings in the same closest-hit bundle when available.
+        let closestTransitionAcc = 0;
+        let closestCrossingCount = 0;
+        for (const hit of closestHits) {
+            const skip = hit.nearVertex && hit.highTolVertex && closestHits.length > 1;
+            if (skip) continue;
+            closestTransitionAcc += hit.transition;
+            closestCrossingCount++;
+        }
+        if (closestCrossingCount === 0) {
+            for (const hit of closestHits) {
+                closestTransitionAcc += hit.transition;
+                closestCrossingCount++;
+            }
+        }
+        if (closestTransitionAcc > 0) return "inside";
+        if (closestTransitionAcc < 0) return "outside";
+        if (closestTransitionAcc === 0 && closestCrossingCount > 1) {
+            return "on";
+        }
+
+        let transitionAcc = 0;
+        for (const hit of hits) {
+            transitionAcc += hit.transition;
+        }
+        if (transitionAcc > 0) return "inside";
+        if (transitionAcc < 0) return "outside";
+
+        // Transition accumulator is a better proxy for in/out on pathological wires;
+        // parity is used as a fallback when transitions cancel to zero.
+        return (hits.length & 1) !== 0 ? "inside" : "outside";
+    };
+
+    const classifyPointAgainstWireByTransitions = (
+        point: Vec2,
+        wire: LocalClassifierWire
+    ): LoopPointRelation => {
+        // OCCT-inspired probing constants from FaceExplorer.cxx
+        const probeStart = 0.123;
+        const probeEnd = 0.7;
+        const probeStep = 0.2111;
+        const smallAngleSin = 0.001;
+
+        const probeDirections: Vec2[] = [];
+        const edgeToleranceScale = Math.max(
+            0.01,
+            readTrimNumber("__LOCAL_UV_TRANSITION_EDGE_TOL_SCALE__") ?? 0.25
+        );
+        const [px, py] = point;
+        for (let i = 0; i < wire.loop.length; i++) {
+            const a = wire.loop[i];
+            const b = wire.loop[(i + 1) % wire.loop.length];
+            const ex = b[0] - a[0];
+            const ey = b[1] - a[1];
+            const eLen = Math.hypot(ex, ey);
+            if (eLen <= 1e-12) continue;
+            const etx = ex / eLen;
+            const ety = ey / eLen;
+
+            for (let t = probeStart; t < probeEnd && probeDirections.length < 4; t += probeStep) {
+                const sx = a[0] * t + b[0] * (1 - t);
+                const sy = a[1] * t + b[1] * (1 - t);
+                const vx = sx - px;
+                const vy = sy - py;
+                const vLen = Math.hypot(vx, vy);
+                if (vLen <= 1e-12) continue;
+                const vtx = vx / vLen;
+                const vty = vy / vLen;
+                const sinA = Math.abs(etx * vty - ety * vtx);
+                if (sinA < smallAngleSin) continue;
+                probeDirections.push([vtx, vty]);
+            }
+            if (probeDirections.length >= 4) break;
+        }
+        if (probeDirections.length === 0) {
+            probeDirections.push([1, 0]);
+        }
+
+        let insideVotes = 0;
+        let outsideVotes = 0;
+        for (const direction of probeDirections) {
+            const relation = classifyPointAgainstWireByDirection(point, wire, direction, {
+                edgeToleranceScale,
+            });
+            if (relation === "on") {
+                return "on";
+            }
+            if (relation === "inside") insideVotes++;
+            else outsideVotes++;
+        }
+        if (insideVotes === 0 && outsideVotes === 0) return "on";
+        if (insideVotes > outsideVotes) return "inside";
+        if (outsideVotes > insideVotes) return "outside";
+
+        return "on";
+    };
+
+    const evaluateLocalUvCandidateByWireTransitions = (
+        u: number,
+        v: number,
+        options?: { allowBoundaryBandUncertain?: boolean }
+    ): LocalUvCandidateEval => {
+        const point: Vec2 = [u, v];
+        let minBoundaryDistance = Infinity;
+        let forceOutside = false;
+        let badWire = false;
+
+        for (const wire of localClassifierWires) {
+            if (wire.hasBadEdges) {
+                badWire = true;
+            }
+            const relation = classifyPointAgainstWireByTransitions(point, wire);
+            const boundaryDistance = distancePointToLoop(point, wire.loop);
+            if (boundaryDistance < minBoundaryDistance) {
+                minBoundaryDistance = boundaryDistance;
+            }
+            if (relation === "on") {
+                return {
+                    decision: "uncertain",
+                    nearBoundaryBand: true,
+                    minBoundaryDistance,
+                    badWire,
+                };
+            }
+            if (
+                (relation === "inside" && wire.orientationBit === 0) ||
+                (relation === "outside" && wire.orientationBit === 1)
+            ) {
+                forceOutside = true;
+            }
+        }
+
+        const nearBoundaryBand =
+            !skipNearBoundaryChecks &&
+            localUvBoundaryTolerance > classifierPointEpsilon &&
+            minBoundaryDistance <= localUvBoundaryTolerance;
+        const allowBoundaryBandUncertain = options?.allowBoundaryBandUncertain ?? true;
+        if (nearBoundaryBand && allowBoundaryBandUncertain) {
+            return {
+                decision: "uncertain",
+                nearBoundaryBand: true,
+                minBoundaryDistance,
+                badWire,
+            };
+        }
+
+        return {
+            decision: forceOutside ? "outside" : "inside",
+            nearBoundaryBand,
+            minBoundaryDistance,
+            badWire,
+        };
+    };
+
+    const recadrePeriodic = (value: number, minValue: number, period: number): number => {
+        if (period <= 1e-12 || !Number.isFinite(value) || !Number.isFinite(minValue)) {
+            return value;
+        }
+        let recadred = value;
+        if (recadred < minValue) {
+            while (recadred < minValue) {
+                recadred += period;
+            }
+            return recadred;
+        }
+        while (recadred >= minValue) {
+            recadred -= period;
+        }
+        return recadred + period;
+    };
+
+    // OCCT-inspired periodic traversal:
+    // evaluate one shifted point against all wires, then iterate periodic images
+    // until IN/ON is found or the periodic domain is exhausted.
+    const evaluateLocalUvWithPeriodicTraversal = (
+        uRaw: number,
+        vRaw: number,
+        options?: { forceStageB?: boolean; disableStageB?: boolean }
+    ): LocalUvCandidateEval => {
+        if (localClassifierWires.length === 0) {
+            return {
+                decision: "uncertain",
+                nearBoundaryBand: true,
+                minBoundaryDistance: Infinity,
+                badWire: true,
+            };
+        }
+
+        const isUPeriodic = hasDiscontinuity;
+        const isVPeriodic = false;
+        const uPeriod = isUPeriodic ? 2 * PI : 0;
+        const vPeriod = isVPeriodic ? 2 * PI : 0;
+
+        let u = uRaw;
+        let v = vRaw;
+        let uu = uRaw;
+        let vv = vRaw;
+        if (isUPeriodic) {
+            uu = recadrePeriodic(uRaw, classifierDomainUMin, uPeriod);
+        }
+        if (isVPeriodic) {
+            vv = recadrePeriodic(vRaw, classifierDomainVMin, vPeriod);
+        }
+
+        let uRecadred = false;
+        let vRecadred = false;
+        let guard = 0;
+        let lastEval: LocalUvCandidateEval = {
+            decision: "outside",
+            nearBoundaryBand: false,
+            minBoundaryDistance: Infinity,
+            badWire: false,
+        };
+        const forceStageB = options?.forceStageB === true;
+        const disableStageB = options?.disableStageB === true;
+
+        while (guard < 64) {
+            guard++;
+            const stageAEval = forceStageB
+                ? {
+                    decision: "uncertain" as const,
+                    nearBoundaryBand: false,
+                    minBoundaryDistance: Infinity,
+                    badWire: true,
+                }
+                : evaluateLocalUvCandidate(u, v);
+            let evalAtPoint = stageAEval;
+            const shouldRunStageB =
+                !disableStageB &&
+                useLocalUvTopologicalFallback &&
+                (forceStageB || stageAEval.decision === "uncertain" || stageAEval.badWire);
+            if (shouldRunStageB) {
+                const stageBEval = evaluateLocalUvCandidateByWireTransitions(u, v, {
+                    allowBoundaryBandUncertain: false,
+                });
+                // OCCT-style flow: Stage-B resolves ambiguous Stage-A outcomes.
+                // We do not override Stage-A hard inside/outside decisions here.
+                if (forceStageB) {
+                    evalAtPoint = stageBEval;
+                } else if (stageAEval.decision === "uncertain" && stageBEval.decision !== "uncertain") {
+                    evalAtPoint = {
+                        decision: stageBEval.decision,
+                        nearBoundaryBand: stageAEval.nearBoundaryBand || stageBEval.nearBoundaryBand,
+                        minBoundaryDistance: Math.min(stageAEval.minBoundaryDistance, stageBEval.minBoundaryDistance),
+                        badWire: stageAEval.badWire || stageBEval.badWire,
+                    };
+                }
+            }
+            lastEval = evalAtPoint;
+
+            if (!isUPeriodic && !isVPeriodic) {
+                return evalAtPoint;
+            }
+
+            // OCCT returns early for IN/ON.
+            if (evalAtPoint.decision === "inside" || evalAtPoint.decision === "uncertain") {
+                return evalAtPoint;
+            }
+
+            if (!uRecadred) {
+                u = uu;
+                uRecadred = true;
+            } else if (isUPeriodic) {
+                u += uPeriod;
+            }
+
+            if (u > classifierDomainUMax + classifierPointEpsilon || !isUPeriodic) {
+                if (!vRecadred) {
+                    v = vv;
+                    vRecadred = true;
+                } else if (isVPeriodic) {
+                    v += vPeriod;
+                }
+                u = uu;
+
+                if (v > classifierDomainVMax + classifierPointEpsilon || !isVPeriodic) {
+                    return lastEval;
+                }
+            }
+        }
+
+        return lastEval;
+    };
+
+    const isSeamProximate = (uRaw: number): boolean => {
+        if (!hasDiscontinuity) return false;
+        return isNearClassifierUSeam(uRaw) || Math.abs(Math.abs(uRaw) - PI) <= localUvSeamTolerance;
+    };
+
+    let localUvPolarityInverted = false;
+    let localUvPolarityCalibrationSamples = 0;
+    let localUvPolarityCalibrationDirectMismatch = 0;
+    let localUvPolarityCalibrationInvertedMismatch = 0;
+
+    const classifyWithLocalUvClassifierRaw = (uRaw: number, v: number): LocalUvClassification => {
+        if (localClassifierDomainUnsafe) {
+            // Candidate mode is quality-gated; keep domain-unsafe faces on OCC until
+            // local parity for these faces is proven safe.
+            if (useLocalUvClassifierCandidate && !localUvClassifierCandidateStrict) {
+                return {
+                    decision: "uncertain",
+                    nearBoundaryBand: true,
+                    seamProximate: isSeamProximate(uRaw),
+                };
+            }
+            if (localClassifierWires.length > 0) {
+                const stageA = evaluateLocalUvWithPeriodicTraversal(uRaw, v, { disableStageB: true });
+                if (stageA.decision !== "uncertain" && !stageA.badWire) {
+                    return {
+                        decision: stageA.decision,
+                        nearBoundaryBand: stageA.nearBoundaryBand,
+                        seamProximate: isSeamProximate(uRaw),
+                    };
+                }
+            }
+            if (useLocalUvTopologicalFallback && localClassifierWires.length > 0) {
+                const candidate = evaluateLocalUvWithPeriodicTraversal(uRaw, v, { forceStageB: true });
+                return {
+                    decision: candidate.decision,
+                    nearBoundaryBand: candidate.nearBoundaryBand,
+                    seamProximate: isSeamProximate(uRaw),
+                };
+            }
+            return {
+                decision: "uncertain",
+                nearBoundaryBand: true,
+                seamProximate: isSeamProximate(uRaw),
+            };
+        }
+        const candidate = evaluateLocalUvWithPeriodicTraversal(uRaw, v);
+        const seamProximate = isSeamProximate(uRaw);
+        return {
+            decision: candidate.decision,
+            nearBoundaryBand: candidate.nearBoundaryBand,
+            seamProximate,
+        };
+    };
+
+    const applyLocalUvPolarity = (decision: LocalUvDecision): LocalUvDecision => {
+        if (!localUvPolarityInverted) return decision;
+        if (decision === "inside") return "outside";
+        if (decision === "outside") return "inside";
+        return decision;
+    };
+
+    const classifyWithLocalUvClassifier = (uRaw: number, v: number): LocalUvClassification => {
+        const raw = classifyWithLocalUvClassifierRaw(uRaw, v);
+        if (raw.decision === "uncertain") return raw;
+        return {
+            ...raw,
+            decision: applyLocalUvPolarity(raw.decision),
+        };
+    };
+
+    const maybeCalibrateConeLocalUvPolarity = (): void => {
+        const strictCandidateNoOcc = localUvClassifierCandidateStrict && useLocalUvClassifierCandidate && !useLocalUvClassifierShadow;
+        if (
+            strictCandidateNoOcc ||
+            surfaceTypeForClassifier !== "Cone" ||
+            !useOccUvInside ||
+            !(useLocalUvClassifierShadow || useLocalUvClassifierCandidate) ||
+            typeof buildOptions?.uvInsideTest !== "function"
+        ) {
+            return;
+        }
+
+        const sampleGrid = Math.max(
+            4,
+            Math.floor(readTrimNumber("__LOCAL_UV_CLASSIFIER_POLARITY_GRID__") ?? 6)
+        );
+        const minSamples = Math.max(
+            8,
+            Math.floor(readTrimNumber("__LOCAL_UV_CLASSIFIER_POLARITY_MIN_SAMPLES__") ?? 12)
+        );
+        const minImprovement = Math.max(
+            1,
+            Math.floor(readTrimNumber("__LOCAL_UV_CLASSIFIER_POLARITY_MIN_IMPROVEMENT__") ?? 3)
+        );
+
+        const uSpanCalib = Math.max(1e-9, uMax - uMin);
+        const vSpanCalib = Math.max(1e-9, vMax - vMin);
+        let directMismatch = 0;
+        let invertedMismatch = 0;
+        let considered = 0;
+
+        for (let j = 1; j < sampleGrid; j++) {
+            for (let i = 1; i < sampleGrid; i++) {
+                const u = uMin + (uSpanCalib * i) / sampleGrid;
+                const v = vMin + (vSpanCalib * j) / sampleGrid;
+                const localRaw = classifyWithLocalUvClassifierRaw(u, v);
+                if (localRaw.decision === "uncertain") continue;
+                const occInside = !!buildOptions.uvInsideTest(u, v);
+                const localInside = localRaw.decision === "inside";
+                considered++;
+                if (localInside !== occInside) directMismatch++;
+                if ((!localInside) !== occInside) invertedMismatch++;
+            }
+        }
+
+        localUvPolarityCalibrationSamples = considered;
+        localUvPolarityCalibrationDirectMismatch = directMismatch;
+        localUvPolarityCalibrationInvertedMismatch = invertedMismatch;
+        if (
+            considered >= minSamples &&
+            invertedMismatch + minImprovement < directMismatch
+        ) {
+            localUvPolarityInverted = true;
+        }
+    };
+    maybeCalibrateConeLocalUvPolarity();
+
     const enableGpuTrimGridClassification = readTrimBoolean("__ENABLE_GPU_TRIM_GRID_CLASSIFICATION__", true);
     const totalGridPoints = (gridDensityU + 1) * (gridDensityV + 1);
     const gpuGridMinPoints = Math.max(
@@ -736,7 +2047,7 @@ export async function tessellateTrimmedSurface(
     );
     const canUseGpuTrimGridClassification =
         enableGpuTrimGridClassification &&
-        !useCustomUvInside &&
+        !useOccUvInside &&
         totalGridPoints >= gpuGridMinPoints;
     // GPU-first path: build triangle connectivity directly from the trim mask.
     // Keep this conservative so we can fall back to the existing CPU path for
@@ -751,10 +2062,11 @@ export async function tessellateTrimmedSurface(
         enableGpuTrimTriangleBuild &&
         !bbox3d &&
         !keepTriangle &&
-        !useCustomUvInside &&
+        !useOccUvInside &&
         totalGridCells >= gpuTrimTriangleMinCells;
 
     if (canUseGpuTrimTriangleBuild) {
+        const gpuClassifyBuildStart = performance.now();
         const gpuTriangles = await classifyAndBuildTrimGridTrianglesGPU({
             boundary: continuousBoundary,
             holes: continuousHoles,
@@ -768,7 +2080,9 @@ export async function tessellateTrimmedSurface(
             useNearBoundary: !skipNearBoundaryChecks,
             allowPartialCellTriangles,
         });
+        recordTrimProfileSample(buildOptions, "gpu_classify_build", performance.now() - gpuClassifyBuildStart);
         if (gpuTriangles && gpuTriangles.triangleCount > 0) {
+            const gpuDenseEvalStart = performance.now();
             const denseGpuEval = await evaluateSurfaceDenseGridGPU(
                 surface as any,
                 gridDensityU,
@@ -778,6 +2092,7 @@ export async function tessellateTrimmedSurface(
                 du,
                 dv
             );
+            recordTrimProfileSample(buildOptions, "gpu_dense_eval", performance.now() - gpuDenseEvalStart);
             if (denseGpuEval) {
                 const uvs = new Float32Array(totalGridPoints * 2);
                 for (let j = 0; j <= gridDensityV; j++) {
@@ -814,12 +2129,16 @@ export async function tessellateTrimmedSurface(
                     `cells=${totalGridCells}, triangles=${gpuTriangles.triangleCount}`
                 );
             }
-            return evaluateUVMesh(surface, uvVerticesDense, gpuTriangles.indices);
+            const finalEvalStart = performance.now();
+            const mesh = await evaluateUVMesh(surface, uvVerticesDense, gpuTriangles.indices, buildOptions?.recordProfileSample);
+            recordTrimProfileSample(buildOptions, "final_evaluate_mesh", performance.now() - finalEvalStart);
+            return mesh;
         }
     }
 
     let gpuTrimMask: Uint32Array | null = null;
     if (canUseGpuTrimGridClassification) {
+        const gpuMaskClassifyStart = performance.now();
         gpuTrimMask = await classifyTrimGridGPU({
             boundary: continuousBoundary,
             holes: continuousHoles,
@@ -832,6 +2151,7 @@ export async function tessellateTrimmedSurface(
             boundaryTolerance,
             useNearBoundary: !skipNearBoundaryChecks,
         });
+        recordTrimProfileSample(buildOptions, "gpu_mask_classify", performance.now() - gpuMaskClassifyStart);
         if (gpuTrimMask && debugTrim) {
             trimDebugLog(
                 `[tessellateTrimmedSurface] GPU trim classification enabled for ${totalGridPoints} grid points`
@@ -840,12 +2160,14 @@ export async function tessellateTrimmedSurface(
     }
 
     if (canUseGpuTrimTriangleBuild && gpuTrimMask) {
+        const gpuMaskTrianglesStart = performance.now();
         const gpuTriangles = await buildTrimGridTrianglesGPU({
             mask: gpuTrimMask,
             gridDensityU,
             gridDensityV,
             allowPartialCellTriangles,
         });
+        recordTrimProfileSample(buildOptions, "gpu_mask_triangles", performance.now() - gpuMaskTrianglesStart);
         if (gpuTriangles && gpuTriangles.triangleCount > 0) {
             const uvVerticesDense: Vec2[] = new Array(totalGridPoints);
             let insideByMask = 0;
@@ -865,7 +2187,10 @@ export async function tessellateTrimmedSurface(
                     `triangles=${gpuTriangles.triangleCount}`
                 );
             }
-            return evaluateUVMesh(surface, uvVerticesDense, gpuTriangles.indices);
+            const finalEvalStart = performance.now();
+            const mesh = await evaluateUVMesh(surface, uvVerticesDense, gpuTriangles.indices, buildOptions?.recordProfileSample);
+            recordTrimProfileSample(buildOptions, "final_evaluate_mesh", performance.now() - finalEvalStart);
+            return mesh;
         }
     }
 
@@ -882,6 +2207,7 @@ export async function tessellateTrimmedSurface(
     };
 
     let bbox3dFilteredCount = 0;
+    const cpuGridClassifyStart = performance.now();
 
     for (let j = 0; j <= gridDensityV; j++) {
         vertexGrid[j] = [];
@@ -895,18 +2221,85 @@ export async function tessellateTrimmedSurface(
             } else {
                 // Check if this point is inside the continuous boundary and outside holes.
                 // For selected OCC paths, use the classifier as the source of truth.
-                const insideBoundary = useCustomUvInside
-                    ? !!buildOptions!.uvInsideTest!(u, v)
-                    : isPointInPolygon([u, v], continuousBoundary);
-                const nearBoundary = useCustomUvInside
-                    ? false
-                    : (skipNearBoundaryChecks
+                if (useLocalUvClassifierShadow) {
+                    const localDecision = classifyWithLocalUvClassifier(u, v);
+                    localUvClassifierStats.occDecisions++;
+                    if (localDecision.decision === "inside") {
+                        localUvClassifierStats.inside++;
+                    } else if (localDecision.decision === "outside") {
+                        localUvClassifierStats.outside++;
+                    } else if (localUvClassifierFallbackToOcc) {
+                        localUvClassifierStats.uncertain++;
+                    } else {
+                        localUvClassifierStats.uncertain++;
+                    }
+                    if (localDecision.nearBoundaryBand) {
+                        localUvClassifierStats.boundaryBandSamples++;
+                    }
+                    if (localDecision.seamProximate) {
+                        localUvClassifierStats.seamProximateSamples++;
+                    }
+                    const occInside = !!buildOptions!.uvInsideTest!(u, v);
+                    includePoint = occInside;
+                    if (localDecision.decision !== "uncertain") {
+                        const localInside = localDecision.decision === "inside";
+                        if (localInside !== occInside) {
+                            localUvClassifierStats.mismatchCount++;
+                            if (localInside) {
+                                localUvClassifierStats.falseInsideCount++;
+                            } else {
+                                localUvClassifierStats.falseOutsideCount++;
+                            }
+                            if (localDecision.nearBoundaryBand) {
+                                localUvClassifierStats.mismatchBoundaryBand++;
+                            } else {
+                                localUvClassifierStats.mismatchInterior++;
+                            }
+                            if (localDecision.seamProximate) {
+                                localUvClassifierStats.mismatchSeamProximate++;
+                            } else {
+                                localUvClassifierStats.mismatchNonSeam++;
+                            }
+                        }
+                    }
+                } else if (useLocalUvClassifierCandidate) {
+                    const localDecision = classifyWithLocalUvClassifier(u, v);
+                    if (localDecision.decision === "inside") {
+                        localUvClassifierStats.inside++;
+                        includePoint = true;
+                    } else if (localDecision.decision === "outside") {
+                        localUvClassifierStats.outside++;
+                        includePoint = false;
+                    } else if (localUvClassifierFallbackToOcc) {
+                        localUvClassifierStats.uncertain++;
+                        localUvClassifierStats.fallbackCalls++;
+                        localUvClassifierStats.occDecisions++;
+                        includePoint = !!buildOptions!.uvInsideTest!(u, v);
+                    } else {
+                        localUvClassifierStats.uncertain++;
+                        // Fail-open without OCC fallback to preserve old classifier bias.
+                        includePoint = true;
+                    }
+                    if (localDecision.nearBoundaryBand) {
+                        localUvClassifierStats.boundaryBandSamples++;
+                    }
+                    if (localDecision.seamProximate) {
+                        localUvClassifierStats.seamProximateSamples++;
+                    }
+                } else {
+                    const insideBoundary = useOccUvInside
+                        ? !!buildOptions!.uvInsideTest!(u, v)
+                        : isPointInPolygon([u, v], continuousBoundary);
+                    const nearBoundary = useOccUvInside
                         ? false
-                        : isNearBoundary([u, v], continuousBoundary, boundaryTolerance));
-                const insideHole = useCustomUvInside
-                    ? false
-                    : continuousHoles.some(hole => isPointInPolygon([u, v], hole));
-                includePoint = (insideBoundary || nearBoundary) && !insideHole;
+                        : (skipNearBoundaryChecks
+                            ? false
+                            : isNearBoundary([u, v], continuousBoundary, boundaryTolerance));
+                    const insideHole = useOccUvInside
+                        ? false
+                        : continuousHoles.some(hole => isPointInPolygon([u, v], hole));
+                    includePoint = (insideBoundary || nearBoundary) && !insideHole;
+                }
             }
 
             if (includePoint) {
@@ -934,6 +2327,7 @@ export async function tessellateTrimmedSurface(
             }
         }
     }
+    recordTrimProfileSample(buildOptions, "cpu_grid_classify", performance.now() - cpuGridClassifyStart);
 
     if (bbox3d && debugTrim) {
         trimDebugLog(`[tessellateTrimmedSurface] 3D bbox provided: X=[${bbox3d.xMin.toFixed(2)}, ${bbox3d.xMax.toFixed(2)}], Y=[${bbox3d.yMin.toFixed(2)}, ${bbox3d.yMax.toFixed(2)}], Z=[${bbox3d.zMin.toFixed(2)}, ${bbox3d.zMax.toFixed(2)}]`);
@@ -952,15 +2346,33 @@ export async function tessellateTrimmedSurface(
 
     if (debugTrim) {
         trimDebugLog(`[tessellateTrimmedSurface] Grid bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
-        trimDebugLog(`[tessellateTrimmedSurface] Grid points: ${insideCount} inside, ${outsideCount} outside${useCustomUvInside ? ` (mode=${buildLabel})` : ''}`);
+        trimDebugLog(`[tessellateTrimmedSurface] Grid points: ${insideCount} inside, ${outsideCount} outside${useOccUvInside ? ` (mode=${buildLabel})` : ''}`);
+        if (useLocalUvClassifierShadow || useLocalUvClassifierCandidate) {
+            localUvClassifierStats.effectiveMismatchCount =
+                localUvClassifierStats.mismatchCount + localUvClassifierStats.uncertain;
+            const mode = useLocalUvClassifierShadow ? 'shadow' : 'candidate';
+            trimDebugLog(
+                `[tessellateTrimmedSurface] Local UV classifier stats (${mode}): ` +
+                `inside=${localUvClassifierStats.inside}, outside=${localUvClassifierStats.outside}, ` +
+                `uncertain=${localUvClassifierStats.uncertain}, fallbackCalls=${localUvClassifierStats.fallbackCalls}, ` +
+                `occDecisions=${localUvClassifierStats.occDecisions}, ` +
+                `mismatch=${localUvClassifierStats.mismatchCount}, ` +
+                `effectiveMismatch=${localUvClassifierStats.effectiveMismatchCount}, ` +
+                `falseInside=${localUvClassifierStats.falseInsideCount}, falseOutside=${localUvClassifierStats.falseOutsideCount}, ` +
+                `polarityInverted=${localUvPolarityInverted}, ` +
+                `polarityCalib=${localUvPolarityCalibrationSamples}/${localUvPolarityCalibrationDirectMismatch}->${localUvPolarityCalibrationInvertedMismatch}, ` +
+                `boundaryMismatch=${localUvClassifierStats.mismatchBoundaryBand}, ` +
+                `seamMismatch=${localUvClassifierStats.mismatchSeamProximate}`
+            );
+        }
 
         // Diagnostic: test a specific point that should be inside (center of grid)
         const testU = (uMin + uMax) / 2;
         const testV = (vMin + vMax) / 2;
-        const testInside = useCustomUvInside
+        const testInside = useOccUvInside
             ? !!buildOptions!.uvInsideTest!(testU, testV)
             : isPointInPolygon([testU, testV], continuousBoundary);
-        const testInHole = useCustomUvInside
+        const testInHole = useOccUvInside
             ? false
             : continuousHoles.some(hole => isPointInPolygon([testU, testV], hole));
         trimDebugLog(`[tessellateTrimmedSurface] Test point (${testU.toFixed(3)}, ${testV.toFixed(3)}): insideBoundary=${testInside}, insideHole=${testInHole}`);
@@ -1088,6 +2500,7 @@ export async function tessellateTrimmedSurface(
         }
     };
 
+    const cpuTriangleBuildStart = performance.now();
     for (let j = 0; j < gridDensityV; j++) {
         for (let i = 0; i < gridDensityU; i++) {
             const v00 = vertexGrid[j][i];
@@ -1120,11 +2533,42 @@ export async function tessellateTrimmedSurface(
             }
         }
     }
+    recordTrimProfileSample(buildOptions, "cpu_triangle_build", performance.now() - cpuTriangleBuildStart);
 
 
     trimDebugLog(`[tessellateTrimmedSurface] Generated ${triangles.length} triangles from ${uvVertices.length} vertices`);
     if (triangleDropsByClassifier > 0) {
         trimDebugLog(`[tessellateTrimmedSurface] Triangle gate dropped ${triangleDropsByClassifier} candidate triangles (mode=${buildLabel})`);
+    }
+    if (useLocalUvClassifierShadow || useLocalUvClassifierCandidate) {
+        try {
+            localUvClassifierStats.effectiveMismatchCount =
+                localUvClassifierStats.mismatchCount + localUvClassifierStats.uncertain;
+            buildOptions?.recordLocalUvClassifierSummary?.({
+                mode: useLocalUvClassifierShadow ? "shadow" : "candidate",
+                faceIndex: buildOptions?.classifierFaceIndex,
+                surfaceType: buildOptions?.classifierSurfaceType,
+                buildLabel,
+                gridPoints: totalGridPoints,
+                occDecisions: localUvClassifierStats.occDecisions,
+                localInside: localUvClassifierStats.inside,
+                localOutside: localUvClassifierStats.outside,
+                localUncertain: localUvClassifierStats.uncertain,
+                localFallbackCalls: localUvClassifierStats.fallbackCalls,
+                boundaryBandSamples: localUvClassifierStats.boundaryBandSamples,
+                seamProximateSamples: localUvClassifierStats.seamProximateSamples,
+                mismatchCount: localUvClassifierStats.mismatchCount,
+                effectiveMismatchCount: localUvClassifierStats.effectiveMismatchCount,
+                mismatchBoundaryBand: localUvClassifierStats.mismatchBoundaryBand,
+                mismatchInterior: localUvClassifierStats.mismatchInterior,
+                mismatchSeamProximate: localUvClassifierStats.mismatchSeamProximate,
+                mismatchNonSeam: localUvClassifierStats.mismatchNonSeam,
+                falseInsideCount: localUvClassifierStats.falseInsideCount,
+                falseOutsideCount: localUvClassifierStats.falseOutsideCount,
+            });
+        } catch {
+            // Classifier summary hooks are best-effort only.
+        }
     }
 
     // Note: We do NOT add boundary stitching triangles here.
@@ -1132,7 +2576,10 @@ export async function tessellateTrimmedSurface(
     // The grid-based tessellation alone provides clean results, even if there are small gaps
     // at the edges. This matches the approach used in the benchmark-research branch.
 
-    return evaluateUVMesh(surface, uvVertices, triangles);
+    const finalEvalStart = performance.now();
+    const mesh = await evaluateUVMesh(surface, uvVertices, triangles, buildOptions?.recordProfileSample);
+    recordTrimProfileSample(buildOptions, "final_evaluate_mesh", performance.now() - finalEvalStart);
+    return mesh;
 }
 
 /**
@@ -1291,7 +2738,8 @@ function isPointInPolygon(point: Vec2, polygon: Vec2[]): boolean {
 async function evaluateUVMesh(
     surface: Surface,
     uvVertices: Vec2[],
-    triangleIndices: [number, number, number][] | Uint32Array
+    triangleIndices: [number, number, number][] | Uint32Array,
+    profileSample?: (phase: TrimmedSurfaceProfilePhase, elapsedMs: number) => void
 ): Promise<TessellatedMesh> {
     const numVertices = uvVertices.length;
 
@@ -1317,7 +2765,11 @@ async function evaluateUVMesh(
     }
 
     // Try GPU evaluation for large primitive faces (CPU fallback below).
-    const gpuEvaluated = await evaluateSurfaceMeshGPU(surface as any, uvVertices);
+    const gpuEvalStart = performance.now();
+    const gpuEvaluated = await evaluateSurfaceMeshGPU(surface as any, uvs);
+    if (profileSample) {
+        profileSample("uvmesh_gpu_eval", performance.now() - gpuEvalStart);
+    }
     if (gpuEvaluated) {
         return {
             positions: gpuEvaluated.positions,
@@ -1331,6 +2783,7 @@ async function evaluateUVMesh(
     const normals = new Float32Array(numVertices * 3);
 
     let nanCount = 0;
+    const cpuEvalStart = performance.now();
 
     // CPU fallback path.
     for (let i = 0; i < numVertices; i++) {
@@ -1362,6 +2815,9 @@ async function evaluateUVMesh(
 
     if (nanCount > 0) {
         console.warn(`[evaluateUVMesh] ${nanCount}/${numVertices} vertices had NaN positions`);
+    }
+    if (profileSample) {
+        profileSample("uvmesh_cpu_eval", performance.now() - cpuEvalStart);
     }
 
     return { positions, normals, indices, uvs };
