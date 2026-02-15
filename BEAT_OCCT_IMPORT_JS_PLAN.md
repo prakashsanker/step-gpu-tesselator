@@ -1005,3 +1005,46 @@ Latest checkpoint metrics (after Stage-B complex transition tie handling):
   - classifier parity: `mismatch=11917`, `uncertain=4071`, `effectiveMismatch=15988`
   - mismatch source: `stageA=550`, `stageB=3971`, `stageBForced=0`, `domain=7396`
   - take-away: domain-stage mismatch is still the largest bucket.
+
+Next parity patch in progress:
+- Domain-unsafe arbitration:
+  - keep forced Stage-B as default
+  - allow confident Stage-A override only when forced Stage-B reports ambiguity/ties
+  - objective: reduce `mismatchFromDomainUnsafe` while avoiding `localUncertain` spikes
+
+Outcome of domain-unsafe arbitration patch:
+- Canary shadow: `PASS (80/80)` with unchanged cone/conical mismatch hotspots.
+- Electronic Enclosure shadow:
+  - unchanged parity metrics (`mismatch=11917`, `uncertain=4071`, `effectiveMismatch=15988`)
+  - unchanged source split (`stageA=550`, `stageB=3971`, `domain=7396`)
+- Performance sample regressed vs prior Electronic shadow sample (`2.57x slower -> 2.93x slower`, noting reference/runtime variance).
+- Conclusion: no measurable parity win from this patch; next step should target Stage-B transition semantics directly (or rollback this patch if we want a cleaner baseline).
+
+Outcome of Stage-B near-vertex endpoint-side transition patch:
+- Canary shadow: `PASS (80/80)`.
+- Electronic Enclosure shadow:
+  - parity unchanged (`mismatch=11917`, `uncertain=4071`, `effectiveMismatch=15988`)
+  - source split unchanged (`stageA=550`, `stageB=3971`, `domain=7396`)
+- Throughput sample remained in the same band (`2.99x slower` in this run, with normal reference/runtime variance).
+- Conclusion: this local endpoint-side bundle resolver is not the missing parity lever. Next steps should focus on OCCT-style transition state accumulation and stricter Stage-A/Stage-B trigger parity.
+
+Outcome of Stage-B TopTrans-style event-state scan:
+- Canary shadow: `PASS (80/80)`.
+- Electronic Enclosure shadow:
+  - parity regressed slightly (`mismatch=11953`, `uncertain=4071`, `effectiveMismatch=16024`)
+  - source shift: `stageB` worsened (`3971 -> 4041`) while `domain` improved (`7396 -> 7362`)
+- Throughput sample: modestly better in this run (`2.90x slower` vs prior `2.99x slower`, with ref variance present).
+- Conclusion: event-state structure is in place, but mixed-transition sign selection is still off. Next parity patch should adjust mixed-sign bundle sign arbitration (closest stable hit / endpoint-side weighting) without reintroducing near-vertex blanket skips.
+
+Outcome of domain-unsafe arbitration widening:
+- Change:
+  - `__LOCAL_UV_DOMAIN_UNSAFE_ARBITRATE_TIES_ONLY__` default `true -> false`
+  - relaxed Stage-A confidence gate from `!nearBoundaryBand` to `minBoundaryDistance > classifierPointEpsilon`
+- Canary shadow: `PASS (80/80)`.
+- Electronic Enclosure shadow:
+  - parity improved (`mismatch=11682`, `uncertain=4071`, `effectiveMismatch=15753`)
+  - source split: `stageA=550`, `stageB=4041`, `domain=7091`
+  - domain source improved (`7362 -> 7091`, `-271`)
+  - decision mix confirms arbitration is active (`domainStageA=1268`, `domainStageB=27238`)
+- Throughput sample: still in the same band (`2.80x slower` in this run; reference variance remains high).
+- Conclusion: keep this change (first material drop in dominant domain mismatch bucket). Next parity work should target the Stage-B bucket (`4041`) while holding domain gains.

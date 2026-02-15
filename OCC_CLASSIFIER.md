@@ -431,3 +431,124 @@ Working diagnosis we are preserving:
   - reference: `3162.9ms`
   - speed ratio: `2.57x slower`
 - Decision: `hold` (domain-stage mismatch remains dominant; continue Stage-B/Stage-A parity alignment)
+
+### 2026-02-15 (local) - Domain-unsafe arbitration (Stage-B primary, Stage-A confident override)
+- Commit: `<working tree>`
+- Change summary: Added domain-unsafe arbitration flags:
+  - `__LOCAL_UV_DOMAIN_UNSAFE_ARBITRATE_STAGEA__` (default `true`)
+  - `__LOCAL_UV_DOMAIN_UNSAFE_ARBITRATE_TIES_ONLY__` (default `true`)
+  Forced Stage-B remains primary, but confident Stage-A (`non-uncertain`, not bad-wire, not boundary-band) can override when Stage-B is ambiguous/tie-prone (uncertain/near-boundary/transition-tie/probe-fallback).
+- Canary: `PASS` (`80/80`) [shadow mode]
+- Representative: `PASS` (`1/1`) [Electronic Enclosure only, shadow mode]
+- Visual notes: No canary regressions; conical mismatch hotspots unchanged.
+- Shadow mismatch (if enabled):
+  - canary hotspot models unchanged:
+    - `c4-surfaces/cone.step`: `mismatch=348`, `uncertain=25`, `effective=373`
+    - `complex/conical-surface.step`: `mismatch=350`, `uncertain=25`, `effective=375`
+    - `complex/cube.step`: `mismatch=350`, `uncertain=25`, `effective=375`
+  - representative (Electronic Enclosure):
+    - overall: `11917 / 113207` mismatches (`10.53%`)
+    - uncertain: `4071 / 113207` (`3.60%`)
+    - effective mismatch: `15988 / 113207` (`14.12%`)
+    - mismatch source: `stageA=550`, `stageB=3971`, `stageBForced=0`, `domain=7396`
+- OCC fallback usage:
+  - faces: shadow mode still OCC-backed for source-of-truth output
+  - classify calls: tracked in benchmark console output path
+- Electronic Enclosure:
+  - ours: `8610.4ms`
+  - reference: `2941.5ms`
+  - speed ratio: `2.93x slower`
+- Decision: `hold` (no parity gain observed; this patch likely needs redesign or rollback)
+
+### 2026-02-15 (local) - Stage-B near-vertex endpoint-side transition resolution
+- Commit: `<working tree>`
+- Change summary: Extended Stage-B ray-hit bundles with endpoint-side metadata (`vertexRole`, `vertexOtherY`) and added `resolveComplexVertexBundle()` to classify vertex-touch vs crossing using neighboring endpoint side tests before generic transition accumulation.
+- Canary: `PASS` (`80/80`) [shadow mode]
+- Representative: `PASS` (`1/1`) [Electronic Enclosure only, shadow mode]
+- Shadow mismatch (if enabled):
+  - representative (Electronic Enclosure):
+    - overall: `11917 / 113207` mismatches (`10.53%`)
+    - uncertain: `4071 / 113207` (`3.60%`)
+    - effective mismatch: `15988 / 113207` (`14.12%`)
+    - mismatch source: `stageA=550`, `stageB=3971`, `stageBForced=0`, `domain=7396`
+- Electronic Enclosure:
+  - ours: `8542.8ms`
+  - reference: `2859.4ms`
+  - speed ratio: `2.99x slower`
+- Decision: `hold` (no measurable parity movement; next step must target Stage-B event semantics closer to OCCT TopTrans/transition state flow)
+
+### 2026-02-15 (local) - Stage-B TopTrans-style event-state scan (cross/touch/ambiguous bundles)
+- Commit: `<working tree>`
+- Change summary: Replaced Stage-B bundle `sum+parity` fallback with explicit per-bundle event resolution:
+  - `cross`: immediate in/out from transition sign
+  - `touch`: deferred (continue scanning later bundles)
+  - `ambiguous`: fallback pass without high-tol skip, then deferred
+  - removed unconditional skip of all near-vertex-only bundles (only high-tolerance unstable bundles are skipped)
+- Canary: `PASS` (`80/80`) [shadow mode]
+- Representative: `PASS` (`1/1`) [Electronic Enclosure only, shadow mode]
+- Shadow mismatch (if enabled):
+  - representative (Electronic Enclosure):
+    - overall: `11953 / 113207` mismatches (`10.56%`)
+    - uncertain: `4071 / 113207` (`3.60%`)
+    - effective mismatch: `16024 / 113207` (`14.15%`)
+    - mismatch source: `stageA=550`, `stageB=4041`, `stageBForced=0`, `domain=7362`
+- Electronic Enclosure:
+  - ours: `8495.5ms`
+  - reference: `2931.4ms`
+  - speed ratio: `2.90x slower`
+- Delta vs previous shadow checkpoint (`11917/4071/15988`):
+  - mismatch: `+36`
+  - uncertain: `+0`
+  - effective mismatch: `+36`
+  - source shift: `stageB +70`, `domain -34`
+- Decision: `hold` (slight parity regression despite modest runtime gain; next change should improve Stage-B sign selection on mixed-transition bundles)
+
+### 2026-02-15 (local) - Stage-B weighted mixed-sign arbitration + Stage-A boundary/bad-wire tightening
+- Commit: `<working tree>`
+- Change summary:
+  - Stage-B: added weighted sign arbitration for mixed-sign bundles when transition sum is non-zero (`__LOCAL_UV_STAGEB_WEIGHTED_MIXED_SIGN__`, default `true`), preferring stable/non-high-tolerance crossings.
+  - Stage-A: added tighter boundary-band scale (`__LOCAL_UV_STAGEA_BOUNDARY_BAND_SCALE__`, default `0.5`) and contradictory same-orientation wire classification -> `badWire` routing to Stage-B.
+- Canary: `PASS` (`80/80`) [shadow mode]
+- Representative: `PASS` (`1/1`) [Electronic Enclosure only, shadow mode]
+- Shadow mismatch (if enabled):
+  - representative (Electronic Enclosure):
+    - overall: `11953 / 113207` mismatches (`10.56%`)
+    - uncertain: `4071 / 113207` (`3.60%`)
+    - effective mismatch: `16024 / 113207` (`14.15%`)
+    - mismatch source: `stageA=550`, `stageB=4041`, `stageBForced=0`, `domain=7362`
+- Electronic Enclosure:
+  - ours: `8791.2ms`
+  - reference: `3376.3ms`
+  - speed ratio: `2.60x slower`
+- Delta vs previous checkpoint (`11953/4071/16024`):
+  - mismatch: `0`
+  - uncertain: `0`
+  - effective mismatch: `0`
+  - source split: unchanged
+- Decision: `hold` (no measurable parity gain; stageA bad-wire trigger still effectively dormant and stageB mixed-sign arbitration did not shift mismatch buckets)
+
+### 2026-02-15 (local) - Domain-unsafe arbitration widened (Stage-A confident override enabled)
+- Commit: `<working tree>`
+- Change summary:
+  - widened domain arbitration so Stage-A can override forced Stage-B beyond tie-only cases:
+    - `__LOCAL_UV_DOMAIN_UNSAFE_ARBITRATE_TIES_ONLY__` default changed to `false`
+  - relaxed Stage-A confidence gate from `!nearBoundaryBand` to `minBoundaryDistance > classifierPointEpsilon` (still requires non-uncertain + non-badWire)
+- Canary: `PASS` (`80/80`) [shadow mode]
+- Representative: `PASS` (`1/1`) [Electronic Enclosure only, shadow mode]
+- Shadow mismatch (if enabled):
+  - representative (Electronic Enclosure):
+    - overall: `11682 / 113207` mismatches (`10.32%`)
+    - uncertain: `4071 / 113207` (`3.60%`)
+    - effective mismatch: `15753 / 113207` (`13.92%`)
+    - mismatch source: `stageA=550`, `stageB=4041`, `stageBForced=0`, `domain=7091`
+    - decision source: `domainStageA=1268`, `domainStageB=27238`
+- Electronic Enclosure:
+  - ours: `8568.4ms`
+  - reference: `3056.2ms`
+  - speed ratio: `2.80x slower`
+- Delta vs previous checkpoint (`11953/4071/16024`):
+  - mismatch: `-271`
+  - uncertain: `+0`
+  - effective mismatch: `-271`
+  - source shift: `domain -271` (stageA/stageB unchanged)
+- Decision: `keep` (first measurable drop in dominant domain mismatch bucket; next step is reducing Stage-B mismatch bucket)

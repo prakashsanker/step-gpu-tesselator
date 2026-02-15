@@ -133,6 +133,15 @@ interface LocalUvClassifierAggregateBucket {
   mismatchFromStageB: number;
   mismatchFromStageBForced: number;
   mismatchFromDomainUnsafe: number;
+  mismatchFromDomainUnsafeStageA: number;
+  mismatchFromDomainUnsafeStageB: number;
+  mismatchDomainStageBOutside: number;
+  mismatchDomainStageBWithTransitionTie: number;
+  mismatchDomainStageBWithProbeFallback: number;
+  mismatchDomainStageBNearBoundary: number;
+  mismatchDomainStageBWithStageAInsideHint: number;
+  mismatchDomainStageBWithStageAOutsideHint: number;
+  mismatchDomainStageBWithStageAUncertainHint: number;
 }
 
 interface LocalUvClassifierFaceAggregate extends LocalUvClassifierAggregateBucket {
@@ -198,6 +207,15 @@ function createLocalUvClassifierAggregateBucket(): LocalUvClassifierAggregateBuc
     mismatchFromStageB: 0,
     mismatchFromStageBForced: 0,
     mismatchFromDomainUnsafe: 0,
+    mismatchFromDomainUnsafeStageA: 0,
+    mismatchFromDomainUnsafeStageB: 0,
+    mismatchDomainStageBOutside: 0,
+    mismatchDomainStageBWithTransitionTie: 0,
+    mismatchDomainStageBWithProbeFallback: 0,
+    mismatchDomainStageBNearBoundary: 0,
+    mismatchDomainStageBWithStageAInsideHint: 0,
+    mismatchDomainStageBWithStageAOutsideHint: 0,
+    mismatchDomainStageBWithStageAUncertainHint: 0,
   };
 }
 
@@ -259,6 +277,15 @@ function accumulateLocalUvClassifierBucket(
   bucket.mismatchFromStageB += summary.mismatchFromStageB;
   bucket.mismatchFromStageBForced += summary.mismatchFromStageBForced;
   bucket.mismatchFromDomainUnsafe += summary.mismatchFromDomainUnsafe;
+  bucket.mismatchFromDomainUnsafeStageA += summary.mismatchFromDomainUnsafeStageA;
+  bucket.mismatchFromDomainUnsafeStageB += summary.mismatchFromDomainUnsafeStageB;
+  bucket.mismatchDomainStageBOutside += summary.mismatchDomainStageBOutside;
+  bucket.mismatchDomainStageBWithTransitionTie += summary.mismatchDomainStageBWithTransitionTie;
+  bucket.mismatchDomainStageBWithProbeFallback += summary.mismatchDomainStageBWithProbeFallback;
+  bucket.mismatchDomainStageBNearBoundary += summary.mismatchDomainStageBNearBoundary;
+  bucket.mismatchDomainStageBWithStageAInsideHint += summary.mismatchDomainStageBWithStageAInsideHint;
+  bucket.mismatchDomainStageBWithStageAOutsideHint += summary.mismatchDomainStageBWithStageAOutsideHint;
+  bucket.mismatchDomainStageBWithStageAUncertainHint += summary.mismatchDomainStageBWithStageAUncertainHint;
 }
 
 function recordLocalUvClassifierSummary(
