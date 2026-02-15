@@ -49,6 +49,11 @@ function parseArgs(argv) {
         filter: null,
         maxFiles: null,
         prewarm: true,
+        detailedProfile: false,
+        classifierShadow: false,
+        classifierCandidate: false,
+        classifierCandidateStrict: false,
+        classifierNoFallback: false,
     };
 
     for (let i = 0; i < argv.length; i++) {
@@ -78,6 +83,18 @@ function parseArgs(argv) {
             i += 1;
         } else if (arg === '--no-prewarm') {
             parsed.prewarm = false;
+        } else if (arg === '--detailed-profile') {
+            parsed.detailedProfile = true;
+        } else if (arg === '--classifier-shadow') {
+            parsed.classifierShadow = true;
+        } else if (arg === '--classifier-candidate') {
+            parsed.classifierCandidate = true;
+        } else if (arg === '--classifier-candidate-strict') {
+            parsed.classifierCandidate = true;
+            parsed.classifierCandidateStrict = true;
+            parsed.classifierNoFallback = true;
+        } else if (arg === '--classifier-no-fallback') {
+            parsed.classifierNoFallback = true;
         } else if (arg === '--help' || arg === '-h') {
             printUsage();
             process.exit(0);
@@ -100,6 +117,11 @@ Options:
   --filter PATTERN          Substring filter on model name/path
   --max-files N             Limit selected model count after filtering
   --no-prewarm              Disable one-time harness prewarm run
+  --detailed-profile        Enable detailed curved-phase profiling
+  --classifier-shadow       Enable local-vs-OCC classifier shadow mode
+  --classifier-candidate    Enable local classifier candidate mode (real output path)
+  --classifier-candidate-strict Enable strict candidate mode (local classifier only; no OCC fallback)
+  --classifier-no-fallback  Disable OCC fallback for classifier candidate runs
   --help                    Show this help
 `);
 }
@@ -327,6 +349,15 @@ function buildCanaryModels(parsed) {
 }
 
 function selectConfig(parsed) {
+    if (parsed.classifierShadow && parsed.classifierCandidate) {
+        throw new Error('Use only one classifier mode per run: --classifier-shadow OR --classifier-candidate');
+    }
+    if (parsed.classifierCandidateStrict && !parsed.classifierCandidate) {
+        throw new Error('--classifier-candidate-strict requires --classifier-candidate');
+    }
+    if (parsed.classifierNoFallback && !parsed.classifierCandidate) {
+        throw new Error('--classifier-no-fallback requires --classifier-candidate');
+    }
     const suiteConfig = SUITES[parsed.suite];
     if (!suiteConfig) {
         throw new Error(`Unknown suite: ${parsed.suite}. Use one of: ${Object.keys(SUITES).join(', ')}`);
@@ -344,6 +375,11 @@ function selectConfig(parsed) {
         filter: parsed.filter,
         maxFiles: parsed.maxFiles,
         prewarm: parsed.prewarm !== false,
+        detailedProfile: parsed.detailedProfile === true,
+        classifierShadow: parsed.classifierShadow === true,
+        classifierCandidate: parsed.classifierCandidate === true,
+        classifierCandidateStrict: parsed.classifierCandidateStrict === true,
+        classifierNoFallback: parsed.classifierNoFallback === true,
     };
 
     let models = [];
@@ -498,8 +534,16 @@ async function withTimeout(promiseFactory, timeoutMs, label) {
 }
 
 function summarizePhaseRuns(phaseRuns) {
+    const keys = new Set(PHASE_KEYS);
+    for (const run of phaseRuns) {
+        if (!run || typeof run !== 'object') continue;
+        for (const key of Object.keys(run)) {
+            keys.add(key);
+        }
+    }
+
     const out = {};
-    for (const key of PHASE_KEYS) {
+    for (const key of keys) {
         const vals = phaseRuns.map((run) => run[key]).filter((v) => Number.isFinite(v));
         out[key] = mean(vals);
     }
@@ -526,6 +570,38 @@ function summarizeLoadBreakdown(phases, oursMs) {
         sharePct: (phases.loadStepFile / oursMs) * 100,
         topText,
     };
+}
+
+function summarizeNonLoadBreakdown(phases) {
+    if (!phases || typeof phases !== 'object') return null;
+    const preferredWallKeys = [
+        'tessellateOCCShape',
+        'curved_batch_compute_wall',
+        'curved_batch_max_trim_gpu_classify_build',
+        'curved_batch_max_trim_gpu_dense_eval',
+        'curved_batch_max_trim_gpu_mask_classify',
+        'curved_batch_max_trim_gpu_mask_triangles',
+        'curved_batch_max_trim_cpu_grid_classify',
+        'curved_batch_max_trim_cpu_triangle_build',
+        'curved_batch_max_trim_final_evaluate_mesh',
+        'curved_batch_max_trim_uvmesh_gpu_eval',
+        'curved_batch_max_trim_uvmesh_cpu_eval',
+        'curved_batch_assembly_wall',
+        'curved_single_compute_wall',
+        'extractFacesWithEdges',
+        'tessellatePlanarFace',
+        'computeNormals',
+        'meshAssembly',
+    ];
+
+    const top = preferredWallKeys
+        .map((key) => [key, phases[key]])
+        .filter(([, ms]) => Number.isFinite(ms) && ms > 0)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5);
+
+    if (top.length === 0) return null;
+    return top.map(([key, ms]) => `${key}:${ms.toFixed(1)}ms`).join(', ');
 }
 
 async function runBenchmark(page, model, config) {
@@ -615,6 +691,8 @@ async function runBenchmark(page, model, config) {
                 maxMs: percentile(oursRuns, 100),
                 runs: oursRuns,
                 phases: summarizePhaseRuns(phaseRuns),
+                phaseCalls: lastSuccess.ours.phaseCalls || {},
+                localUvClassifier: lastSuccess.ours.localUvClassifier || null,
                 vertexCount: lastSuccess.ours.vertexCount,
                 triangleCount: lastSuccess.ours.triangleCount,
             },
@@ -664,7 +742,10 @@ function printSuiteHeader(config, models, excluded) {
     log(` Representative Benchmark (${config.suite})`, 'bold');
     log(` ${config.suiteDescription}`, 'cyan');
     log(` runs=${config.benchmarkRuns}, warmup=${config.warmupRuns}, timeout=${config.timeoutMs}ms, models=${models.length}`, 'dim');
-    log(` prewarm=${config.prewarm ? 'on' : 'off'}`, 'dim');
+    log(
+        ` prewarm=${config.prewarm ? 'on' : 'off'}, detailedProfile=${config.detailedProfile ? 'on' : 'off'}, classifierShadow=${config.classifierShadow ? 'on' : 'off'}, classifierCandidate=${config.classifierCandidate ? 'on' : 'off'}, strict=${config.classifierCandidateStrict ? 'on' : 'off'}, noFallback=${config.classifierNoFallback ? 'on' : 'off'}`,
+        'dim'
+    );
     log('='.repeat(120), 'blue');
 
     log('\nExcluded from routine suites:', 'yellow');
@@ -696,6 +777,37 @@ function printResultRow(result) {
             const detail = load.topText ? ` | top: ${load.topText}` : '';
             log(
                 `      loadStepFile=${load.loadMs.toFixed(1)}ms (${load.sharePct.toFixed(1)}% of ours)${detail}`,
+                'dim',
+            );
+        }
+        const nonLoadTop = summarizeNonLoadBreakdown(result.ours.phases);
+        if (nonLoadTop) {
+            log(`      top non-load phases: ${nonLoadTop}`, 'dim');
+        }
+    }
+
+    const classifierTotals = result?.ours?.localUvClassifier?.totals;
+    if (classifierTotals) {
+        const mismatch = Number(classifierTotals.mismatchCount || 0);
+        const uncertain = Number(classifierTotals.localUncertain || 0);
+        const effectiveMismatch = Number(
+            classifierTotals.effectiveMismatchCount != null
+                ? classifierTotals.effectiveMismatchCount
+                : mismatch + uncertain
+        );
+        log(
+            `      classifier parity: mismatch=${mismatch}, uncertain=${uncertain}, effectiveMismatch=${effectiveMismatch}`,
+            'dim',
+        );
+        const stageA = Number(classifierTotals.stageAEvaluations || 0);
+        const stageB = Number(classifierTotals.stageBEvaluations || 0);
+        if (stageA > 0 || stageB > 0) {
+            log(
+                `      classifier stages: stageA=${stageA}, stageB=${stageB}, badWireTriggers=${Number(classifierTotals.stageBTriggeredByBadWire || 0)}, stageBResolvedBadWire=${Number(classifierTotals.stageBResolvedByBadWire || 0)}`,
+                'dim',
+            );
+            log(
+                `      classifier mismatch source: stageA=${Number(classifierTotals.mismatchFromStageA || 0)}, stageB=${Number(classifierTotals.mismatchFromStageB || 0)}, stageBForced=${Number(classifierTotals.mismatchFromStageBForced || 0)}, domain=${Number(classifierTotals.mismatchFromDomainUnsafe || 0)}`,
                 'dim',
             );
         }
@@ -955,6 +1067,17 @@ async function main() {
         await page.waitForFunction(() => window.benchmarkReady === true, {
             timeout: config.timeoutMs,
         });
+        await page.evaluate((enableDetailedProfile, enableClassifierShadow, enableClassifierCandidate) => {
+            (window).__BENCH_DETAILED_PROFILE__ = enableDetailedProfile;
+            (window).__BENCH_ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__ = enableClassifierShadow;
+            (window).__BENCH_ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__ = enableClassifierCandidate;
+            (window).__BENCH_ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__ = false;
+            (window).__BENCH_DISABLE_LOCAL_UV_CLASSIFIER_FALLBACK__ = false;
+        }, config.detailedProfile, config.classifierShadow, config.classifierCandidate);
+        await page.evaluate((strictCandidate, disableFallback) => {
+            (window).__BENCH_ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__ = strictCandidate;
+            (window).__BENCH_DISABLE_LOCAL_UV_CLASSIFIER_FALLBACK__ = disableFallback;
+        }, config.classifierCandidateStrict, config.classifierNoFallback);
         log('Benchmark harness ready', 'green');
         await prewarmHarness(page, config);
 

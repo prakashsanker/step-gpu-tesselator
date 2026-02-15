@@ -137,6 +137,33 @@ export interface LocalUvClassifierSummary {
     mismatchNonSeam: number;
     falseInsideCount: number;
     falseOutsideCount: number;
+    stageAEvaluations: number;
+    stageAInside: number;
+    stageAOutside: number;
+    stageAUncertain: number;
+    stageABadWire: number;
+    stageBEvaluations: number;
+    stageBForcedEvaluations: number;
+    stageBTriggeredByUncertain: number;
+    stageBTriggeredByBadWire: number;
+    stageBInside: number;
+    stageBOutside: number;
+    stageBUncertain: number;
+    stageBResolvedByUncertain: number;
+    stageBResolvedByBadWire: number;
+    stageBProbeFallbacks: number;
+    stageBBundleSkips: number;
+    stageBSkippedNearVertexHits: number;
+    stageBTransitionTies: number;
+    decisionFromStageA: number;
+    decisionFromStageB: number;
+    decisionFromStageBForced: number;
+    decisionFromDomainUnsafeStageA: number;
+    decisionFromDomainUnsafeStageB: number;
+    mismatchFromStageA: number;
+    mismatchFromStageB: number;
+    mismatchFromStageBForced: number;
+    mismatchFromDomainUnsafe: number;
 }
 
 export interface TrimmedSurfaceBuildOptions {
@@ -852,13 +879,48 @@ export async function tessellateTrimmedSurface(
         mismatchNonSeam: 0,
         falseInsideCount: 0,
         falseOutsideCount: 0,
+        stageAEvaluations: 0,
+        stageAInside: 0,
+        stageAOutside: 0,
+        stageAUncertain: 0,
+        stageABadWire: 0,
+        stageBEvaluations: 0,
+        stageBForcedEvaluations: 0,
+        stageBTriggeredByUncertain: 0,
+        stageBTriggeredByBadWire: 0,
+        stageBInside: 0,
+        stageBOutside: 0,
+        stageBUncertain: 0,
+        stageBResolvedByUncertain: 0,
+        stageBResolvedByBadWire: 0,
+        stageBProbeFallbacks: 0,
+        stageBBundleSkips: 0,
+        stageBSkippedNearVertexHits: 0,
+        stageBTransitionTies: 0,
+        decisionFromStageA: 0,
+        decisionFromStageB: 0,
+        decisionFromStageBForced: 0,
+        decisionFromDomainUnsafeStageA: 0,
+        decisionFromDomainUnsafeStageB: 0,
+        mismatchFromStageA: 0,
+        mismatchFromStageB: 0,
+        mismatchFromStageBForced: 0,
+        mismatchFromDomainUnsafe: 0,
     };
 
     type LocalUvDecision = "inside" | "outside" | "uncertain";
+    type LocalUvDecisionSource =
+        | "stageA"
+        | "stageB"
+        | "stageB_forced"
+        | "domain_stageA"
+        | "domain_stageB"
+        | "domain_uncertain";
     interface LocalUvClassification {
         decision: LocalUvDecision;
         nearBoundaryBand: boolean;
         seamProximate: boolean;
+        source: LocalUvDecisionSource;
     }
 
     type LoopPointRelation = "inside" | "outside" | "on";
@@ -1248,24 +1310,23 @@ export async function tessellateTrimmedSurface(
             loop: normalizedLoop,
             orientationBit: wire.orientationBit === 0 ? 0 : 1,
             edges: Array.isArray(wire.edges)
-                ? wire.edges
-                    .map((edge) => {
-                        const pointsBase = normalizeEdgePointsForClassifier(edge?.points ?? []);
-                        const points = hasDiscontinuity
-                            ? unwrapLoopPeriodicUForClassifier(pointsBase, 2 * PI)
-                            : pointsBase;
-                        if (points.length < 2) return null;
-                        return {
-                            points,
-                            vertexToleranceMax:
-                                typeof edge.vertexToleranceMax === "number" && Number.isFinite(edge.vertexToleranceMax)
-                                    ? edge.vertexToleranceMax
-                                    : undefined,
-                            hasHighVertexTolerance: edge.hasHighVertexTolerance === true,
-                            isDegenerate: edge.isDegenerate === true,
-                        } satisfies LocalUvClassifierEdgeInput;
-                    })
-                    .filter((edge): edge is LocalUvClassifierEdgeInput => edge != null)
+                ? wire.edges.reduce<LocalUvClassifierEdgeInput[]>((acc, edge) => {
+                    const pointsBase = normalizeEdgePointsForClassifier(edge?.points ?? []);
+                    const points = hasDiscontinuity
+                        ? unwrapLoopPeriodicUForClassifier(pointsBase, 2 * PI)
+                        : pointsBase;
+                    if (points.length < 2) return acc;
+                    const edgeInput: LocalUvClassifierEdgeInput = {
+                        points,
+                        hasHighVertexTolerance: edge.hasHighVertexTolerance === true,
+                        isDegenerate: edge.isDegenerate === true,
+                    };
+                    if (typeof edge.vertexToleranceMax === "number" && Number.isFinite(edge.vertexToleranceMax)) {
+                        edgeInput.vertexToleranceMax = edge.vertexToleranceMax;
+                    }
+                    acc.push(edgeInput);
+                    return acc;
+                }, [])
                 : undefined,
             hasBadEdges: wire.hasBadEdges === true,
         });
@@ -1399,6 +1460,15 @@ export async function tessellateTrimmedSurface(
         nearBoundaryBand: boolean;
         minBoundaryDistance: number;
         badWire: boolean;
+        source: "stageA" | "stageB" | "stageB_forced";
+        stageBMetrics?: LocalUvTransitionMetrics;
+    }
+
+    interface LocalUvTransitionMetrics {
+        probeFallbacks: number;
+        bundleSkips: number;
+        skippedNearVertexHits: number;
+        transitionTies: number;
     }
 
     const localClassifierWires: LocalClassifierWire[] = [];
@@ -1455,6 +1525,7 @@ export async function tessellateTrimmedSurface(
                     nearBoundaryBand: true,
                     minBoundaryDistance,
                     badWire,
+                    source: "stageA",
                 };
             }
             if (
@@ -1475,6 +1546,7 @@ export async function tessellateTrimmedSurface(
                 nearBoundaryBand: true,
                 minBoundaryDistance,
                 badWire,
+                source: "stageA",
             };
         }
 
@@ -1483,7 +1555,77 @@ export async function tessellateTrimmedSurface(
             nearBoundaryBand: false,
             minBoundaryDistance,
             badWire,
+            source: "stageA",
         };
+    };
+
+    const forEachWireSegment = (
+        wire: LocalClassifierWire,
+        visitor: (edge: LocalUvClassifierEdgeInput, a: Vec2, b: Vec2) => void
+    ): void => {
+        if (wire.edges.length > 0) {
+            for (const edge of wire.edges) {
+                const edgePoints = edge.points;
+                if (!Array.isArray(edgePoints) || edgePoints.length < 2) continue;
+                for (let i = 0; i < edgePoints.length - 1; i++) {
+                    visitor(edge, edgePoints[i], edgePoints[i + 1]);
+                }
+            }
+            return;
+        }
+        const syntheticEdge: LocalUvClassifierEdgeInput = {
+            points: wire.loop,
+            hasHighVertexTolerance: false,
+            isDegenerate: false,
+        };
+        for (let i = 0; i < wire.loop.length; i++) {
+            const a = wire.loop[i];
+            const b = wire.loop[(i + 1) % wire.loop.length];
+            visitor(syntheticEdge, a, b);
+        }
+    };
+
+    const distancePointToWire = (point: Vec2, wire: LocalClassifierWire): number => {
+        const [px, py] = point;
+        let minDistSq = Infinity;
+        forEachWireSegment(wire, (_edge, a, b) => {
+            const dx = b[0] - a[0];
+            const dy = b[1] - a[1];
+            const lenSq = dx * dx + dy * dy;
+            let cx = a[0];
+            let cy = a[1];
+            if (lenSq > 1e-14) {
+                let t = ((px - a[0]) * dx + (py - a[1]) * dy) / lenSq;
+                t = Math.max(0, Math.min(1, t));
+                cx = a[0] + t * dx;
+                cy = a[1] + t * dy;
+            }
+            const distSq = (px - cx) * (px - cx) + (py - cy) * (py - cy);
+            if (distSq < minDistSq) minDistSq = distSq;
+        });
+        return minDistSq === Infinity ? Infinity : Math.sqrt(minDistSq);
+    };
+
+    interface LocalUvDirectionClassification {
+        relation: LoopPointRelation;
+        metrics: LocalUvTransitionMetrics;
+    }
+
+    const createTransitionMetrics = (): LocalUvTransitionMetrics => ({
+        probeFallbacks: 0,
+        bundleSkips: 0,
+        skippedNearVertexHits: 0,
+        transitionTies: 0,
+    });
+
+    const accumulateTransitionMetrics = (
+        target: LocalUvTransitionMetrics,
+        delta: LocalUvTransitionMetrics
+    ): void => {
+        target.probeFallbacks += delta.probeFallbacks;
+        target.bundleSkips += delta.bundleSkips;
+        target.skippedNearVertexHits += delta.skippedNearVertexHits;
+        target.transitionTies += delta.transitionTies;
     };
 
     const classifyPointAgainstWireByDirection = (
@@ -1491,7 +1633,8 @@ export async function tessellateTrimmedSurface(
         wire: LocalClassifierWire,
         dir: Vec2,
         options?: { edgeToleranceScale?: number }
-    ): LoopPointRelation => {
+    ): LocalUvDirectionClassification => {
+        const metrics = createTransitionMetrics();
         const [px, py] = point;
         const edgeToleranceScale = Math.max(0.01, options?.edgeToleranceScale ?? 1);
         const tolU = Math.max(
@@ -1509,13 +1652,13 @@ export async function tessellateTrimmedSurface(
             py < wire.bounds.vMin - tolV ||
             py > wire.bounds.vMax + tolV
         ) {
-            return "outside";
+            return { relation: "outside", metrics };
         }
 
         const [dx, dy] = dir;
         const rayLen = Math.hypot(dx, dy);
         if (rayLen <= 1e-12) {
-            return "outside";
+            return { relation: "outside", metrics };
         }
         const ux = dx / rayLen;
         const uy = dy / rayLen;
@@ -1528,14 +1671,7 @@ export async function tessellateTrimmedSurface(
             highTolVertex: boolean;
         };
         const hits: IntersectionHit[] = [];
-        const edgeChains = wire.edges.length > 0
-            ? wire.edges
-            : [{ points: wire.loop, vertexToleranceMax: undefined, hasHighVertexTolerance: false, isDegenerate: false }];
-        for (const edge of edgeChains) {
-            const edgePoints = edge.points;
-            if (!Array.isArray(edgePoints) || edgePoints.length < 2) {
-                continue;
-            }
+        forEachWireSegment(wire, (edge, a, b) => {
             const edgeTolRaw =
                 typeof edge.vertexToleranceMax === "number" && Number.isFinite(edge.vertexToleranceMax)
                     ? edge.vertexToleranceMax
@@ -1543,68 +1679,74 @@ export async function tessellateTrimmedSurface(
             const edgeTol = Math.max(0, edgeTolRaw);
             const edgeTolU = Math.max(tolU, edgeTol);
             const edgeTolV = Math.max(tolV, edgeTol);
-            for (let i = 0; i < edgePoints.length - 1; i++) {
-                const a = edgePoints[i];
-                const b = edgePoints[i + 1];
-                const aRelX = a[0] - px;
-                const aRelY = a[1] - py;
-                const bRelX = b[0] - px;
-                const bRelY = b[1] - py;
-                const ax = aRelX * ux + aRelY * uy;
-                const ay = aRelX * nx + aRelY * ny;
-                const bx = bRelX * ux + bRelY * uy;
-                const by = bRelX * nx + bRelY * ny;
+            const aRelX = a[0] - px;
+            const aRelY = a[1] - py;
+            const bRelX = b[0] - px;
+            const bRelY = b[1] - py;
+            const ax = aRelX * ux + aRelY * uy;
+            const ay = aRelX * nx + aRelY * ny;
+            const bx = bRelX * ux + bRelY * uy;
+            const by = bRelX * nx + bRelY * ny;
 
-                const segDx = bx - ax;
-                const segDy = by - ay;
-                const segLen2 = segDx * segDx + segDy * segDy;
-                if (segLen2 > 1e-16) {
-                    const t = Math.max(0, Math.min(1, ((-ax) * segDx + (-ay) * segDy) / segLen2));
-                    const qx = ax + t * segDx;
-                    const qy = ay + t * segDy;
-                    if (Math.abs(qx) <= edgeTolU && Math.abs(qy) <= edgeTolV) {
-                        return "on";
-                    }
-                } else if (Math.abs(ax) <= edgeTolU && Math.abs(ay) <= edgeTolV) {
-                    return "on";
+            const segDx = bx - ax;
+            const segDy = by - ay;
+            const segLen2 = segDx * segDx + segDy * segDy;
+            if (segLen2 > 1e-16) {
+                const t = Math.max(0, Math.min(1, ((-ax) * segDx + (-ay) * segDy) / segLen2));
+                const qx = ax + t * segDx;
+                const qy = ay + t * segDy;
+                if (Math.abs(qx) <= edgeTolU && Math.abs(qy) <= edgeTolV) {
+                    hits.length = 0;
+                    hits.push({ x: 0, transition: 1, nearVertex: false, highTolVertex: false });
+                    return;
                 }
-
-                // Ignore horizontal segments for crossing count.
-                if (Math.abs(by - ay) <= edgeTolV) {
-                    continue;
-                }
-                // Half-open vertical test avoids double counting shared vertices.
-                const y1 = ay;
-                const y2 = by;
-                const crosses =
-                    (y1 <= 0 && y2 > 0) ||
-                    (y2 <= 0 && y1 > 0);
-                if (!crosses) continue;
-
-                const xIntersect = ax + ((-ay) * (bx - ax)) / (by - ay);
-                if (Math.abs(xIntersect) <= edgeTolU) {
-                    return "on";
-                }
-                if (xIntersect > edgeTolU) {
-                    const t = (-ay) / (by - ay);
-                    const nearVertexTol = Math.max(1e-6, edgeTolV / (Math.abs(by - ay) + 1e-9));
-                    const nearVertex = t <= nearVertexTol || t >= 1 - nearVertexTol;
-                    hits.push({
-                        x: xIntersect,
-                        transition: by > ay ? 1 : -1,
-                        nearVertex,
-                        highTolVertex: edge.hasHighVertexTolerance === true,
-                    });
-                }
+            } else if (Math.abs(ax) <= edgeTolU && Math.abs(ay) <= edgeTolV) {
+                hits.length = 0;
+                hits.push({ x: 0, transition: 1, nearVertex: false, highTolVertex: false });
+                return;
             }
+
+            // Ignore nearly horizontal segments for crossing count.
+            if (Math.abs(by - ay) <= edgeTolV) {
+                return;
+            }
+            // Half-open vertical test avoids double counting shared vertices.
+            const y1 = ay;
+            const y2 = by;
+            const crosses =
+                (y1 <= 0 && y2 > 0) ||
+                (y2 <= 0 && y1 > 0);
+            if (!crosses) return;
+
+            const xIntersect = ax + ((-ay) * (bx - ax)) / (by - ay);
+            if (Math.abs(xIntersect) <= edgeTolU) {
+                hits.length = 0;
+                hits.push({ x: 0, transition: 1, nearVertex: false, highTolVertex: false });
+                return;
+            }
+            if (xIntersect > edgeTolU) {
+                const t = (-ay) / (by - ay);
+                const nearVertexTol = Math.max(1e-6, edgeTolV / (Math.abs(by - ay) + 1e-9));
+                const nearVertex = t <= nearVertexTol || t >= 1 - nearVertexTol;
+                hits.push({
+                    x: xIntersect,
+                    transition: by > ay ? 1 : -1,
+                    nearVertex,
+                    highTolVertex: edge.hasHighVertexTolerance === true,
+                });
+            }
+        });
+
+        if (hits.length === 1 && hits[0].x === 0) {
+            return { relation: "on", metrics };
         }
 
         if (hits.length === 0) {
-            return "outside";
+            return { relation: "outside", metrics };
         }
         hits.sort((a, b) => a.x - b.x);
 
-        const closestBandTol = Math.max(tolU * 8, 1e-6);
+        const closestBandTol = Math.max(tolU * 2, 1e-7);
         const hitBundles: IntersectionHit[][] = [];
         for (const hit of hits) {
             const last = hitBundles[hitBundles.length - 1];
@@ -1616,13 +1758,19 @@ export async function tessellateTrimmedSurface(
         }
         const isUnstableBundle = (bundle: IntersectionHit[]): boolean =>
             bundle.length > 0 && bundle.every((hit) => hit.nearVertex && hit.highTolVertex);
+        const isNearVertexOnlyBundle = (bundle: IntersectionHit[]): boolean =>
+            bundle.length > 0 && bundle.every((hit) => hit.nearVertex);
 
         // OCCT CheckSkip analogue:
         // if the leading intersection bundle is entirely unstable (high-tolerance
         // near-vertex), bridge to the next bundle before classification.
         let bundleIndex = 0;
-        while (bundleIndex < hitBundles.length - 1 && isUnstableBundle(hitBundles[bundleIndex])) {
+        while (
+            bundleIndex < hitBundles.length - 1 &&
+            (isUnstableBundle(hitBundles[bundleIndex]) || isNearVertexOnlyBundle(hitBundles[bundleIndex]))
+        ) {
             bundleIndex++;
+            metrics.bundleSkips++;
         }
         const closestHits = hitBundles[bundleIndex] ?? hitBundles[0];
 
@@ -1633,7 +1781,10 @@ export async function tessellateTrimmedSurface(
         let closestCrossingCount = 0;
         for (const hit of closestHits) {
             const skip = hit.nearVertex && hit.highTolVertex && closestHits.length > 1;
-            if (skip) continue;
+            if (skip) {
+                metrics.skippedNearVertexHits++;
+                continue;
+            }
             closestTransitionAcc += hit.transition;
             closestCrossingCount++;
         }
@@ -1643,28 +1794,35 @@ export async function tessellateTrimmedSurface(
                 closestCrossingCount++;
             }
         }
-        if (closestTransitionAcc > 0) return "inside";
-        if (closestTransitionAcc < 0) return "outside";
+        if (closestTransitionAcc > 0) return { relation: "inside", metrics };
+        if (closestTransitionAcc < 0) return { relation: "outside", metrics };
         if (closestTransitionAcc === 0 && closestCrossingCount > 1) {
-            return "on";
+            metrics.transitionTies++;
+            return { relation: "on", metrics };
         }
 
         let transitionAcc = 0;
         for (const hit of hits) {
             transitionAcc += hit.transition;
         }
-        if (transitionAcc > 0) return "inside";
-        if (transitionAcc < 0) return "outside";
+        if (transitionAcc > 0) return { relation: "inside", metrics };
+        if (transitionAcc < 0) return { relation: "outside", metrics };
 
         // Transition accumulator is a better proxy for in/out on pathological wires;
         // parity is used as a fallback when transitions cancel to zero.
-        return (hits.length & 1) !== 0 ? "inside" : "outside";
+        metrics.transitionTies++;
+        return { relation: (hits.length & 1) !== 0 ? "inside" : "outside", metrics };
     };
+
+    interface LocalUvTransitionClassification {
+        relation: LoopPointRelation;
+        metrics: LocalUvTransitionMetrics;
+    }
 
     const classifyPointAgainstWireByTransitions = (
         point: Vec2,
         wire: LocalClassifierWire
-    ): LoopPointRelation => {
+    ): LocalUvTransitionClassification => {
         // OCCT-inspired probing constants from FaceExplorer.cxx
         const probeStart = 0.123;
         const probeEnd = 0.7;
@@ -1672,22 +1830,21 @@ export async function tessellateTrimmedSurface(
         const smallAngleSin = 0.001;
 
         const probeDirections: Vec2[] = [];
+        const metrics = createTransitionMetrics();
         const edgeToleranceScale = Math.max(
             0.01,
             readTrimNumber("__LOCAL_UV_TRANSITION_EDGE_TOL_SCALE__") ?? 0.25
         );
         const [px, py] = point;
-        for (let i = 0; i < wire.loop.length; i++) {
-            const a = wire.loop[i];
-            const b = wire.loop[(i + 1) % wire.loop.length];
+        forEachWireSegment(wire, (_edge, a, b) => {
             const ex = b[0] - a[0];
             const ey = b[1] - a[1];
             const eLen = Math.hypot(ex, ey);
-            if (eLen <= 1e-12) continue;
+            if (eLen <= 1e-12 || probeDirections.length >= 6) return;
             const etx = ex / eLen;
             const ety = ey / eLen;
 
-            for (let t = probeStart; t < probeEnd && probeDirections.length < 4; t += probeStep) {
+            for (let t = probeStart; t < probeEnd && probeDirections.length < 6; t += probeStep) {
                 const sx = a[0] * t + b[0] * (1 - t);
                 const sy = a[1] * t + b[1] * (1 - t);
                 const vx = sx - px;
@@ -1700,29 +1857,34 @@ export async function tessellateTrimmedSurface(
                 if (sinA < smallAngleSin) continue;
                 probeDirections.push([vtx, vty]);
             }
-            if (probeDirections.length >= 4) break;
-        }
+        });
         if (probeDirections.length === 0) {
+            metrics.probeFallbacks++;
             probeDirections.push([1, 0]);
         }
 
         let insideVotes = 0;
         let outsideVotes = 0;
         for (const direction of probeDirections) {
-            const relation = classifyPointAgainstWireByDirection(point, wire, direction, {
+            const directional = classifyPointAgainstWireByDirection(point, wire, direction, {
                 edgeToleranceScale,
             });
-            if (relation === "on") {
-                return "on";
+            accumulateTransitionMetrics(metrics, directional.metrics);
+            if (directional.relation === "on") {
+                return { relation: "on", metrics };
             }
-            if (relation === "inside") insideVotes++;
+            if (directional.relation === "inside") insideVotes++;
             else outsideVotes++;
         }
-        if (insideVotes === 0 && outsideVotes === 0) return "on";
-        if (insideVotes > outsideVotes) return "inside";
-        if (outsideVotes > insideVotes) return "outside";
+        if (insideVotes === 0 && outsideVotes === 0) {
+            metrics.transitionTies++;
+            return { relation: "on", metrics };
+        }
+        if (insideVotes > outsideVotes) return { relation: "inside", metrics };
+        if (outsideVotes > insideVotes) return { relation: "outside", metrics };
 
-        return "on";
+        metrics.transitionTies++;
+        return { relation: "on", metrics };
     };
 
     const evaluateLocalUvCandidateByWireTransitions = (
@@ -1734,13 +1896,16 @@ export async function tessellateTrimmedSurface(
         let minBoundaryDistance = Infinity;
         let forceOutside = false;
         let badWire = false;
+        const transitionMetrics = createTransitionMetrics();
 
         for (const wire of localClassifierWires) {
             if (wire.hasBadEdges) {
                 badWire = true;
             }
-            const relation = classifyPointAgainstWireByTransitions(point, wire);
-            const boundaryDistance = distancePointToLoop(point, wire.loop);
+            const transitionClassification = classifyPointAgainstWireByTransitions(point, wire);
+            accumulateTransitionMetrics(transitionMetrics, transitionClassification.metrics);
+            const relation = transitionClassification.relation;
+            const boundaryDistance = distancePointToWire(point, wire);
             if (boundaryDistance < minBoundaryDistance) {
                 minBoundaryDistance = boundaryDistance;
             }
@@ -1750,6 +1915,8 @@ export async function tessellateTrimmedSurface(
                     nearBoundaryBand: true,
                     minBoundaryDistance,
                     badWire,
+                    source: "stageB",
+                    stageBMetrics: transitionMetrics,
                 };
             }
             if (
@@ -1771,6 +1938,8 @@ export async function tessellateTrimmedSurface(
                 nearBoundaryBand: true,
                 minBoundaryDistance,
                 badWire,
+                source: "stageB",
+                stageBMetrics: transitionMetrics,
             };
         }
 
@@ -1779,6 +1948,8 @@ export async function tessellateTrimmedSurface(
             nearBoundaryBand,
             minBoundaryDistance,
             badWire,
+            source: "stageB",
+            stageBMetrics: transitionMetrics,
         };
     };
 
@@ -1813,6 +1984,7 @@ export async function tessellateTrimmedSurface(
                 nearBoundaryBand: true,
                 minBoundaryDistance: Infinity,
                 badWire: true,
+                source: "stageA",
             };
         }
 
@@ -1840,6 +2012,7 @@ export async function tessellateTrimmedSurface(
             nearBoundaryBand: false,
             minBoundaryDistance: Infinity,
             badWire: false,
+            source: "stageA",
         };
         const forceStageB = options?.forceStageB === true;
         const disableStageB = options?.disableStageB === true;
@@ -1852,27 +2025,86 @@ export async function tessellateTrimmedSurface(
                     nearBoundaryBand: false,
                     minBoundaryDistance: Infinity,
                     badWire: true,
+                    source: "stageA" as const,
                 }
                 : evaluateLocalUvCandidate(u, v);
+            if (!forceStageB) {
+                localUvClassifierStats.stageAEvaluations++;
+                if (stageAEval.decision === "inside") {
+                    localUvClassifierStats.stageAInside++;
+                } else if (stageAEval.decision === "outside") {
+                    localUvClassifierStats.stageAOutside++;
+                } else {
+                    localUvClassifierStats.stageAUncertain++;
+                }
+                if (stageAEval.badWire) {
+                    localUvClassifierStats.stageABadWire++;
+                }
+            }
             let evalAtPoint = stageAEval;
             const shouldRunStageB =
                 !disableStageB &&
                 useLocalUvTopologicalFallback &&
                 (forceStageB || stageAEval.decision === "uncertain" || stageAEval.badWire);
             if (shouldRunStageB) {
+                localUvClassifierStats.stageBEvaluations++;
+                if (forceStageB) {
+                    localUvClassifierStats.stageBForcedEvaluations++;
+                }
+                if (!forceStageB && stageAEval.decision === "uncertain") {
+                    localUvClassifierStats.stageBTriggeredByUncertain++;
+                }
+                if (!forceStageB && stageAEval.badWire) {
+                    localUvClassifierStats.stageBTriggeredByBadWire++;
+                }
                 const stageBEval = evaluateLocalUvCandidateByWireTransitions(u, v, {
                     allowBoundaryBandUncertain: false,
                 });
-                // OCCT-style flow: Stage-B resolves ambiguous Stage-A outcomes.
-                // We do not override Stage-A hard inside/outside decisions here.
+                if (stageBEval.decision === "inside") {
+                    localUvClassifierStats.stageBInside++;
+                } else if (stageBEval.decision === "outside") {
+                    localUvClassifierStats.stageBOutside++;
+                } else {
+                    localUvClassifierStats.stageBUncertain++;
+                }
+                if (stageBEval.stageBMetrics) {
+                    localUvClassifierStats.stageBProbeFallbacks += stageBEval.stageBMetrics.probeFallbacks;
+                    localUvClassifierStats.stageBBundleSkips += stageBEval.stageBMetrics.bundleSkips;
+                    localUvClassifierStats.stageBSkippedNearVertexHits += stageBEval.stageBMetrics.skippedNearVertexHits;
+                    localUvClassifierStats.stageBTransitionTies += stageBEval.stageBMetrics.transitionTies;
+                }
+                // OCCT-style flow: Stage-B owns ambiguous/bad-wire paths.
                 if (forceStageB) {
-                    evalAtPoint = stageBEval;
+                    evalAtPoint = {
+                        ...stageBEval,
+                        source: "stageB_forced",
+                    };
+                } else if (stageAEval.badWire) {
+                    localUvClassifierStats.stageBResolvedByBadWire++;
+                    if (stageBEval.decision === "uncertain") {
+                        evalAtPoint = {
+                            decision: "uncertain",
+                            nearBoundaryBand: stageAEval.nearBoundaryBand || stageBEval.nearBoundaryBand,
+                            minBoundaryDistance: Math.min(stageAEval.minBoundaryDistance, stageBEval.minBoundaryDistance),
+                            badWire: true,
+                            source: "stageB",
+                            stageBMetrics: stageBEval.stageBMetrics,
+                        };
+                    } else {
+                        evalAtPoint = {
+                            ...stageBEval,
+                            source: "stageB",
+                        };
+                    }
                 } else if (stageAEval.decision === "uncertain" && stageBEval.decision !== "uncertain") {
+                    localUvClassifierStats.stageBResolvedByUncertain++;
                     evalAtPoint = {
                         decision: stageBEval.decision,
                         nearBoundaryBand: stageAEval.nearBoundaryBand || stageBEval.nearBoundaryBand,
                         minBoundaryDistance: Math.min(stageAEval.minBoundaryDistance, stageBEval.minBoundaryDistance),
                         badWire: stageAEval.badWire || stageBEval.badWire,
+                        source: "stageB",
+                        stageBMetrics: stageBEval.stageBMetrics,
                     };
                 }
             }
@@ -1931,6 +2163,7 @@ export async function tessellateTrimmedSurface(
                     decision: "uncertain",
                     nearBoundaryBand: true,
                     seamProximate: isSeamProximate(uRaw),
+                    source: "domain_uncertain",
                 };
             }
             if (localClassifierWires.length > 0) {
@@ -1940,6 +2173,7 @@ export async function tessellateTrimmedSurface(
                         decision: stageA.decision,
                         nearBoundaryBand: stageA.nearBoundaryBand,
                         seamProximate: isSeamProximate(uRaw),
+                        source: "domain_stageA",
                     };
                 }
             }
@@ -1949,12 +2183,14 @@ export async function tessellateTrimmedSurface(
                     decision: candidate.decision,
                     nearBoundaryBand: candidate.nearBoundaryBand,
                     seamProximate: isSeamProximate(uRaw),
+                    source: "domain_stageB",
                 };
             }
             return {
                 decision: "uncertain",
                 nearBoundaryBand: true,
                 seamProximate: isSeamProximate(uRaw),
+                source: "domain_uncertain",
             };
         }
         const candidate = evaluateLocalUvWithPeriodicTraversal(uRaw, v);
@@ -1963,6 +2199,7 @@ export async function tessellateTrimmedSurface(
             decision: candidate.decision,
             nearBoundaryBand: candidate.nearBoundaryBand,
             seamProximate,
+            source: candidate.source,
         };
     };
 
@@ -1980,6 +2217,36 @@ export async function tessellateTrimmedSurface(
             ...raw,
             decision: applyLocalUvPolarity(raw.decision),
         };
+    };
+
+    const recordLocalDecisionSource = (
+        source: LocalUvDecisionSource,
+        mismatched: boolean
+    ): void => {
+        if (source === "stageA") {
+            localUvClassifierStats.decisionFromStageA++;
+            if (mismatched) localUvClassifierStats.mismatchFromStageA++;
+            return;
+        }
+        if (source === "stageB") {
+            localUvClassifierStats.decisionFromStageB++;
+            if (mismatched) localUvClassifierStats.mismatchFromStageB++;
+            return;
+        }
+        if (source === "stageB_forced") {
+            localUvClassifierStats.decisionFromStageBForced++;
+            if (mismatched) localUvClassifierStats.mismatchFromStageBForced++;
+            return;
+        }
+        if (source === "domain_stageA") {
+            localUvClassifierStats.decisionFromDomainUnsafeStageA++;
+            if (mismatched) localUvClassifierStats.mismatchFromDomainUnsafe++;
+            return;
+        }
+        if (source === "domain_stageB") {
+            localUvClassifierStats.decisionFromDomainUnsafeStageB++;
+            if (mismatched) localUvClassifierStats.mismatchFromDomainUnsafe++;
+        }
     };
 
     const maybeCalibrateConeLocalUvPolarity = (): void => {
@@ -2243,6 +2510,7 @@ export async function tessellateTrimmedSurface(
                     includePoint = occInside;
                     if (localDecision.decision !== "uncertain") {
                         const localInside = localDecision.decision === "inside";
+                        recordLocalDecisionSource(localDecision.source, localInside !== occInside);
                         if (localInside !== occInside) {
                             localUvClassifierStats.mismatchCount++;
                             if (localInside) {
@@ -2265,9 +2533,11 @@ export async function tessellateTrimmedSurface(
                 } else if (useLocalUvClassifierCandidate) {
                     const localDecision = classifyWithLocalUvClassifier(u, v);
                     if (localDecision.decision === "inside") {
+                        recordLocalDecisionSource(localDecision.source, false);
                         localUvClassifierStats.inside++;
                         includePoint = true;
                     } else if (localDecision.decision === "outside") {
+                        recordLocalDecisionSource(localDecision.source, false);
                         localUvClassifierStats.outside++;
                         includePoint = false;
                     } else if (localUvClassifierFallbackToOcc) {
@@ -2362,7 +2632,9 @@ export async function tessellateTrimmedSurface(
                 `polarityInverted=${localUvPolarityInverted}, ` +
                 `polarityCalib=${localUvPolarityCalibrationSamples}/${localUvPolarityCalibrationDirectMismatch}->${localUvPolarityCalibrationInvertedMismatch}, ` +
                 `boundaryMismatch=${localUvClassifierStats.mismatchBoundaryBand}, ` +
-                `seamMismatch=${localUvClassifierStats.mismatchSeamProximate}`
+                `seamMismatch=${localUvClassifierStats.mismatchSeamProximate}, ` +
+                `stageA=${localUvClassifierStats.stageAEvaluations}, stageB=${localUvClassifierStats.stageBEvaluations}, ` +
+                `stageBForced=${localUvClassifierStats.stageBForcedEvaluations}, badWireTriggers=${localUvClassifierStats.stageBTriggeredByBadWire}`
             );
         }
 
@@ -2565,6 +2837,33 @@ export async function tessellateTrimmedSurface(
                 mismatchNonSeam: localUvClassifierStats.mismatchNonSeam,
                 falseInsideCount: localUvClassifierStats.falseInsideCount,
                 falseOutsideCount: localUvClassifierStats.falseOutsideCount,
+                stageAEvaluations: localUvClassifierStats.stageAEvaluations,
+                stageAInside: localUvClassifierStats.stageAInside,
+                stageAOutside: localUvClassifierStats.stageAOutside,
+                stageAUncertain: localUvClassifierStats.stageAUncertain,
+                stageABadWire: localUvClassifierStats.stageABadWire,
+                stageBEvaluations: localUvClassifierStats.stageBEvaluations,
+                stageBForcedEvaluations: localUvClassifierStats.stageBForcedEvaluations,
+                stageBTriggeredByUncertain: localUvClassifierStats.stageBTriggeredByUncertain,
+                stageBTriggeredByBadWire: localUvClassifierStats.stageBTriggeredByBadWire,
+                stageBInside: localUvClassifierStats.stageBInside,
+                stageBOutside: localUvClassifierStats.stageBOutside,
+                stageBUncertain: localUvClassifierStats.stageBUncertain,
+                stageBResolvedByUncertain: localUvClassifierStats.stageBResolvedByUncertain,
+                stageBResolvedByBadWire: localUvClassifierStats.stageBResolvedByBadWire,
+                stageBProbeFallbacks: localUvClassifierStats.stageBProbeFallbacks,
+                stageBBundleSkips: localUvClassifierStats.stageBBundleSkips,
+                stageBSkippedNearVertexHits: localUvClassifierStats.stageBSkippedNearVertexHits,
+                stageBTransitionTies: localUvClassifierStats.stageBTransitionTies,
+                decisionFromStageA: localUvClassifierStats.decisionFromStageA,
+                decisionFromStageB: localUvClassifierStats.decisionFromStageB,
+                decisionFromStageBForced: localUvClassifierStats.decisionFromStageBForced,
+                decisionFromDomainUnsafeStageA: localUvClassifierStats.decisionFromDomainUnsafeStageA,
+                decisionFromDomainUnsafeStageB: localUvClassifierStats.decisionFromDomainUnsafeStageB,
+                mismatchFromStageA: localUvClassifierStats.mismatchFromStageA,
+                mismatchFromStageB: localUvClassifierStats.mismatchFromStageB,
+                mismatchFromStageBForced: localUvClassifierStats.mismatchFromStageBForced,
+                mismatchFromDomainUnsafe: localUvClassifierStats.mismatchFromDomainUnsafe,
             });
         } catch {
             // Classifier summary hooks are best-effort only.

@@ -611,34 +611,140 @@ let hasWarnedGpuEvalFailure = false;
 
 interface PendingSurfaceEvalJob {
     surface: SupportedSurface;
-    uvVertices: [number, number][];
+    vertexCount: number;
+    uvFlat: Float32Array;
+    uvVertices: [number, number][] | null;
     resolve: (result: { positions: Float32Array; normals: Float32Array } | null) => void;
 }
 
 let pendingJobs: PendingSurfaceEvalJob[] = [];
 let flushInFlight = false;
 let flushScheduled = false;
+let flushTimer: ReturnType<typeof setTimeout> | null = null;
+const EMPTY_UV = new Float32Array(0);
+const evalPackScratch: {
+    uvFlat: Float32Array;
+    vertexSurfaceIndex: Uint32Array;
+    surfaceParamsF32: Float32Array;
+    rangeStarts: Uint32Array;
+    rangeCounts: Uint32Array;
+} = {
+    uvFlat: EMPTY_UV,
+    vertexSurfaceIndex: new Uint32Array(0),
+    surfaceParamsF32: new Float32Array(0),
+    rangeStarts: new Uint32Array(0),
+    rangeCounts: new Uint32Array(0),
+};
+
+function growCapacity(current: number, required: number): number {
+    if (current >= required) return current;
+    let next = Math.max(1024, current);
+    while (next < required) {
+        next *= 2;
+    }
+    return next;
+}
+
+function ensureEvalPackScratch(totalVerts: number, jobCount: number) {
+    const uvFloatsNeeded = totalVerts * 2;
+    if (evalPackScratch.uvFlat.length < uvFloatsNeeded) {
+        evalPackScratch.uvFlat = new Float32Array(growCapacity(evalPackScratch.uvFlat.length, uvFloatsNeeded));
+    }
+    if (evalPackScratch.vertexSurfaceIndex.length < totalVerts) {
+        evalPackScratch.vertexSurfaceIndex = new Uint32Array(
+            growCapacity(evalPackScratch.vertexSurfaceIndex.length, totalVerts)
+        );
+    }
+    const surfaceFloatsNeeded = jobCount * FLOATS_PER_SURFACE;
+    if (evalPackScratch.surfaceParamsF32.length < surfaceFloatsNeeded) {
+        evalPackScratch.surfaceParamsF32 = new Float32Array(
+            growCapacity(evalPackScratch.surfaceParamsF32.length, surfaceFloatsNeeded)
+        );
+    }
+    if (evalPackScratch.rangeStarts.length < jobCount) {
+        evalPackScratch.rangeStarts = new Uint32Array(
+            growCapacity(evalPackScratch.rangeStarts.length, jobCount)
+        );
+    }
+    if (evalPackScratch.rangeCounts.length < jobCount) {
+        evalPackScratch.rangeCounts = new Uint32Array(
+            growCapacity(evalPackScratch.rangeCounts.length, jobCount)
+        );
+    }
+}
+
+function getSurfaceEvalBatchTargetJobs(): number {
+    const explicitTarget = readGlobalNumber("__GPU_SURFACE_EVAL_BATCH_TARGET_JOBS__");
+    if (explicitTarget !== undefined) {
+        return Math.max(1, Math.floor(explicitTarget));
+    }
+    if (readGlobalBoolean("__PERF_GEOMETRY_ONLY_LOAD__", false)) {
+        return 256;
+    }
+    return 1;
+}
+
+function getSurfaceEvalBatchTargetVerts(): number {
+    const explicitTarget = readGlobalNumber("__GPU_SURFACE_EVAL_BATCH_TARGET_VERTS__");
+    if (explicitTarget !== undefined) {
+        return Math.max(1, Math.floor(explicitTarget));
+    }
+    if (readGlobalBoolean("__PERF_GEOMETRY_ONLY_LOAD__", false)) {
+        return 350000;
+    }
+    return Number.MAX_SAFE_INTEGER;
+}
 
 function getSurfaceEvalBatchDelayMs(): number {
     const explicitDelay = readGlobalNumber("__GPU_SURFACE_EVAL_BATCH_DELAY_MS__");
     if (explicitDelay !== undefined) {
         return Math.max(0, Math.min(32, explicitDelay));
     }
+    if (readGlobalBoolean("__PERF_GEOMETRY_ONLY_LOAD__", false)) {
+        // Allow a tiny coalescing window in perf mode so many curved faces can
+        // share a single GPU dispatch/readback batch instead of trickling one by one.
+        return 4;
+    }
     return 0;
 }
 
 function scheduleFlush() {
-    if (flushScheduled) return;
-    flushScheduled = true;
+    const targetJobs = getSurfaceEvalBatchTargetJobs();
+    const targetVerts = getSurfaceEvalBatchTargetVerts();
     const delayMs = getSurfaceEvalBatchDelayMs();
-    if (delayMs <= 0) {
+    let pendingVerts = 0;
+    for (const job of pendingJobs) {
+        pendingVerts += job.vertexCount;
+    }
+    const shouldFlushNow =
+        pendingJobs.length >= targetJobs ||
+        pendingVerts >= targetVerts ||
+        delayMs <= 0;
+    if (shouldFlushNow) {
+        if (flushTimer) {
+            clearTimeout(flushTimer);
+            flushTimer = null;
+            flushScheduled = false;
+        }
+        if (flushScheduled) return;
+        flushScheduled = true;
         queueMicrotask(() => {
             flushScheduled = false;
             void flushPendingJobs();
         });
         return;
     }
-    setTimeout(() => {
+
+    // Debounce timer-based flushes so jobs that arrive over a few milliseconds
+    // coalesce into one larger GPU submission/readback.
+    if (!flushScheduled) {
+        flushScheduled = true;
+    }
+    if (flushTimer) {
+        clearTimeout(flushTimer);
+    }
+    flushTimer = setTimeout(() => {
+        flushTimer = null;
         flushScheduled = false;
         void flushPendingJobs();
     }, delayMs);
@@ -665,27 +771,42 @@ async function runBatch(jobs: PendingSurfaceEvalJob[]) {
         const { device, pipeline } = await ensurePipeline();
 
         let totalVerts = 0;
-        for (const job of jobs) totalVerts += job.uvVertices.length;
+        for (const job of jobs) totalVerts += job.vertexCount;
+        ensureEvalPackScratch(totalVerts, jobs.length);
 
-        const uvFlat = new Float32Array(totalVerts * 2);
-        const vertexSurfaceIndex = new Uint32Array(totalVerts);
-        const surfaceParamsF32 = new Float32Array(jobs.length * FLOATS_PER_SURFACE);
-        const surfaceParamsU32 = new Uint32Array(surfaceParamsF32.buffer);
+        const uvFlat = evalPackScratch.uvFlat.subarray(0, totalVerts * 2);
+        const vertexSurfaceIndex = evalPackScratch.vertexSurfaceIndex.subarray(0, totalVerts);
+        const surfaceParamsF32 = evalPackScratch.surfaceParamsF32.subarray(0, jobs.length * FLOATS_PER_SURFACE);
+        const surfaceParamsU32 = new Uint32Array(
+            surfaceParamsF32.buffer,
+            surfaceParamsF32.byteOffset,
+            surfaceParamsF32.byteLength / 4
+        );
+        const rangeStarts = evalPackScratch.rangeStarts.subarray(0, jobs.length);
+        const rangeCounts = evalPackScratch.rangeCounts.subarray(0, jobs.length);
 
-        const ranges: Array<{ start: number; count: number }> = [];
         let cursor = 0;
         for (let jobIndex = 0; jobIndex < jobs.length; jobIndex++) {
             const job = jobs[jobIndex];
-            const count = job.uvVertices.length;
-            ranges.push({ start: cursor, count });
+            const count = job.vertexCount;
+            rangeStarts[jobIndex] = cursor;
+            rangeCounts[jobIndex] = count;
             writeSurfaceParams(surfaceParamsF32, surfaceParamsU32, jobIndex, job.surface);
-            for (let i = 0; i < count; i++) {
-                const [u, v] = job.uvVertices[i];
-                const outUvBase = (cursor + i) * 2;
-                uvFlat[outUvBase + 0] = u;
-                uvFlat[outUvBase + 1] = v;
-                vertexSurfaceIndex[cursor + i] = jobIndex;
+            if (job.uvFlat.length === count * 2) {
+                uvFlat.set(job.uvFlat, cursor * 2);
+            } else if (job.uvVertices) {
+                for (let i = 0; i < count; i++) {
+                    const [u, v] = job.uvVertices[i];
+                    const outUvBase = (cursor + i) * 2;
+                    uvFlat[outUvBase + 0] = u;
+                    uvFlat[outUvBase + 1] = v;
+                }
+            } else {
+                for (let i = 0; i < count * 2; i++) {
+                    uvFlat[cursor * 2 + i] = 0;
+                }
             }
+            vertexSurfaceIndex.fill(jobIndex, cursor, cursor + count);
             cursor += count;
         }
 
@@ -826,14 +947,19 @@ async function runBatch(jobs: PendingSurfaceEvalJob[]) {
         const normalsView = new Float32Array(normalsMapped);
 
         try {
+            // Copy once per batch, then hand out cheap views for each face/job.
+            const positionsAll = new Float32Array(totalVerts * 3);
+            const normalsAll = new Float32Array(totalVerts * 3);
+            positionsAll.set(positionsView);
+            normalsAll.set(normalsView);
+
             for (let i = 0; i < jobs.length; i++) {
-                const { start, count } = ranges[i];
+                const start = rangeStarts[i];
+                const count = rangeCounts[i];
                 const posBase = start * 3;
                 const posEnd = posBase + count * 3;
-                const positions = new Float32Array(count * 3);
-                const normals = new Float32Array(count * 3);
-                positions.set(positionsView.subarray(posBase, posEnd));
-                normals.set(normalsView.subarray(posBase, posEnd));
+                const positions = positionsAll.subarray(posBase, posEnd);
+                const normals = normalsAll.subarray(posBase, posEnd);
                 jobs[i].resolve({ positions, normals });
             }
         } finally {
@@ -853,7 +979,7 @@ async function runBatch(jobs: PendingSurfaceEvalJob[]) {
 
 export async function evaluateSurfaceMeshGPU(
     surface: Surface,
-    uvVertices: [number, number][]
+    uvData: [number, number][] | Float32Array
 ): Promise<{ positions: Float32Array; normals: Float32Array } | null> {
     if (!readGlobalBoolean("__ENABLE_GPU_SURFACE_EVAL__", true)) {
         return null;
@@ -862,7 +988,12 @@ export async function evaluateSurfaceMeshGPU(
         return null;
     }
 
-    const vertexCount = uvVertices.length;
+    const uvFlat = uvData instanceof Float32Array
+        ? (uvData.length >= 2 ? uvData.subarray(0, Math.floor(uvData.length / 2) * 2) : EMPTY_UV)
+        : EMPTY_UV;
+    const vertexCount = uvData instanceof Float32Array
+        ? Math.floor(uvFlat.length / 2)
+        : uvData.length;
     const minVerts = Math.max(512, Math.floor(readGlobalNumber("__GPU_SURFACE_EVAL_MIN_VERTS__") ?? 2048));
     if (vertexCount < minVerts) {
         return null;
@@ -871,7 +1002,9 @@ export async function evaluateSurfaceMeshGPU(
     return await new Promise((resolve) => {
         pendingJobs.push({
             surface,
-            uvVertices,
+            vertexCount,
+            uvFlat,
+            uvVertices: uvData instanceof Float32Array ? null : uvData,
             resolve,
         });
         scheduleFlush();
@@ -894,27 +1027,122 @@ interface PendingGridEvalJob {
 let pendingGridJobs: PendingGridEvalJob[] = [];
 let gridFlushInFlight = false;
 let gridFlushScheduled = false;
+let gridFlushTimer: ReturnType<typeof setTimeout> | null = null;
+const gridPackScratch: {
+    surfaceParamsF32: Float32Array;
+    jobParamsU32: Uint32Array;
+    vertexJobIndex: Uint32Array;
+    rangeStarts: Uint32Array;
+    rangeCounts: Uint32Array;
+} = {
+    surfaceParamsF32: new Float32Array(0),
+    jobParamsU32: new Uint32Array(0),
+    vertexJobIndex: new Uint32Array(0),
+    rangeStarts: new Uint32Array(0),
+    rangeCounts: new Uint32Array(0),
+};
+
+function ensureGridPackScratch(totalVerts: number, jobCount: number) {
+    const surfaceFloatsNeeded = jobCount * FLOATS_PER_SURFACE;
+    if (gridPackScratch.surfaceParamsF32.length < surfaceFloatsNeeded) {
+        gridPackScratch.surfaceParamsF32 = new Float32Array(
+            growCapacity(gridPackScratch.surfaceParamsF32.length, surfaceFloatsNeeded)
+        );
+    }
+    const jobU32Needed = jobCount * 8;
+    if (gridPackScratch.jobParamsU32.length < jobU32Needed) {
+        gridPackScratch.jobParamsU32 = new Uint32Array(
+            growCapacity(gridPackScratch.jobParamsU32.length, jobU32Needed)
+        );
+    }
+    if (gridPackScratch.vertexJobIndex.length < totalVerts) {
+        gridPackScratch.vertexJobIndex = new Uint32Array(
+            growCapacity(gridPackScratch.vertexJobIndex.length, totalVerts)
+        );
+    }
+    if (gridPackScratch.rangeStarts.length < jobCount) {
+        gridPackScratch.rangeStarts = new Uint32Array(
+            growCapacity(gridPackScratch.rangeStarts.length, jobCount)
+        );
+    }
+    if (gridPackScratch.rangeCounts.length < jobCount) {
+        gridPackScratch.rangeCounts = new Uint32Array(
+            growCapacity(gridPackScratch.rangeCounts.length, jobCount)
+        );
+    }
+}
+
+function getSurfaceGridEvalBatchTargetJobs(): number {
+    const explicitTarget = readGlobalNumber("__GPU_SURFACE_GRID_BATCH_TARGET_JOBS__");
+    if (explicitTarget !== undefined) {
+        return Math.max(1, Math.floor(explicitTarget));
+    }
+    if (readGlobalBoolean("__PERF_GEOMETRY_ONLY_LOAD__", false)) {
+        return 256;
+    }
+    return 1;
+}
+
+function getSurfaceGridEvalBatchTargetVerts(): number {
+    const explicitTarget = readGlobalNumber("__GPU_SURFACE_GRID_BATCH_TARGET_VERTS__");
+    if (explicitTarget !== undefined) {
+        return Math.max(1, Math.floor(explicitTarget));
+    }
+    if (readGlobalBoolean("__PERF_GEOMETRY_ONLY_LOAD__", false)) {
+        return 350000;
+    }
+    return Number.MAX_SAFE_INTEGER;
+}
 
 function getSurfaceGridEvalBatchDelayMs(): number {
     const explicitDelay = readGlobalNumber("__GPU_SURFACE_GRID_BATCH_DELAY_MS__");
     if (explicitDelay !== undefined) {
         return Math.max(0, Math.min(32, explicitDelay));
     }
+    if (readGlobalBoolean("__PERF_GEOMETRY_ONLY_LOAD__", false)) {
+        // Same coalescing strategy for dense-grid jobs.
+        return 4;
+    }
     return 0;
 }
 
 function scheduleGridFlush() {
-    if (gridFlushScheduled) return;
-    gridFlushScheduled = true;
+    const targetJobs = getSurfaceGridEvalBatchTargetJobs();
+    const targetVerts = getSurfaceGridEvalBatchTargetVerts();
     const delayMs = getSurfaceGridEvalBatchDelayMs();
-    if (delayMs <= 0) {
+    let pendingVerts = 0;
+    for (const job of pendingGridJobs) {
+        pendingVerts += (job.gridDensityU + 1) * (job.gridDensityV + 1);
+    }
+    const shouldFlushNow =
+        pendingGridJobs.length >= targetJobs ||
+        pendingVerts >= targetVerts ||
+        delayMs <= 0;
+    if (shouldFlushNow) {
+        if (gridFlushTimer) {
+            clearTimeout(gridFlushTimer);
+            gridFlushTimer = null;
+            gridFlushScheduled = false;
+        }
+        if (gridFlushScheduled) return;
+        gridFlushScheduled = true;
         queueMicrotask(() => {
             gridFlushScheduled = false;
             void flushPendingGridJobs();
         });
         return;
     }
-    setTimeout(() => {
+
+    // Debounce timer-based flushes to collect a model-wide curved trim batch
+    // into one/few dense-grid eval submissions.
+    if (!gridFlushScheduled) {
+        gridFlushScheduled = true;
+    }
+    if (gridFlushTimer) {
+        clearTimeout(gridFlushTimer);
+    }
+    gridFlushTimer = setTimeout(() => {
+        gridFlushTimer = null;
         gridFlushScheduled = false;
         void flushPendingGridJobs();
     }, delayMs);
@@ -939,23 +1167,34 @@ async function runDenseGridBatch(jobs: PendingGridEvalJob[]) {
     try {
         const { device, pipeline } = await ensureGridPipeline();
 
-        const surfaceParamsF32 = new Float32Array(jobs.length * FLOATS_PER_SURFACE);
-        const surfaceParamsU32 = new Uint32Array(surfaceParamsF32.buffer);
-        const jobParamsU32 = new Uint32Array(jobs.length * 8);
-        const jobParamsF32 = new Float32Array(jobParamsU32.buffer);
-
         let totalVerts = 0;
         for (const job of jobs) {
             totalVerts += (job.gridDensityU + 1) * (job.gridDensityV + 1);
         }
-        const vertexJobIndex = new Uint32Array(totalVerts);
-        const ranges: Array<{ start: number; count: number }> = [];
+        ensureGridPackScratch(totalVerts, jobs.length);
+
+        const surfaceParamsF32 = gridPackScratch.surfaceParamsF32.subarray(0, jobs.length * FLOATS_PER_SURFACE);
+        const surfaceParamsU32 = new Uint32Array(
+            surfaceParamsF32.buffer,
+            surfaceParamsF32.byteOffset,
+            surfaceParamsF32.byteLength / 4
+        );
+        const jobParamsU32 = gridPackScratch.jobParamsU32.subarray(0, jobs.length * 8);
+        const jobParamsF32 = new Float32Array(
+            jobParamsU32.buffer,
+            jobParamsU32.byteOffset,
+            jobParamsU32.byteLength / 4
+        );
+        const vertexJobIndex = gridPackScratch.vertexJobIndex.subarray(0, totalVerts);
+        const rangeStarts = gridPackScratch.rangeStarts.subarray(0, jobs.length);
+        const rangeCounts = gridPackScratch.rangeCounts.subarray(0, jobs.length);
 
         let cursor = 0;
         for (let jobIndex = 0; jobIndex < jobs.length; jobIndex++) {
             const job = jobs[jobIndex];
             const count = (job.gridDensityU + 1) * (job.gridDensityV + 1);
-            ranges.push({ start: cursor, count });
+            rangeStarts[jobIndex] = cursor;
+            rangeCounts[jobIndex] = count;
             vertexJobIndex.fill(jobIndex, cursor, cursor + count);
 
             writeSurfaceParams(surfaceParamsF32, surfaceParamsU32, jobIndex, job.surface);
@@ -1109,14 +1348,19 @@ async function runDenseGridBatch(jobs: PendingGridEvalJob[]) {
         const normalsView = new Float32Array(normalsMapped);
 
         try {
+            // Copy once per batch, then hand out per-job views without additional memcpy.
+            const positionsAll = new Float32Array(totalVerts * 3);
+            const normalsAll = new Float32Array(totalVerts * 3);
+            positionsAll.set(positionsView);
+            normalsAll.set(normalsView);
+
             for (let i = 0; i < jobs.length; i++) {
-                const { start, count } = ranges[i];
+                const start = rangeStarts[i];
+                const count = rangeCounts[i];
                 const base = start * 3;
                 const end = base + count * 3;
-                const positions = new Float32Array(count * 3);
-                const normals = new Float32Array(count * 3);
-                positions.set(positionsView.subarray(base, end));
-                normals.set(normalsView.subarray(base, end));
+                const positions = positionsAll.subarray(base, end);
+                const normals = normalsAll.subarray(base, end);
                 jobs[i].resolve({ positions, normals });
             }
         } finally {
@@ -1151,7 +1395,9 @@ export async function evaluateSurfaceDenseGridGPU(
     }
 
     const vertexCount = (gridDensityU + 1) * (gridDensityV + 1);
-    const minVerts = Math.max(1024, Math.floor(readGlobalNumber("__GPU_SURFACE_GRID_EVAL_MIN_VERTS__") ?? 4096));
+    const preferGeometryOnlyLoad = readGlobalBoolean("__PERF_GEOMETRY_ONLY_LOAD__", false);
+    const defaultMinVerts = preferGeometryOnlyLoad ? 1024 : 4096;
+    const minVerts = Math.max(256, Math.floor(readGlobalNumber("__GPU_SURFACE_GRID_EVAL_MIN_VERTS__") ?? defaultMinVerts));
     if (vertexCount < minVerts) {
         return null;
     }

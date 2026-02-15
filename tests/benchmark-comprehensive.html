@@ -31,6 +31,7 @@
             tessellationProfile,
             resetTessellationProfile,
             getTessellationProfileReport,
+            getLocalUvClassifierTelemetry,
             parseStepWithOcctImportSimple
         } from '/src/occ-test.ts';
         import { getGPUDevice } from '/src/lib.ts';
@@ -56,6 +57,22 @@
                     const prevCurveVerbose = globalThis.__CURVE_VERBOSE_LOGS__;
                     const prevTessVerbose = globalThis.__TESSELLATION_VERBOSE_LOGS__;
                     const prevTriFastGpuPriority = globalThis.__TRI_FAST_GPU_PRIORITY__;
+                    const prevDetailedTessProfile = globalThis.__ENABLE_DETAILED_TESSELLATION_PROFILING__;
+                    const prevLocalUvClassifierShadow = globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__;
+                    const prevLocalUvClassifierCandidate = globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__;
+                    const prevLocalUvClassifierFallback = globalThis.__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__;
+                    const prevLocalUvClassifierCandidateStrict = globalThis.__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__;
+                    const prevGridBatchTargetJobs = globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_JOBS__;
+                    const prevGridBatchTargetVerts = globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_VERTS__;
+                    const prevGridBatchDelayMs = globalThis.__GPU_SURFACE_GRID_BATCH_DELAY_MS__;
+                    const prevEvalBatchTargetJobs = globalThis.__GPU_SURFACE_EVAL_BATCH_TARGET_JOBS__;
+                    const prevEvalBatchTargetVerts = globalThis.__GPU_SURFACE_EVAL_BATCH_TARGET_VERTS__;
+                    const prevEvalBatchDelayMs = globalThis.__GPU_SURFACE_EVAL_BATCH_DELAY_MS__;
+                    const enableDetailedTessProfile = globalThis.__BENCH_DETAILED_PROFILE__ === true;
+                    const enableLocalUvClassifierShadow = globalThis.__BENCH_ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__ === true;
+                    const enableLocalUvClassifierCandidate = globalThis.__BENCH_ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__ === true;
+                    const enableLocalUvClassifierCandidateStrict = globalThis.__BENCH_ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__ === true;
+                    const disableLocalUvClassifierFallback = globalThis.__BENCH_DISABLE_LOCAL_UV_CLASSIFIER_FALLBACK__ === true;
                     globalThis.__PERF_GEOMETRY_ONLY_LOAD__ = true;
                     globalThis.__ENABLE_XCAF_READER__ = false;
                     globalThis.__ENABLE_STEP_COLOR_PARSING__ = false;
@@ -63,6 +80,19 @@
                     globalThis.__CURVE_VERBOSE_LOGS__ = false;
                     globalThis.__TESSELLATION_VERBOSE_LOGS__ = false;
                     globalThis.__TRI_FAST_GPU_PRIORITY__ = true;
+                    globalThis.__ENABLE_DETAILED_TESSELLATION_PROFILING__ = enableDetailedTessProfile;
+                    globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__ = enableLocalUvClassifierShadow;
+                    globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__ = enableLocalUvClassifierCandidate;
+                    globalThis.__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__ = !disableLocalUvClassifierFallback;
+                    globalThis.__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__ = enableLocalUvClassifierCandidateStrict;
+                    // Keep dense/sparse surface eval in model-wide coalescing mode so
+                    // curved-trimmed faces are packed into one/few GPU submissions.
+                    globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_JOBS__ = 1024;
+                    globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_VERTS__ = 2_000_000;
+                    globalThis.__GPU_SURFACE_GRID_BATCH_DELAY_MS__ = 8;
+                    globalThis.__GPU_SURFACE_EVAL_BATCH_TARGET_JOBS__ = 1024;
+                    globalThis.__GPU_SURFACE_EVAL_BATCH_TARGET_VERTS__ = 2_000_000;
+                    globalThis.__GPU_SURFACE_EVAL_BATCH_DELAY_MS__ = 8;
 
                     let mesh;
                     try {
@@ -103,12 +133,79 @@
                         } else {
                             globalThis.__TRI_FAST_GPU_PRIORITY__ = prevTriFastGpuPriority;
                         }
+                        if (prevDetailedTessProfile === undefined) {
+                            delete globalThis.__ENABLE_DETAILED_TESSELLATION_PROFILING__;
+                        } else {
+                            globalThis.__ENABLE_DETAILED_TESSELLATION_PROFILING__ = prevDetailedTessProfile;
+                        }
+                        if (prevLocalUvClassifierShadow === undefined) {
+                            delete globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__;
+                        } else {
+                            globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__ = prevLocalUvClassifierShadow;
+                        }
+                        if (prevLocalUvClassifierCandidate === undefined) {
+                            delete globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__;
+                        } else {
+                            globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__ = prevLocalUvClassifierCandidate;
+                        }
+                        if (prevLocalUvClassifierFallback === undefined) {
+                            delete globalThis.__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__;
+                        } else {
+                            globalThis.__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__ = prevLocalUvClassifierFallback;
+                        }
+                        if (prevLocalUvClassifierCandidateStrict === undefined) {
+                            delete globalThis.__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__;
+                        } else {
+                            globalThis.__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__ = prevLocalUvClassifierCandidateStrict;
+                        }
+                        if (prevGridBatchTargetJobs === undefined) {
+                            delete globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_JOBS__;
+                        } else {
+                            globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_JOBS__ = prevGridBatchTargetJobs;
+                        }
+                        if (prevGridBatchTargetVerts === undefined) {
+                            delete globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_VERTS__;
+                        } else {
+                            globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_VERTS__ = prevGridBatchTargetVerts;
+                        }
+                        if (prevGridBatchDelayMs === undefined) {
+                            delete globalThis.__GPU_SURFACE_GRID_BATCH_DELAY_MS__;
+                        } else {
+                            globalThis.__GPU_SURFACE_GRID_BATCH_DELAY_MS__ = prevGridBatchDelayMs;
+                        }
+                        if (prevEvalBatchTargetJobs === undefined) {
+                            delete globalThis.__GPU_SURFACE_EVAL_BATCH_TARGET_JOBS__;
+                        } else {
+                            globalThis.__GPU_SURFACE_EVAL_BATCH_TARGET_JOBS__ = prevEvalBatchTargetJobs;
+                        }
+                        if (prevEvalBatchTargetVerts === undefined) {
+                            delete globalThis.__GPU_SURFACE_EVAL_BATCH_TARGET_VERTS__;
+                        } else {
+                            globalThis.__GPU_SURFACE_EVAL_BATCH_TARGET_VERTS__ = prevEvalBatchTargetVerts;
+                        }
+                        if (prevEvalBatchDelayMs === undefined) {
+                            delete globalThis.__GPU_SURFACE_EVAL_BATCH_DELAY_MS__;
+                        } else {
+                            globalThis.__GPU_SURFACE_EVAL_BATCH_DELAY_MS__ = prevEvalBatchDelayMs;
+                        }
                     }
 
                     const totalTime = performance.now() - startTime;
 
                     // Extract phase timings from profile
                     const profile = tessellationProfile;
+                    const phases = Object.fromEntries(
+                        Object.entries(profile).map(([name, data]) => [
+                            name,
+                            Number.isFinite(data?.total) ? data.total : 0,
+                        ])
+                    );
+                    const phaseCalls = Object.fromEntries(
+                        Object.entries(profile).map(([name, data]) => [
+                            name,
+                            Number.isFinite(data?.calls) ? data.calls : 0,
+                        ])
+                    );
 
                     return {
                         success: true,
@@ -117,28 +214,9 @@
                         triangleCount: mesh.indices.length / 3,
                         hasNormals: !!mesh.normals,
                         hasColors: !!mesh.vertexColors,
-                        phases: {
-                            // Top-level phases (the main overhead)
-                            loadStepFile: profile.loadStepFile.total,
-                            // loadStepFile sub-phases
-                            loadStepFile_initOC: profile.loadStepFile_initOC.total,
-                            loadStepFile_createDoc: profile.loadStepFile_createDoc.total,
-                            loadStepFile_readFile: profile.loadStepFile_readFile.total,
-                            loadStepFile_transfer: profile.loadStepFile_transfer.total,
-                            loadStepFile_getTools: profile.loadStepFile_getTools.total,
-                            loadStepFile_oneShape: profile.loadStepFile_oneShape.total,
-                            loadStepFile_fsWrite: profile.loadStepFile_fsWrite.total,
-                            loadStepFile_fsCleanup: profile.loadStepFile_fsCleanup.total,
-                            loadStepFile_colorParsing: profile.loadStepFile_colorParsing.total,
-                            extractFacesWithEdges: profile.extractFacesWithEdges.total,
-                            // Tessellation phases
-                            tessellateOCCShape: profile.tessellateOCCShape.total,
-                            tessellatePlanarFace: profile.tessellatePlanarFace.total,
-                            tessellateCurvedFace: profile.tessellateCurvedFace.total,
-                            earClipping: profile.earClipping.total,
-                            computeNormals: profile.computeNormals.total,
-                            meshAssembly: profile.meshAssembly.total,
-                        },
+                        phases,
+                        phaseCalls,
+                        localUvClassifier: getLocalUvClassifierTelemetry(),
                         profileReport: getTessellationProfileReport()
                     };
                 } catch (e) {

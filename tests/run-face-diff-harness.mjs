@@ -110,6 +110,8 @@ async function main() {
     : undefined;
   const curveVerboseLogs = process.env.CURVE_VERBOSE_LOGS === '1';
   const tessellationVerboseLogs = process.env.TESSELLATION_VERBOSE_LOGS === '1';
+  const trimVerboseLogs = process.env.TRIM_VERBOSE_LOGS === '1';
+  const localUvClassifierShadow = process.env.LOCAL_UV_CLASSIFIER_SHADOW === '1';
 
   const absoluteStepPath = join(PROJECT_ROOT, stepFile);
   if (!fs.existsSync(absoluteStepPath)) {
@@ -160,6 +162,8 @@ async function main() {
       globalThis.__CONE_SEAM_SPLIT_FACE_IDS__ = targets;
       globalThis.__CURVE_VERBOSE_LOGS__ = !!opts.curveVerboseLogs;
       globalThis.__TESSELLATION_VERBOSE_LOGS__ = !!opts.tessellationVerboseLogs;
+      globalThis.__TRIM_VERBOSE_LOGS__ = !!opts.trimVerboseLogs;
+      globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__ = !!opts.localUvClassifierShadow;
       globalThis.__ENABLE_OCCT_INSPIRED_TRIM_GRAPH__ = !!opts.enableOcctInspiredTrimGraph;
       globalThis.__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__ = opts.occtInspiredTrimGraphFaceIds;
       globalThis.__ALLOW_OCCT_ORACLE_PATH__ = !!opts.enableOcctNativeFaceTessellation;
@@ -184,6 +188,8 @@ async function main() {
       nativeAngDeflection,
       curveVerboseLogs,
       tessellationVerboseLogs,
+      trimVerboseLogs,
+      localUvClassifierShadow,
     });
 
     fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);

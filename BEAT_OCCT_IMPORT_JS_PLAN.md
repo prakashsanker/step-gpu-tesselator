@@ -821,3 +821,130 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 - Takeaway:
   - Change is stable (no canary regressions).
   - Electronic Enclosure remains limited by load path + curved-face runtime variability, so next step should remove remaining per-batch sync by pushing model-level curved assembly to a true single-readback path.
+
+### 2026-02-13 Profiling Deep Dive (Wall-Clock, Latest)
+
+- Run used for wall-clock attribution:
+  - `npm run -s bench:representative -- --filter Electronic --max-files 1 --runs 1 --warmup 0 --no-prewarm --detailed-profile`
+- Key result:
+  - Electronic Enclosure: `ours=9230.4ms`, `ref=3297.8ms` (`2.80x slower`)
+  - `loadStepFile=4696.6ms` (`50.9%`)
+  - non-load wall path: `tessellateOCCShape=4410.1ms`
+- Top non-load wall phases:
+  - `curved_batch_compute_wall=4289.5ms`
+  - `curved_batch_max_trim_uvmesh_gpu_eval=4229.1ms`
+  - `curved_batch_max_trim_final_evaluate_mesh=4277.1ms`
+  - `curved_batch_max_trim_cpu_triangle_build=1214.8ms`
+  - `curved_batch_max_trim_cpu_grid_classify=134.2ms`
+  - `curved_batch_assembly_wall=19.4ms`
+- Important interpretation:
+  - `curved_trim_phase_*` totals are sum-over-faces (overlapping waits), not wall-clock.
+  - The wall-clock bottleneck is now clearly `curved_batch_compute_wall`, specifically dense UV-mesh evaluation/final evaluation, not curved batch assembly.
+
+### 2026-02-13 Next Execution Order (Updated from Profile)
+
+1. M4.1: model-wide dense trimmed-grid GPU evaluation (single packed dispatch/readback per curved batch).
+2. M4.2: GPU-side per-face offset/prefix handling for dense eval outputs (remove CPU split/reindex loops).
+3. M4.3: move trimmed-cell triangle generation/reindex fully to GPU for eligible faces (eliminate `cpu_triangle_build` hotspot share).
+4. Keep validation strict after each step:
+   - `npm run -s bench:canary`
+   - then `npm run -s bench:representative`
+   - track Electronic Enclosure using slowdown multiple (`ours/ref`) and speedup (`ref/ours`), not absolute ms alone.
+
+### 2026-02-13 M4.1 Step: Model-Wide Trimmed Eval Coalescing (One/Few Global GPU Jobs)
+
+- Optimization implemented:
+  - Updated `/src/surface-eval-gpu.ts` batching policy for both sparse UV eval and dense-grid eval:
+    - perf-mode batch targets raised (`jobs: 256`, plus new vertex-cap target),
+    - perf-mode coalescing window increased (`delay: 4ms`),
+    - timer-based flush changed to debounce so arrivals over a short window coalesce into larger submissions.
+  - Added vertex-based flush thresholds:
+    - `__GPU_SURFACE_EVAL_BATCH_TARGET_VERTS__`
+    - `__GPU_SURFACE_GRID_BATCH_TARGET_VERTS__`
+  - Wired deterministic benchmark-mode knobs in `/tests/benchmark-comprehensive.html` (set + restore):
+    - `__GPU_SURFACE_GRID_BATCH_TARGET_JOBS__ = 1024`
+    - `__GPU_SURFACE_GRID_BATCH_TARGET_VERTS__ = 2_000_000`
+    - `__GPU_SURFACE_GRID_BATCH_DELAY_MS__ = 8`
+    - `__GPU_SURFACE_EVAL_BATCH_TARGET_JOBS__ = 1024`
+    - `__GPU_SURFACE_EVAL_BATCH_TARGET_VERTS__ = 2_000_000`
+    - `__GPU_SURFACE_EVAL_BATCH_DELAY_MS__ = 8`
+
+- Validation:
+  - `npm run -s bench:canary`
+    - successful: `80/80`
+    - failed: `0/80`
+    - wins vs `occt-import-js`: `80/80`
+    - speedup median: `4.78x faster`
+  - `npm run -s bench:representative`
+    - Electronic Enclosure: `ours=7406.3ms`, `ref=3125.4ms`
+      - `ours/ref = 2.37x slower`
+      - `ref/ours = 0.422x`
+      - `loadStepFile=2777.1ms` (`37.5%`)
+      - `curved_batch_compute_wall=4320.6ms`
+    - VM-001: `ours=194.4ms`, `ref=190.9ms` (`1.02x slower`)
+    - wins vs `occt-import-js`: `3/6`
+  - Detailed single-file profile (`--filter Electronic --detailed-profile`):
+    - Electronic Enclosure: `ours=9303.9ms`, `ref=3212.8ms` (`2.90x slower`)
+    - `loadStepFile=4827.5ms` (`51.9%`)
+    - top non-load wall: `curved_batch_compute_wall=4245.1ms`,
+      `curved_batch_max_trim_uvmesh_gpu_eval=4163.4ms`,
+      `curved_batch_max_trim_final_evaluate_mesh=4204.0ms`.
+
+- Takeaway:
+  - Coalescing is stable and improves Electronic Enclosure ratio vs prior worse sample (`2.90x -> 2.37x slower`) but does not yet break through the main wall-time hotspot.
+  - Bottleneck remains dense trimmed evaluation + final evaluate path (`uvmesh_gpu_eval`/`final_evaluate_mesh`) and still requires deeper fusion in M4.2/M4.3.
+
+### 2026-02-15 Classifier Parity Sprint (Priority Track)
+
+Recent profiling shows two non-obvious facts that must be addressed before we can trust throughput gains:
+1) fast paths can still be dominated by incorrect geometry decisions on cone-like domains, and  
+2) correctness work must remain in the canary loop, otherwise regressions slip through when changing classification logic.
+
+Current objective:
+- Restore parity on OCC-like point-in-domain behavior for trimmed curved faces (especially cones) without regressing the canary geometry.
+- Once parity is acceptable, keep squeezing throughput under the same benchmark gates.
+
+Execution sequence (strict order):
+
+1. Stage A (Classification Instrumentation and Baselines)
+   - Continue shadow-mode tracking with `--classifier-shadow` on representative and canary.
+   - Record:
+     - `mismatchCount`
+     - `localUncertain`
+     - `effectiveMismatch = mismatchCount + localUncertain`
+     - `mismatchFromStageA`, `mismatchFromStageB`, `mismatchFromDomainUnsafe`
+     - `domainUnsafeFaceCount`
+     - `mismatch` trend for Electronic Enclosure.
+   - Gate:
+     - canary status: `PASS`
+     - no catastrophic geometry regressions in canary images.
+
+2. Stage B (OCCT Parity Work on our classifier)
+   - Implement/adjust cone-focused Stage A/B behavior in `tessellateTrimmedSurface` and related helpers toward OCCT-like periodic/domain behavior.
+   - Keep domain handling explicit: avoid making cone faces uncertain-only unless telemetry proves domain-unsafe path is dominating.
+   - Gate:
+     - canary + representative pass
+     - `mismatch` and `effectiveMismatch` improve in the direction of lower values
+     - domain-unsafe count and `effectiveMismatch` trend should not worsen.
+
+3. Stage C (Candidate mode promotion path)
+   - Switch from default fallback to candidate path only where telemetry allows:
+     - `--classifier-candidate` enabled.
+     - `--classifier-no-fallback` only when mismatch/uncertainty are clearly below target.
+   - Gate:
+     - canary must remain pass in candidate mode (no visible regressions).
+     - representative must stay stable.
+
+4. Throughput re-check after each classifier stage
+   - Keep the existing strict benchmark gate after each code change:
+     - `npm run -s bench:canary -- --classifier-shadow`
+     - `npm run -s bench:representative -- --classifier-shadow`
+     - `npm run -s bench:canary`
+     - `npm run -s bench:representative`
+   - Always compare to last good snapshot using:
+     - slowdown multiple (`ours/ref`)
+     - `effectiveMismatch` trend.
+
+5. Integration rule with M4/GPU efforts
+   - Any classifier edit blocks promotion to default if it causes geometric instability, regardless of speed gains.
+   - Once parity and canary are green, continue M4.1/M4.2/M4.3 optimizations with the same gates.
