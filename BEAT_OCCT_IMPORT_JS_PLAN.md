@@ -213,6 +213,26 @@ For each update in `benchmark.md` / `FIXING_OPTION_2.md`:
 - Verdict:
   - `improved` / `neutral` / `regressed`
 
+## 6.1 Whole-Plan Execution Gate (Current Request)
+
+- Objective:
+  - Execute the full benchmark and correctness cycle on the current branch state with no code changes, then compare against the previous committed checkpoint.
+- Checks to run:
+  - `node --experimental-vm-modules tests/run-tests.js`
+  - `npm run -s bench:canary`
+  - `npm run -s bench:canary -- --classifier-shadow`
+  - `npm run -s bench:representative`
+  - `npm run -s bench:representative -- --classifier-shadow`
+  - `npm run -s bench:full`
+- Optional:
+  - `npm run -s bench:full -- --classifier-shadow` if runtime budget permits.
+- Reporting rule:
+  - append the run results to this plan and `FIXING_OPTION_2.md` with:
+    - per-suite pass/fail counts,
+    - electronic enclosure `ours/ref` and `ref/ours`,
+    - mismatch/effectiveMismatch trend when shadow is used,
+    - benchmark snapshot file hash + timestamp.
+
 ---
 
 ## 7. Immediate Next Actions
@@ -948,3 +968,40 @@ Execution sequence (strict order):
 5. Integration rule with M4/GPU efforts
    - Any classifier edit blocks promotion to default if it causes geometric instability, regardless of speed gains.
    - Once parity and canary are green, continue M4.1/M4.2/M4.3 optimizations with the same gates.
+
+Implementation progress (current checkpoint):
+- Implemented domain-unsafe classifier routing to default to Stage-B ownership (`forceStageB`) with new runtime flag `__LOCAL_UV_DOMAIN_UNSAFE_FORCE_STAGEB__` (default `true`).
+- This removes the prior Stage-A-first short-circuit on domain-unsafe cone paths and aligns the decision flow closer to OCCT bad-wire fallback behavior.
+- Reworked Stage-B probe policy to OCCT-style "strong probe first, limited alternates" (removed majority-vote direction blending that could bias false-inside decisions).
+- Added wire-local periodic recadre for both Stage A and Stage B (`__LOCAL_UV_WIRE_LOCAL_RECADRE__`, default `true`) so each wire is classified in its own periodic U band.
+- Implemented Stage-B complex transition tie handling across hit bundles (OCCT-style vertex-event disambiguation) to reduce Stage-B mismatch on ambiguous cone crossings.
+- Validation is pending and intentionally deferred until requested (per "implementation-only" instruction).
+
+Remaining classifier parity steps (explicit tracker):
+- [ ] Implement OCCT-style transition accumulator parity in Stage-B:
+  - head/end complex transition handling (`TopTrans`-like accumulation)
+  - stronger `IN/OUT/TOUCH` mapping with edge orientation at vertex events
+- [ ] Tighten Stage-A `FClass2d` behavior:
+  - closer `SiDans`/`SiDans_OnMode` boundary semantics
+  - stronger wire-quality/bad-wire detection for ambiguous pcurve wires
+- [ ] Reduce domain-unsafe mismatch source:
+  - minimize divergence between `domain_stageB` and regular Stage-B flow
+  - drive down `mismatchFromDomainUnsafe` without increasing `localUncertain`
+- [ ] Shadow validation pass for latest classifier changes:
+  - capture `mismatchCount`, `localUncertain`, `effectiveMismatch`
+  - capture source split (`mismatchFromStageA`, `mismatchFromStageB`, `mismatchFromDomainUnsafe`)
+- [ ] Candidate-mode safety validation:
+  - ensure candidate-with-fallback has no visual regressions
+  - only consider no-fallback after shadow metrics meet Stage C promotion criteria
+
+Latest checkpoint metrics (after Stage-B complex transition tie handling):
+- Canary (`--classifier-shadow`): `PASS (80/80)`
+  - mismatch hotspots remained cone/domain-centric:
+    - `c4-surfaces/cone.step`: `mismatch=348`, `uncertain=25`, `effective=373`
+    - `complex/conical-surface.step`: `mismatch=350`, `uncertain=25`, `effective=375`
+    - `complex/cube.step`: `mismatch=350`, `uncertain=25`, `effective=375`
+- Electronic Enclosure only (`--suite representative --filter Electronic --classifier-shadow`):
+  - `ours=8127.9ms`, `ref=3162.9ms` (`2.57x slower`)
+  - classifier parity: `mismatch=11917`, `uncertain=4071`, `effectiveMismatch=15988`
+  - mismatch source: `stageA=550`, `stageB=3971`, `stageBForced=0`, `domain=7396`
+  - take-away: domain-stage mismatch is still the largest bucket.

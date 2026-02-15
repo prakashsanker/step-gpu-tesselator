@@ -343,3 +343,91 @@ Working diagnosis we are preserving:
   - reference: `3155.3ms`
   - speed ratio: `2.60x slower`
 - Decision: `hold` (telemetry now isolates dominant mismatch source to domain-stage cone paths; next step is reducing domain-stage dependence and improving Stage-B parity there)
+
+### 2026-02-15 (local) - Domain-unsafe path: force Stage-B ownership by default
+- Commit: `<pending>`
+- Change summary: Updated `classifyWithLocalUvClassifierRaw` so domain-unsafe faces now default to Stage-B forced periodic traversal (`forceStageB`) rather than Stage-A-first short-circuiting. Added runtime flag `__LOCAL_UV_DOMAIN_UNSAFE_FORCE_STAGEB__` (default `true`) to keep this behavior controllable.
+- Canary: `not run` (by request)
+- Representative: `not run` (by request)
+- Visual notes: `n/a` (implementation-only step)
+- Shadow mismatch (if enabled):
+  - overall: `pending`
+  - uncertain: `pending`
+  - effective mismatch: `pending`
+  - mismatch source: `pending`
+- OCC fallback usage:
+  - faces: `pending`
+  - classify calls: `pending`
+- Electronic Enclosure:
+  - ours: `pending`
+  - reference: `pending`
+  - speed ratio: `pending`
+- Decision: `hold` (next run should validate whether domain-stage mismatch drops without increasing uncertainty too much)
+
+### 2026-02-15 (local) - Stage-B probe policy closer to OCCT segment selection
+- Commit: `<pending>`
+- Change summary: Reworked `classifyPointAgainstWireByTransitions` to prioritize a single high-quality probe direction (best non-tangent segment) with limited alternates, instead of majority voting across many directions. This better matches OCCT's robust-segment-first fallback behavior.
+- Canary: `not run` (by request)
+- Representative: `not run` (by request)
+- Visual notes: `n/a` (implementation-only step)
+- Shadow mismatch (if enabled):
+  - overall: `pending`
+  - uncertain: `pending`
+  - effective mismatch: `pending`
+  - stageB mismatch: `pending`
+- OCC fallback usage:
+  - faces: `pending`
+  - classify calls: `pending`
+- Electronic Enclosure:
+  - ours: `pending`
+  - reference: `pending`
+  - speed ratio: `pending`
+- Decision: `hold` (validate whether Stage-B false-inside drops without increasing uncertain-heavy outcomes)
+
+### 2026-02-15 (local) - Wire-local periodic recadre for Stage A/B
+- Commit: `<pending>`
+- Change summary: Added wire-local periodic recadre (`__LOCAL_UV_WIRE_LOCAL_RECADRE__`, default `true`) so Stage-A and Stage-B classification tests are run in each wire's own U-band instead of a single global periodic frame. This targets domain-stage cone mismatches where wires sit in shifted periodic images.
+- Canary: `not run` (by request)
+- Representative: `not run` (by request)
+- Visual notes: `n/a` (implementation-only step)
+- Shadow mismatch (if enabled):
+  - overall: `pending`
+  - uncertain: `pending`
+  - effective mismatch: `pending`
+  - mismatchFromDomainUnsafe: `pending`
+- OCC fallback usage:
+  - faces: `pending`
+  - classify calls: `pending`
+- Electronic Enclosure:
+  - ours: `pending`
+  - reference: `pending`
+  - speed ratio: `pending`
+- Decision: `hold` (next validation should confirm whether domain-stage mismatch drops without boundary regressions)
+
+### 2026-02-15 (local) - Stage-B complex transition tie handling
+- Commit: `<working tree>`
+- Change summary: Added OCCT-inspired complex transition handling in `classifyPointAgainstWireByDirection`:
+  - bundle transition accumulator helper
+  - disambiguation across subsequent hit bundles when closest bundle has canceling in/out transitions
+  - robust bundle-wise fallback accumulation before parity fallback
+- Canary: `PASS` (`80/80`) [shadow mode]
+- Representative: `PASS` (`1/1`) [Electronic Enclosure only, shadow mode]
+- Visual notes: No catastrophic regressions observed in benchmark runs.
+- Shadow mismatch (if enabled):
+  - canary hotspot models:
+    - `c4-surfaces/cone.step`: `mismatch=348`, `uncertain=25`, `effective=373`, source `domain=348`
+    - `complex/conical-surface.step`: `mismatch=350`, `uncertain=25`, `effective=375`, source `domain=350`
+    - `complex/cube.step`: `mismatch=350`, `uncertain=25`, `effective=375`, source `domain=350`
+  - representative (Electronic Enclosure):
+    - overall: `11917 / 113207` mismatches (`10.53%`)
+    - uncertain: `4071 / 113207` (`3.60%`)
+    - effective mismatch: `15988 / 113207` (`14.12%`)
+    - mismatch source: `stageA=550`, `stageB=3971`, `stageBForced=0`, `domain=7396`
+- OCC fallback usage:
+  - faces: shadow mode still OCC-backed for source-of-truth output
+  - classify calls: tracked in benchmark console output path
+- Electronic Enclosure:
+  - ours: `8127.9ms`
+  - reference: `3162.9ms`
+  - speed ratio: `2.57x slower`
+- Decision: `hold` (domain-stage mismatch remains dominant; continue Stage-B/Stage-A parity alignment)
