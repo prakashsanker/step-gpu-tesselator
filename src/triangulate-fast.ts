@@ -11,27 +11,61 @@ import earcut from 'earcut';
 import { earClippingOptimized } from './ear-clipping-optimized';
 import { earClippingParallel } from './ear-clipping-parallel';
 
-// Thresholds for algorithm selection
-const EARCUT_THRESHOLD = 50;
-const OPTIMIZED_THRESHOLD = 256;
+// Default thresholds for algorithm selection.
+// Runtime overrides (via global flags) allow benchmark experiments:
+// - __TRI_FAST_EARCUT_THRESHOLD__
+// - __TRI_FAST_OPTIMIZED_THRESHOLD__
+// - __TRI_FAST_GPU_PRIORITY__
+const DEFAULT_EARCUT_THRESHOLD = 1024;
+const DEFAULT_OPTIMIZED_THRESHOLD = 4096;
 
 type Vec2 = [number, number];
 type Vec3 = [number, number, number];
+
+interface TriangulateFastThresholds {
+  earcutThreshold: number;
+  optimizedThreshold: number;
+}
+
+function readGlobalNumber(key: string): number | undefined {
+  const raw = (globalThis as any)?.[key];
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : undefined;
+}
+
+function resolveThresholds(): TriangulateFastThresholds {
+  const gpuPriority = (globalThis as any)?.__TRI_FAST_GPU_PRIORITY__ === true;
+  const perfGeometryOnly = (globalThis as any)?.__PERF_GEOMETRY_ONLY_LOAD__ === true;
+
+  const defaultEarcut = (gpuPriority || perfGeometryOnly) ? 128 : DEFAULT_EARCUT_THRESHOLD;
+  const defaultOptimized = (gpuPriority || perfGeometryOnly) ? 1024 : DEFAULT_OPTIMIZED_THRESHOLD;
+
+  const earcutThreshold = Math.max(
+    16,
+    Math.floor(readGlobalNumber('__TRI_FAST_EARCUT_THRESHOLD__') ?? defaultEarcut)
+  );
+  const optimizedThreshold = Math.max(
+    earcutThreshold + 1,
+    Math.floor(readGlobalNumber('__TRI_FAST_OPTIMIZED_THRESHOLD__') ?? defaultOptimized)
+  );
+
+  return { earcutThreshold, optimizedThreshold };
+}
 
 /**
  * Triangulate a simple polygon using the optimal algorithm.
  */
 export async function triangulateFast(points: Vec2[] | Vec3[]): Promise<number[][]> {
   const n = points.length;
+  const { earcutThreshold, optimizedThreshold } = resolveThresholds();
 
   if (n < 3) return [];
   if (n === 3) return [[0, 1, 2]];
 
-  if (n < EARCUT_THRESHOLD) {
+  if (n < earcutThreshold) {
     return triangulateWithEarcut(points);
   }
 
-  if (n <= OPTIMIZED_THRESHOLD) {
+  if (n <= optimizedThreshold) {
     return triangulateWithGPUOptimized(points);
   }
 
@@ -92,102 +126,26 @@ function computeSignedArea(vertices: Vec2[]): number {
  * Triangulate a polygon with holes using earcut.
  */
 export function triangulateWithHoles(outer: Vec2[], holes: Vec2[][]): number[][] {
-  console.log(`[triangulateWithHoles] outer: ${outer.length} vertices, holes: ${holes.length} (sizes: ${holes.map(h => h.length).join(', ')})`);
+  const debug = (globalThis as any)?.__TRIANGULATE_HOLES_DEBUG__ === true;
 
-  // Check winding orders
-  const outerArea = computeSignedArea(outer);
-  const outerWinding = outerArea > 0 ? 'CCW' : 'CW';
-  console.log(`[triangulateWithHoles] Outer winding: ${outerWinding} (signed area: ${outerArea.toFixed(3)})`);
+  if (debug) {
+    console.log(`[triangulateWithHoles] outer: ${outer.length} vertices, holes: ${holes.length} (sizes: ${holes.map(h => h.length).join(', ')})`);
 
-  // Debug: dump vertices when area is near zero
-  if (Math.abs(outerArea) < 1) {
-    console.error(`[triangulateWithHoles] DEGENERATE OUTER (area near zero)! First 5 vertices:`);
-    for (let i = 0; i < Math.min(5, outer.length); i++) {
-      console.error(`  [${i}]: (${outer[i][0].toFixed(6)}, ${outer[i][1].toFixed(6)})`);
+    const outerArea = computeSignedArea(outer);
+    const outerWinding = outerArea > 0 ? 'CCW' : 'CW';
+    console.log(`[triangulateWithHoles] Outer winding: ${outerWinding} (signed area: ${outerArea.toFixed(3)})`);
+
+    if (Math.abs(outerArea) < 1) {
+      console.error(`[triangulateWithHoles] DEGENERATE OUTER (area near zero)`);
     }
-    console.error(`  ... last vertex: (${outer[outer.length-1][0].toFixed(6)}, ${outer[outer.length-1][1].toFixed(6)})`);
-  }
 
-  for (let h = 0; h < holes.length; h++) {
-    const holeArea = computeSignedArea(holes[h]);
-    const holeWinding = holeArea > 0 ? 'CCW' : 'CW';
-    console.log(`[triangulateWithHoles] Hole ${h} winding: ${holeWinding} (signed area: ${holeArea.toFixed(3)})`);
-
-    // Debug: dump vertices when area is near zero
-    if (Math.abs(holeArea) < 1) {
-      console.error(`[triangulateWithHoles] DEGENERATE HOLE ${h} (area near zero)! First 5 vertices:`);
-      const hole = holes[h];
-      for (let i = 0; i < Math.min(5, hole.length); i++) {
-        console.error(`  [${i}]: (${hole[i][0].toFixed(6)}, ${hole[i][1].toFixed(6)})`);
+    for (let h = 0; h < holes.length; h++) {
+      const holeArea = computeSignedArea(holes[h]);
+      const holeWinding = holeArea > 0 ? 'CCW' : 'CW';
+      console.log(`[triangulateWithHoles] Hole ${h} winding: ${holeWinding} (signed area: ${holeArea.toFixed(3)})`);
+      if (outerWinding === holeWinding) {
+        console.error(`[triangulateWithHoles] ERROR: Outer and hole ${h} have same winding`);
       }
-      console.error(`  ... last vertex: (${hole[hole.length-1][0].toFixed(6)}, ${hole[hole.length-1][1].toFixed(6)})`);
-    }
-
-    if (outerWinding === holeWinding) {
-      console.error(`[triangulateWithHoles] ERROR: Outer and hole ${h} have SAME winding (both ${outerWinding})! This will cause earcut to fail.`);
-    }
-  }
-
-  // Check for duplicate vertices in outer
-  const EPSILON = 1e-9;
-  let duplicateCount = 0;
-  for (let i = 0; i < outer.length; i++) {
-    const next = (i + 1) % outer.length;
-    const dx = outer[i][0] - outer[next][0];
-    const dy = outer[i][1] - outer[next][1];
-    if (Math.sqrt(dx*dx + dy*dy) < EPSILON) {
-      duplicateCount++;
-      if (duplicateCount <= 5) {
-        console.warn(`[triangulateWithHoles] DUPLICATE in outer at index ${i}: (${outer[i][0].toFixed(6)}, ${outer[i][1].toFixed(6)})`);
-      }
-    }
-  }
-  if (duplicateCount > 0) {
-    console.warn(`[triangulateWithHoles] Found ${duplicateCount} duplicate consecutive vertices in outer!`);
-  }
-
-  // Check for duplicate vertices in holes
-  for (let h = 0; h < holes.length; h++) {
-    const hole = holes[h];
-    let holeDups = 0;
-    for (let i = 0; i < hole.length; i++) {
-      const next = (i + 1) % hole.length;
-      const dx = hole[i][0] - hole[next][0];
-      const dy = hole[i][1] - hole[next][1];
-      if (Math.sqrt(dx*dx + dy*dy) < EPSILON) {
-        holeDups++;
-      }
-    }
-    if (holeDups > 0) {
-      console.warn(`[triangulateWithHoles] Found ${holeDups} duplicate consecutive vertices in hole ${h}!`);
-    }
-  }
-
-  // Log bounding boxes to check spatial relationship
-  let outerMinX = Infinity, outerMinY = Infinity, outerMaxX = -Infinity, outerMaxY = -Infinity;
-  for (const p of outer) {
-    outerMinX = Math.min(outerMinX, p[0]);
-    outerMinY = Math.min(outerMinY, p[1]);
-    outerMaxX = Math.max(outerMaxX, p[0]);
-    outerMaxY = Math.max(outerMaxY, p[1]);
-  }
-  console.log(`[triangulateWithHoles] Outer bbox: (${outerMinX.toFixed(3)}, ${outerMinY.toFixed(3)}) to (${outerMaxX.toFixed(3)}, ${outerMaxY.toFixed(3)})`);
-
-  for (let h = 0; h < holes.length; h++) {
-    let holeMinX = Infinity, holeMinY = Infinity, holeMaxX = -Infinity, holeMaxY = -Infinity;
-    for (const p of holes[h]) {
-      holeMinX = Math.min(holeMinX, p[0]);
-      holeMinY = Math.min(holeMinY, p[1]);
-      holeMaxX = Math.max(holeMaxX, p[0]);
-      holeMaxY = Math.max(holeMaxY, p[1]);
-    }
-    console.log(`[triangulateWithHoles] Hole ${h} bbox: (${holeMinX.toFixed(3)}, ${holeMinY.toFixed(3)}) to (${holeMaxX.toFixed(3)}, ${holeMaxY.toFixed(3)})`);
-
-    // Check if hole is inside outer
-    const holeInside = holeMinX >= outerMinX && holeMaxX <= outerMaxX &&
-                       holeMinY >= outerMinY && holeMaxY <= outerMaxY;
-    if (!holeInside) {
-      console.error(`[triangulateWithHoles] ERROR: Hole ${h} bbox extends outside outer bbox!`);
     }
   }
 
@@ -207,15 +165,15 @@ export function triangulateWithHoles(outer: Vec2[], holes: Vec2[][]): number[][]
     currentIndex += hole.length;
   }
 
-  console.log(`[triangulateWithHoles] flatCoords: ${flatCoords.length / 2} points, holeIndices: [${holeIndices.join(', ')}]`);
-
   const indices = earcut(flatCoords, holeIndices);
-  const triangleCount = indices.length / 3;
-  const expectedTriangles = outer.length + holes.reduce((sum, h) => sum + h.length, 0) + holes.length - 2;
-  console.log(`[triangulateWithHoles] earcut returned ${triangleCount} triangles (expected ~${expectedTriangles})`);
-
-  if (triangleCount < expectedTriangles * 0.7) {
-    console.error(`[triangulateWithHoles] WARNING: earcut returned significantly fewer triangles than expected!`);
+  if (debug) {
+    const triangleCount = indices.length / 3;
+    const expectedTriangles = outer.length + holes.reduce((sum, h) => sum + h.length, 0) + holes.length - 2;
+    console.log(`[triangulateWithHoles] flatCoords: ${flatCoords.length / 2} points, holeIndices: [${holeIndices.join(', ')}]`);
+    console.log(`[triangulateWithHoles] earcut returned ${triangleCount} triangles (expected ~${expectedTriangles})`);
+    if (triangleCount < expectedTriangles * 0.7) {
+      console.error(`[triangulateWithHoles] WARNING: earcut returned significantly fewer triangles than expected`);
+    }
   }
 
   const triangles: number[][] = [];

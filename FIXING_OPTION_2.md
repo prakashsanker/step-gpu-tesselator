@@ -399,3 +399,38 @@ Compared against **Post-Manual-2 (2026-02-05)**.
 ### Note
 
 This run is dominated by harness/runtime failures (timeouts and reference failures), so the raw delta is not a clean geometric-quality regression signal by itself.
+
+---
+
+## Beat-OCCT Baseline Gate (2026-02-11, M0)
+
+This checkpoint was run on branch `beat-occt-import-js` to establish a reproducible baseline before optimization work.
+
+### Command
+
+```bash
+npm run -s baseline:beat -- --date 2026-02-11 --skip-ai
+```
+
+### Result Summary
+
+| Step | Status | Key Result |
+|------|--------|------------|
+| `tests/run-tests.js` | FAIL | `testVisualHoleRendering` timed out at 60s; earlier suites passed |
+| `tests/benchmark-comprehensive.js` | PASS | 8/8 successful, 1.20x avg speedup, 1/8 wins vs `occt-import-js` |
+| `tests/benchmark.js` | PASS | 3.84x avg speedup, 4/5 wins (XLarge is 1.08x slower) |
+
+Artifacts:
+- `diagnostics/beat-occt-import-js/2026-02-11/2026-02-11T07-30-04-101Z-c59b8a6/`
+
+### Comparison vs Previous Checkpoint in This Doc
+
+Compared against **AI Visual Run (2026-02-11, Cone Path Default-On)**:
+
+| Dimension | Previous | Beat-OCCT M0 |
+|----------|----------|--------------|
+| Correctness method | AI visual suite | Unit + perf gates (AI skipped) |
+| Correctness outcome | 86 pass / 18 fail / 16 error | Unit suites pass until visual screenshot timeout |
+| Performance signal | Not primary in that run | Baseline captured for both perf harnesses |
+
+These two checkpoints are complementary (not directly apples-to-apples), and together form the starting line for Beat-OCCT optimization work.

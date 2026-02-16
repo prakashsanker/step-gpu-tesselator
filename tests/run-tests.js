@@ -19,6 +19,7 @@ const PROJECT_ROOT = join(__dirname, '..');
 
 // Test configuration
 const CONFIG = {
+    viteHost: '127.0.0.1',
     vitePort: 5173,
     timeout: 60000,
     headless: true,
@@ -52,7 +53,7 @@ async function startViteServer() {
     return new Promise((resolve, reject) => {
         log('Starting Vite dev server...', 'blue');
 
-        const vite = spawn('npx', ['vite', '--port', CONFIG.vitePort.toString()], {
+        const vite = spawn('npx', ['vite', '--host', CONFIG.viteHost, '--port', CONFIG.vitePort.toString()], {
             cwd: PROJECT_ROOT,
             stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -1666,7 +1667,7 @@ async function main() {
 
         // Navigate to test harness
         log(`Navigating to test harness...`, 'blue');
-        await page.goto(`http://localhost:${CONFIG.vitePort}/tests/test-harness.html`, {
+        await page.goto(`http://${CONFIG.viteHost}:${CONFIG.vitePort}/tests/test-harness.html`, {
             waitUntil: 'networkidle0',
             timeout: CONFIG.timeout,
         });

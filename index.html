@@ -103,6 +103,45 @@
         .status-loading { background: #432; }
         .status-error { background: #422; }
 
+        .loading-overlay {
+            position: fixed;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            background: rgba(12, 12, 12, 0.88);
+            backdrop-filter: blur(2px);
+            z-index: 1000;
+        }
+        .loading-overlay.visible {
+            display: flex;
+        }
+        .loading-card {
+            min-width: 320px;
+            max-width: 520px;
+            background: #1f1f1f;
+            border: 1px solid #444;
+            border-radius: 10px;
+            padding: 18px 20px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+        }
+        .loading-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: #fbbf24;
+            margin-bottom: 8px;
+        }
+        .loading-message {
+            font-size: 14px;
+            color: #ddd;
+            margin-bottom: 8px;
+            word-break: break-word;
+        }
+        .loading-progress {
+            font-size: 13px;
+            color: #9ca3af;
+        }
+
         .comparison-result {
             margin-top: 20px;
             padding: 15px;
@@ -118,10 +157,21 @@
     <h1>Visual Validation - Algorithm Comparison</h1>
 
     <div id="status" class="status-loading">Initializing...</div>
+    <div id="transferOverlay" class="loading-overlay" aria-live="polite">
+        <div class="loading-card">
+            <div class="loading-title">Preparing File</div>
+            <div id="transferOverlayMessage" class="loading-message">Waiting for input...</div>
+            <div id="transferOverlayProgress" class="loading-progress"></div>
+        </div>
+    </div>
 
     <div class="controls">
         <select id="testFile">
             <option value="">-- Select Test File --</option>
+            <optgroup label="Real-world">
+                <option value="step-examples/Electronic Enclousre.STEP">Electronic Enclosure</option>
+                <option value="step-examples/VM-001.STEP">VM-001</option>
+            </optgroup>
             <optgroup label="Benchmark">
                 <option value="step-examples/benchmark/simple-square.step">simple-square.step</option>
                 <option value="step-examples/benchmark/plate-small-2x2.step">plate-small-2x2.step</option>
@@ -284,6 +334,18 @@
         <button id="runBtn" disabled>Run Comparison</button>
         <button id="captureBtn" disabled>Capture Screenshots</button>
         <input type="text" id="checkpointName" placeholder="checkpoint-0" style="width: 120px;" />
+        <label style="display: inline-flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="localClassifierCandidate" checked />
+            Local Classifier Candidate
+        </label>
+        <label style="display: inline-flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="localClassifierFallback" />
+            OCC Fallback
+        </label>
+        <label style="display: inline-flex; align-items: center; gap: 6px;">
+            <input type="checkbox" id="localClassifierStrict" checked />
+            Classifier Only (No OCC)
+        </label>
     </div>
 
     <div class="render-container">
@@ -323,7 +385,8 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
         import { parseStepFile } from '/src/tessellator.ts';
-        import { parseStepWithOCC, parseStepWithOcctImportFull, buildFaceDiffReport } from '/src/occ-test.ts';
+        import { initOC, parseStepWithOCC, parseStepWithOcctImportFull, buildFaceDiffReport } from '/src/occ-test.ts';
+        import { applyClassifierRuntimeGlobals } from '/src/classifier-runtime.ts';
         import { getGPUDevice } from '/src/lib.ts';
 
         // State
@@ -349,6 +412,63 @@
             const statusDiv = document.getElementById('status');
             statusDiv.textContent = message;
             statusDiv.className = 'status-' + type;
+        }
+
+        function showTransferOverlay(message, progressText = '') {
+            const overlay = document.getElementById('transferOverlay');
+            const messageEl = document.getElementById('transferOverlayMessage');
+            const progressEl = document.getElementById('transferOverlayProgress');
+            if (!overlay || !messageEl || !progressEl) return;
+            messageEl.textContent = message;
+            progressEl.textContent = progressText;
+            overlay.classList.add('visible');
+        }
+
+        function hideTransferOverlay() {
+            const overlay = document.getElementById('transferOverlay');
+            if (!overlay) return;
+            overlay.classList.remove('visible');
+        }
+
+        function applyLocalClassifierFlagsFromUi() {
+            const candidateBox = document.getElementById('localClassifierCandidate');
+            const fallbackBox = document.getElementById('localClassifierFallback');
+            const strictBox = document.getElementById('localClassifierStrict');
+            const strictOnly = strictBox.checked;
+            const enableCandidate = strictOnly ? true : candidateBox.checked;
+            const enableFallback = strictOnly ? false : fallbackBox.checked;
+
+            if (strictOnly) {
+                candidateBox.checked = true;
+                fallbackBox.checked = false;
+            }
+
+            // Keep UI and script runs aligned through the shared runtime helper.
+            applyClassifierRuntimeGlobals({
+                enableCandidate,
+                enableShadow: false,
+                fallbackToOcc: enableFallback,
+                strictCandidate: strictOnly,
+                stageBUnresolvedPreferInside: true,
+            });
+
+            log(
+                `Classifier mode: candidate=${enableCandidate ? 'on' : 'off'}, fallback=${enableFallback ? 'on' : 'off'}, strict=${strictOnly ? 'on' : 'off'}`,
+                'info'
+            );
+        }
+
+        function applyDefaultLocalClassifierMode() {
+            const candidateBox = document.getElementById('localClassifierCandidate');
+            const fallbackBox = document.getElementById('localClassifierFallback');
+            const strictBox = document.getElementById('localClassifierStrict');
+
+            // Default visual-check mode: local classifier only (no OCC fallback).
+            candidateBox.checked = true;
+            fallbackBox.checked = false;
+            strictBox.checked = true;
+
+            applyLocalClassifierFlagsFromUi();
         }
 
         // Initialize Three.js renderers for each canvas
@@ -518,21 +638,25 @@
 
         // Run comparison with step content string
         async function runComparisonWithContent(stepContent, fileName) {
-            setStatus('Loading STEP file...', 'loading');
-            log(`Loading: ${fileName}`, 'info');
+            hideTransferOverlay();
+            setStatus('STEP file ready. Preparing tessellation...', 'loading');
+            log(`Input ready: ${fileName}`, 'info');
 
             try {
+                applyLocalClassifierFlagsFromUi();
                 log(`Loaded ${(stepContent.length / 1024).toFixed(1)} KB`, 'info');
 
                 // Run our pipeline
-                setStatus('Running our pipeline...', 'loading');
-                log('Running our pipeline...', 'info');
+                setStatus('Tessellation starting (our pipeline)...', 'loading');
+                log('Tessellation starting (our pipeline)...', 'info');
                 const occStart = performance.now();
                 const statsOcc = document.getElementById('stats-occ');
                 statsOcc.style.color = '#fbbf24';
                 statsOcc.style.fontSize = '16px';
                 const occMesh = await parseStepFile(new TextEncoder().encode(stepContent), 'ear-clipping', (pct) => {
-                    statsOcc.textContent = `${pct}%`;
+                    const roundedPct = Math.max(0, Math.min(100, Math.round(pct)));
+                    statsOcc.textContent = `${roundedPct}%`;
+                    setStatus(`Tessellating (our pipeline)... ${roundedPct}%`, 'loading');
                 });
                 const occTime = performance.now() - occStart;
 
@@ -546,7 +670,7 @@
                 log(`Our pipeline: ${occStats}`, 'pass');
 
                 // Run occt-import-js (reference)
-                setStatus('Running occt-import-js...', 'loading');
+                setStatus('Our tessellation complete. Running occt-import-js...', 'loading');
                 log('Running occt-import-js...', 'info');
                 const occtResult = await parseStepWithOcctImportFull(stepContent);
 
@@ -588,11 +712,17 @@
             }
 
             try {
+                showTransferOverlay(`Loading STEP file from server: ${testFile}`, 'Downloading...');
+                setStatus('Loading STEP file from server...', 'loading');
+                log(`Loading STEP file from server: ${testFile}`, 'info');
                 const response = await fetch('/' + testFile);
                 if (!response.ok) throw new Error(`Failed to load ${testFile}`);
                 const stepContent = await response.text();
+                showTransferOverlay('Server file load complete', 'Starting tessellation...');
+                setStatus('STEP file loaded. Tessellation starting...', 'loading');
                 await runComparisonWithContent(stepContent, testFile);
             } catch (error) {
+                hideTransferOverlay();
                 log(`Error: ${error.message}`, 'fail');
                 setStatus(`Error: ${error.message}`, 'error');
             }
@@ -709,13 +839,38 @@
             document.getElementById('testFile').value = '';
 
             const reader = new FileReader();
+            reader.onloadstart = function() {
+                showTransferOverlay(`Uploading/reading local STEP file: ${file.name}`, 'Starting...');
+                setStatus(`Uploading/reading local STEP file: ${file.name}...`, 'loading');
+                log(`Reading local file: ${file.name}`, 'info');
+            };
+            reader.onprogress = function(e) {
+                if (e.lengthComputable && e.total > 0) {
+                    const pct = Math.round((e.loaded / e.total) * 100);
+                    showTransferOverlay(`Uploading/reading local STEP file: ${file.name}`, `${pct}%`);
+                    setStatus(`Uploading/reading local STEP file... ${pct}%`, 'loading');
+                }
+            };
             reader.onload = function(e) {
                 const content = e.target.result;
                 log(`File selected: ${file.name} (${(content.length / 1024).toFixed(1)} KB)`, 'info');
+                showTransferOverlay('Local file load complete', 'Starting tessellation...');
+                setStatus('Local file loaded. Tessellation starting...', 'loading');
                 runComparisonWithContent(content, file.name).catch(err => {
+                    hideTransferOverlay();
                     log(`Error: ${err.message}`, 'fail');
                     setStatus(`Error: ${err.message}`, 'error');
                 });
+            };
+            reader.onerror = function() {
+                hideTransferOverlay();
+                setStatus(`Error: Failed to read ${file.name}`, 'error');
+                log(`Error: Failed to read ${file.name}`, 'fail');
+            };
+            reader.onabort = function() {
+                hideTransferOverlay();
+                setStatus('File read cancelled', 'error');
+                log('Local file read cancelled', 'warn');
             };
             reader.readAsText(file);
         }
@@ -745,6 +900,12 @@
                 // Start animation loop
                 animate();
 
+                // Warm OpenCascade on page load so first benchmark run is not penalized by init cost
+                log('Prewarming OpenCascade...', 'info');
+                setStatus('Prewarming OpenCascade...', 'loading');
+                await initOC();
+                log('OpenCascade prewarm complete', 'pass');
+
                 // Enable buttons
                 document.getElementById('runBtn').disabled = false;
                 document.getElementById('captureBtn').disabled = false;
@@ -758,6 +919,8 @@
                 document.getElementById('testFile').addEventListener('change', () => {
                     document.getElementById('filePicker').value = '';
                 });
+
+                applyDefaultLocalClassifierMode();
 
                 setStatus('Ready - Select a test file and click Run Comparison', 'ready');
                 log('Initialization complete', 'pass');

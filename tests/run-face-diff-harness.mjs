@@ -108,6 +108,11 @@ async function main() {
   const nativeAngDeflection = process.env.OCCT_NATIVE_ANG_DEFLECTION
     ? Number.parseFloat(process.env.OCCT_NATIVE_ANG_DEFLECTION)
     : undefined;
+  const curveVerboseLogs = process.env.CURVE_VERBOSE_LOGS === '1';
+  const tessellationVerboseLogs = process.env.TESSELLATION_VERBOSE_LOGS === '1';
+  const trimVerboseLogs = process.env.TRIM_VERBOSE_LOGS === '1';
+  const localUvClassifierShadow = process.env.LOCAL_UV_CLASSIFIER_SHADOW === '1';
+  const perfGeometryOnlyLoad = process.env.PERF_GEOMETRY_ONLY_LOAD === '1';
 
   const absoluteStepPath = join(PROJECT_ROOT, stepFile);
   if (!fs.existsSync(absoluteStepPath)) {
@@ -156,8 +161,13 @@ async function main() {
       globalThis.__FACE_DEBUG_IDS__ = targets;
       globalThis.__ENABLE_CONE_SEAM_SPLIT__ = true;
       globalThis.__CONE_SEAM_SPLIT_FACE_IDS__ = targets;
+      globalThis.__CURVE_VERBOSE_LOGS__ = !!opts.curveVerboseLogs;
+      globalThis.__TESSELLATION_VERBOSE_LOGS__ = !!opts.tessellationVerboseLogs;
+      globalThis.__TRIM_VERBOSE_LOGS__ = !!opts.trimVerboseLogs;
+      globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__ = !!opts.localUvClassifierShadow;
       globalThis.__ENABLE_OCCT_INSPIRED_TRIM_GRAPH__ = !!opts.enableOcctInspiredTrimGraph;
       globalThis.__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__ = opts.occtInspiredTrimGraphFaceIds;
+      globalThis.__PERF_GEOMETRY_ONLY_LOAD__ = !!opts.perfGeometryOnlyLoad;
       globalThis.__ALLOW_OCCT_ORACLE_PATH__ = !!opts.enableOcctNativeFaceTessellation;
       globalThis.__ENABLE_OCCT_NATIVE_FACE_TESSELLATION__ = !!opts.enableOcctNativeFaceTessellation;
       globalThis.__OCCT_NATIVE_FACE_IDS__ = targets;
@@ -178,6 +188,11 @@ async function main() {
       nativeLinDeflection,
       nativeLinDeflectionRatio,
       nativeAngDeflection,
+      curveVerboseLogs,
+      tessellationVerboseLogs,
+      trimVerboseLogs,
+      localUvClassifierShadow,
+      perfGeometryOnlyLoad,
     });
 
     fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);

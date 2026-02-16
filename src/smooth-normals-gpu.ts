@@ -14,6 +14,124 @@ let device: GPUDevice | null = null;
 let accumulatePipeline: GPUComputePipeline | null = null;
 let normalizePipeline: GPUComputePipeline | null = null;
 
+type BufferSlot =
+    | "positionsBuffer"
+    | "trianglesBuffer"
+    | "accumBuffer"
+    | "normalsBuffer"
+    | "stagingBuffer";
+
+type CapacitySlot =
+    | "positionsCapacity"
+    | "trianglesCapacity"
+    | "accumCapacity"
+    | "normalsCapacity"
+    | "stagingCapacity";
+
+const normalBufferCache: {
+    positionsBuffer: GPUBuffer | null;
+    trianglesBuffer: GPUBuffer | null;
+    accumBuffer: GPUBuffer | null;
+    normalsBuffer: GPUBuffer | null;
+    stagingBuffer: GPUBuffer | null;
+    accumParamsBuffer: GPUBuffer | null;
+    normParamsBuffer: GPUBuffer | null;
+    positionsCapacity: number;
+    trianglesCapacity: number;
+    accumCapacity: number;
+    normalsCapacity: number;
+    stagingCapacity: number;
+} = {
+    positionsBuffer: null,
+    trianglesBuffer: null,
+    accumBuffer: null,
+    normalsBuffer: null,
+    stagingBuffer: null,
+    accumParamsBuffer: null,
+    normParamsBuffer: null,
+    positionsCapacity: 0,
+    trianglesCapacity: 0,
+    accumCapacity: 0,
+    normalsCapacity: 0,
+    stagingCapacity: 0,
+};
+
+function roundCapacity(size: number): number {
+    const alignment = 256;
+    const rounded = Math.ceil(size / alignment) * alignment;
+    return Math.max(alignment, rounded);
+}
+
+function destroyCachedBuffers() {
+    normalBufferCache.positionsBuffer?.destroy();
+    normalBufferCache.trianglesBuffer?.destroy();
+    normalBufferCache.accumBuffer?.destroy();
+    normalBufferCache.normalsBuffer?.destroy();
+    normalBufferCache.stagingBuffer?.destroy();
+    normalBufferCache.accumParamsBuffer?.destroy();
+    normalBufferCache.normParamsBuffer?.destroy();
+
+    normalBufferCache.positionsBuffer = null;
+    normalBufferCache.trianglesBuffer = null;
+    normalBufferCache.accumBuffer = null;
+    normalBufferCache.normalsBuffer = null;
+    normalBufferCache.stagingBuffer = null;
+    normalBufferCache.accumParamsBuffer = null;
+    normalBufferCache.normParamsBuffer = null;
+    normalBufferCache.positionsCapacity = 0;
+    normalBufferCache.trianglesCapacity = 0;
+    normalBufferCache.accumCapacity = 0;
+    normalBufferCache.normalsCapacity = 0;
+    normalBufferCache.stagingCapacity = 0;
+}
+
+function ensureCachedBuffer(
+    dev: GPUDevice,
+    slot: BufferSlot,
+    capacitySlot: CapacitySlot,
+    size: number,
+    usage: GPUBufferUsageFlags,
+    label: string
+): GPUBuffer {
+    const needed = roundCapacity(size);
+    const current = normalBufferCache[slot];
+    const currentCapacity = normalBufferCache[capacitySlot];
+    if (current && currentCapacity >= needed) {
+        return current;
+    }
+
+    current?.destroy();
+    const next = dev.createBuffer({
+        label,
+        size: needed,
+        usage,
+    });
+    normalBufferCache[slot] = next;
+    normalBufferCache[capacitySlot] = needed;
+    return next;
+}
+
+function ensureParamBuffers(dev: GPUDevice): { accum: GPUBuffer; norm: GPUBuffer } {
+    if (!normalBufferCache.accumParamsBuffer) {
+        normalBufferCache.accumParamsBuffer = dev.createBuffer({
+            label: "accum-params",
+            size: 8,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+    }
+    if (!normalBufferCache.normParamsBuffer) {
+        normalBufferCache.normParamsBuffer = dev.createBuffer({
+            label: "norm-params",
+            size: 8,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+        });
+    }
+    return {
+        accum: normalBufferCache.accumParamsBuffer,
+        norm: normalBufferCache.normParamsBuffer,
+    };
+}
+
 // Scale factor for integer atomics (floats scaled to i32)
 const ATOMIC_SCALE = 1e6;
 
@@ -134,6 +252,7 @@ async function initPipelines(): Promise<GPUDevice> {
 
     // Invalidate cached pipelines if device changed
     if (device !== currentDevice) {
+        destroyCachedBuffers();
         accumulatePipeline = null;
         normalizePipeline = null;
         device = currentDevice;
@@ -176,76 +295,96 @@ async function initPipelines(): Promise<GPUDevice> {
     return device;
 }
 
-/**
- * Compute smooth vertex normals on the GPU.
- * Uses angle-weighted averaging matching the CPU implementation.
- */
-export async function computeSmoothNormalsGPU(
-    positions: Vec3[],
-    triangles: [number, number, number][]
-): Promise<Vec3[]> {
-    const dev = await initPipelines();
-
-    const vertexCount = positions.length;
-    const triangleCount = triangles.length;
-
-    if (triangleCount === 0 || vertexCount === 0) {
-        return positions.map(() => [0, 0, 1]);
-    }
-
-    // Flatten positions to Float32Array
-    const positionsFlat = new Float32Array(vertexCount * 3);
-    for (let i = 0; i < vertexCount; i++) {
+function flattenPositions(positions: Vec3[]): Float32Array {
+    const positionsFlat = new Float32Array(positions.length * 3);
+    for (let i = 0; i < positions.length; i++) {
         positionsFlat[i * 3 + 0] = positions[i][0];
         positionsFlat[i * 3 + 1] = positions[i][1];
         positionsFlat[i * 3 + 2] = positions[i][2];
     }
+    return positionsFlat;
+}
 
-    // Flatten triangles to Uint32Array
-    const trianglesFlat = new Uint32Array(triangleCount * 3);
-    for (let i = 0; i < triangleCount; i++) {
+function flattenTriangles(triangles: [number, number, number][]): Uint32Array {
+    const trianglesFlat = new Uint32Array(triangles.length * 3);
+    for (let i = 0; i < triangles.length; i++) {
         trianglesFlat[i * 3 + 0] = triangles[i][0];
         trianglesFlat[i * 3 + 1] = triangles[i][1];
         trianglesFlat[i * 3 + 2] = triangles[i][2];
     }
+    return trianglesFlat;
+}
 
-    // Create buffers
-    const positionsBuffer = dev.createBuffer({
-        label: "positions-buffer",
-        size: positionsFlat.byteLength,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
+/**
+ * Compute smooth normals on the GPU for flat buffers.
+ * Returns a flat Float32Array [nx0, ny0, nz0, nx1, ...].
+ */
+export async function computeSmoothNormalsGPUFlat(
+    positionsFlat: Float32Array,
+    trianglesFlat: Uint32Array
+): Promise<Float32Array> {
+    const dev = await initPipelines();
+
+    const vertexCount = Math.floor(positionsFlat.length / 3);
+    const triangleCount = Math.floor(trianglesFlat.length / 3);
+
+    if (triangleCount === 0 || vertexCount === 0) {
+        const emptyNormals = new Float32Array(vertexCount * 3);
+        for (let i = 0; i < vertexCount; i++) {
+            emptyNormals[i * 3 + 2] = 1;
+        }
+        return emptyNormals;
+    }
+
+    // Reuse buffers between calls; this avoids repeated GPU allocation churn.
+    const positionsBuffer = ensureCachedBuffer(
+        dev,
+        "positionsBuffer",
+        "positionsCapacity",
+        positionsFlat.byteLength,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        "positions-buffer"
+    );
     dev.queue.writeBuffer(positionsBuffer, 0, positionsFlat);
 
-    const trianglesBuffer = dev.createBuffer({
-        label: "triangles-buffer",
-        size: trianglesFlat.byteLength,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
+    const trianglesBuffer = ensureCachedBuffer(
+        dev,
+        "trianglesBuffer",
+        "trianglesCapacity",
+        trianglesFlat.byteLength,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        "triangles-buffer"
+    );
     dev.queue.writeBuffer(trianglesBuffer, 0, trianglesFlat);
 
-    // Accumulator buffer (i32 atomics, initialized to 0)
-    const accumBuffer = dev.createBuffer({
-        label: "normal-accum-buffer",
-        size: vertexCount * 3 * 4, // i32 per component
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
-    });
-    // Zero-initialize
-    dev.queue.writeBuffer(accumBuffer, 0, new Int32Array(vertexCount * 3));
+    const accumBufferSize = vertexCount * 3 * 4;
+    const accumBuffer = ensureCachedBuffer(
+        dev,
+        "accumBuffer",
+        "accumCapacity",
+        accumBufferSize,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_DST,
+        "normal-accum-buffer"
+    );
 
-    // Output normals buffer
-    const normalsBuffer = dev.createBuffer({
-        label: "normals-buffer",
-        size: vertexCount * 3 * 4, // f32 per component
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-    });
+    const normalsBufferSize = vertexCount * 3 * 4;
+    const normalsBuffer = ensureCachedBuffer(
+        dev,
+        "normalsBuffer",
+        "normalsCapacity",
+        normalsBufferSize,
+        GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
+        "normals-buffer"
+    );
 
-    // Staging buffer for readback
-    const stagingBuffer = dev.createBuffer({
-        label: "normals-staging",
-        size: vertexCount * 3 * 4,
-        usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
-    });
+    const stagingBuffer = ensureCachedBuffer(
+        dev,
+        "stagingBuffer",
+        "stagingCapacity",
+        normalsBufferSize,
+        GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST,
+        "normals-staging"
+    );
 
     // Accumulate params
     const accumParamsData = new ArrayBuffer(8);
@@ -253,11 +392,7 @@ export async function computeSmoothNormalsGPU(
     accumParamsView.setUint32(0, triangleCount, true);
     accumParamsView.setFloat32(4, ATOMIC_SCALE, true);
 
-    const accumParamsBuffer = dev.createBuffer({
-        label: "accum-params",
-        size: 8,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
+    const { accum: accumParamsBuffer, norm: normParamsBuffer } = ensureParamBuffers(dev);
     dev.queue.writeBuffer(accumParamsBuffer, 0, accumParamsData);
 
     // Normalize params
@@ -266,11 +401,6 @@ export async function computeSmoothNormalsGPU(
     normParamsView.setUint32(0, vertexCount, true);
     normParamsView.setFloat32(4, 1.0 / ATOMIC_SCALE, true);
 
-    const normParamsBuffer = dev.createBuffer({
-        label: "norm-params",
-        size: 8,
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-    });
     dev.queue.writeBuffer(normParamsBuffer, 0, normParamsData);
 
     // Create bind groups
@@ -299,6 +429,7 @@ export async function computeSmoothNormalsGPU(
     const encoder = dev.createCommandEncoder({ label: "smooth-normals-encoder" });
 
     // Pass 1: Accumulate weighted normals
+    encoder.clearBuffer(accumBuffer, 0, accumBufferSize);
     const accumPass = encoder.beginComputePass({ label: "accumulate-pass" });
     accumPass.setPipeline(accumulatePipeline!);
     accumPass.setBindGroup(0, accumBindGroup);
@@ -313,33 +444,38 @@ export async function computeSmoothNormalsGPU(
     normPass.end();
 
     // Copy to staging
-    encoder.copyBufferToBuffer(normalsBuffer, 0, stagingBuffer, 0, vertexCount * 3 * 4);
+    encoder.copyBufferToBuffer(normalsBuffer, 0, stagingBuffer, 0, normalsBufferSize);
 
     dev.queue.submit([encoder.finish()]);
 
     // Read back results
     await stagingBuffer.mapAsync(GPUMapMode.READ);
-    const resultData = new Float32Array(stagingBuffer.getMappedRange().slice(0));
+    const mapped = stagingBuffer.getMappedRange(0, normalsBufferSize);
+    const resultData = new Float32Array(mapped.slice(0));
     stagingBuffer.unmap();
 
-    // Convert to Vec3 array
+    return resultData;
+}
+
+/**
+ * Compute smooth vertex normals on the GPU.
+ * Uses angle-weighted averaging matching the CPU implementation.
+ */
+export async function computeSmoothNormalsGPU(
+    positions: Vec3[],
+    triangles: [number, number, number][]
+): Promise<Vec3[]> {
+    const positionsFlat = flattenPositions(positions);
+    const trianglesFlat = flattenTriangles(triangles);
+    const normalsFlat = await computeSmoothNormalsGPUFlat(positionsFlat, trianglesFlat);
+
     const normals: Vec3[] = [];
-    for (let i = 0; i < vertexCount; i++) {
+    for (let i = 0; i < positions.length; i++) {
         normals.push([
-            resultData[i * 3 + 0],
-            resultData[i * 3 + 1],
-            resultData[i * 3 + 2],
+            normalsFlat[i * 3 + 0],
+            normalsFlat[i * 3 + 1],
+            normalsFlat[i * 3 + 2],
         ]);
     }
-
-    // Cleanup buffers
-    positionsBuffer.destroy();
-    trianglesBuffer.destroy();
-    accumBuffer.destroy();
-    normalsBuffer.destroy();
-    stagingBuffer.destroy();
-    accumParamsBuffer.destroy();
-    normParamsBuffer.destroy();
-
     return normals;
 }

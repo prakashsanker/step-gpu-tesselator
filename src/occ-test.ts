@@ -13,7 +13,7 @@ import {
 import { earClipping } from './ear-clipping';
 import { constrainedDelaunayTriangulation } from './cdt-gpu';
 import { bridgeAllHoles } from './step-parser';
-import { triangulateWithHoles } from './triangulate-fast';
+import { triangulateFast, triangulateWithHoles } from './triangulate-fast';
 
 // Triangulation method type
 export type TriangulationMethod = 'ear-clipping' | 'cdt';
@@ -32,6 +32,9 @@ export const tessellationProfile = {
   loadStepFile_readFile: { total: 0, calls: 0 },
   loadStepFile_transfer: { total: 0, calls: 0 },
   loadStepFile_getTools: { total: 0, calls: 0 },
+  loadStepFile_oneShape: { total: 0, calls: 0 },
+  loadStepFile_fsWrite: { total: 0, calls: 0 },
+  loadStepFile_fsCleanup: { total: 0, calls: 0 },
   loadStepFile_colorParsing: { total: 0, calls: 0 },
   extractFacesWithEdges: { total: 0, calls: 0 },
   // Tessellation phases
@@ -44,15 +47,320 @@ export const tessellationProfile = {
   earClipping: { total: 0, calls: 0 },
   tessellatePlanarFace: { total: 0, calls: 0 },
   tessellateCurvedFace: { total: 0, calls: 0 },
+  // Curved tessellation fine-grained timing
+  curved_initOC: { total: 0, calls: 0 },
+  curved_getFaceTrimLoops: { total: 0, calls: 0 },
+  curved_trim_setup: { total: 0, calls: 0 },
+  curved_trim_tessellate: { total: 0, calls: 0 },
+  curved_occ_filter: { total: 0, calls: 0 },
+  curved_mesh_convert: { total: 0, calls: 0 },
+  curved_fallback_tessellate: { total: 0, calls: 0 },
+  curved_trim_phase_hole_triangulation: { total: 0, calls: 0 },
+  curved_trim_phase_hole_triangle_gate: { total: 0, calls: 0 },
+  curved_trim_phase_hole_evaluate_mesh: { total: 0, calls: 0 },
+  curved_trim_phase_gpu_classify_build: { total: 0, calls: 0 },
+  curved_trim_phase_gpu_dense_eval: { total: 0, calls: 0 },
+  curved_trim_phase_gpu_mask_classify: { total: 0, calls: 0 },
+  curved_trim_phase_gpu_mask_triangles: { total: 0, calls: 0 },
+  curved_trim_phase_cpu_grid_classify: { total: 0, calls: 0 },
+  curved_trim_phase_cpu_triangle_build: { total: 0, calls: 0 },
+  curved_trim_phase_final_evaluate_mesh: { total: 0, calls: 0 },
+  curved_trim_phase_uvmesh_gpu_eval: { total: 0, calls: 0 },
+  curved_trim_phase_uvmesh_cpu_eval: { total: 0, calls: 0 },
+  curved_batch_compute_wall: { total: 0, calls: 0 },
+  curved_batch_assembly_wall: { total: 0, calls: 0 },
+  curved_single_compute_wall: { total: 0, calls: 0 },
+  curved_batch_max_trim_hole_triangulation: { total: 0, calls: 0 },
+  curved_batch_max_trim_hole_evaluate_mesh: { total: 0, calls: 0 },
+  curved_batch_max_trim_gpu_classify_build: { total: 0, calls: 0 },
+  curved_batch_max_trim_gpu_dense_eval: { total: 0, calls: 0 },
+  curved_batch_max_trim_gpu_mask_classify: { total: 0, calls: 0 },
+  curved_batch_max_trim_gpu_mask_triangles: { total: 0, calls: 0 },
+  curved_batch_max_trim_cpu_grid_classify: { total: 0, calls: 0 },
+  curved_batch_max_trim_cpu_triangle_build: { total: 0, calls: 0 },
+  curved_batch_max_trim_final_evaluate_mesh: { total: 0, calls: 0 },
+  curved_batch_max_trim_uvmesh_gpu_eval: { total: 0, calls: 0 },
+  curved_batch_max_trim_uvmesh_cpu_eval: { total: 0, calls: 0 },
   computeNormals: { total: 0, calls: 0 },
   meshAssembly: { total: 0, calls: 0 },
   tessellateOCCShape: { total: 0, calls: 0 },
 };
 
+interface LocalUvClassifierAggregateBucket {
+  patches: number;
+  gridPoints: number;
+  occDecisions: number;
+  occCallsGrid: number;
+  occCallsTriangleGate: number;
+  localInside: number;
+  localOutside: number;
+  localUncertain: number;
+  localFallbackCalls: number;
+  boundaryBandSamples: number;
+  seamProximateSamples: number;
+  mismatchCount: number;
+  effectiveMismatchCount: number;
+  mismatchBoundaryBand: number;
+  mismatchInterior: number;
+  mismatchSeamProximate: number;
+  mismatchNonSeam: number;
+  falseInsideCount: number;
+  falseOutsideCount: number;
+  stageAEvaluations: number;
+  stageAInside: number;
+  stageAOutside: number;
+  stageAUncertain: number;
+  stageABadWire: number;
+  stageBEvaluations: number;
+  stageBForcedEvaluations: number;
+  stageBTriggeredByUncertain: number;
+  stageBTriggeredByBadWire: number;
+  stageBInside: number;
+  stageBOutside: number;
+  stageBUncertain: number;
+  stageBResolvedByUncertain: number;
+  stageBResolvedByBadWire: number;
+  stageBProbeFallbacks: number;
+  stageBBundleSkips: number;
+  stageBSkippedNearVertexHits: number;
+  stageBTransitionTies: number;
+  decisionFromStageA: number;
+  decisionFromStageB: number;
+  decisionFromStageBForced: number;
+  decisionFromDomainUnsafeStageA: number;
+  decisionFromDomainUnsafeStageB: number;
+  mismatchFromStageA: number;
+  mismatchFromStageB: number;
+  mismatchFromStageBForced: number;
+  mismatchFromDomainUnsafe: number;
+  mismatchFromDomainUnsafeStageA: number;
+  mismatchFromDomainUnsafeStageB: number;
+  mismatchDomainStageBOutside: number;
+  mismatchDomainStageBWithTransitionTie: number;
+  mismatchDomainStageBWithProbeFallback: number;
+  mismatchDomainStageBNearBoundary: number;
+  mismatchDomainStageBWithStageAInsideHint: number;
+  mismatchDomainStageBWithStageAOutsideHint: number;
+  mismatchDomainStageBWithStageAUncertainHint: number;
+}
+
+interface LocalUvClassifierFaceAggregate extends LocalUvClassifierAggregateBucket {
+  faceIndex: number;
+  surfaceType: string;
+}
+
+interface LocalUvClassifierSurfaceAggregate extends LocalUvClassifierAggregateBucket {
+  surfaceType: string;
+}
+
+export interface LocalUvClassifierTelemetry {
+  totals: LocalUvClassifierAggregateBucket;
+  bySurface: Record<string, LocalUvClassifierSurfaceAggregate>;
+  byFace: Record<string, LocalUvClassifierFaceAggregate>;
+}
+
+function createLocalUvClassifierAggregateBucket(): LocalUvClassifierAggregateBucket {
+  return {
+    patches: 0,
+    gridPoints: 0,
+    occDecisions: 0,
+    occCallsGrid: 0,
+    occCallsTriangleGate: 0,
+    localInside: 0,
+    localOutside: 0,
+    localUncertain: 0,
+    localFallbackCalls: 0,
+    boundaryBandSamples: 0,
+    seamProximateSamples: 0,
+    mismatchCount: 0,
+    effectiveMismatchCount: 0,
+    mismatchBoundaryBand: 0,
+    mismatchInterior: 0,
+    mismatchSeamProximate: 0,
+    mismatchNonSeam: 0,
+    falseInsideCount: 0,
+    falseOutsideCount: 0,
+    stageAEvaluations: 0,
+    stageAInside: 0,
+    stageAOutside: 0,
+    stageAUncertain: 0,
+    stageABadWire: 0,
+    stageBEvaluations: 0,
+    stageBForcedEvaluations: 0,
+    stageBTriggeredByUncertain: 0,
+    stageBTriggeredByBadWire: 0,
+    stageBInside: 0,
+    stageBOutside: 0,
+    stageBUncertain: 0,
+    stageBResolvedByUncertain: 0,
+    stageBResolvedByBadWire: 0,
+    stageBProbeFallbacks: 0,
+    stageBBundleSkips: 0,
+    stageBSkippedNearVertexHits: 0,
+    stageBTransitionTies: 0,
+    decisionFromStageA: 0,
+    decisionFromStageB: 0,
+    decisionFromStageBForced: 0,
+    decisionFromDomainUnsafeStageA: 0,
+    decisionFromDomainUnsafeStageB: 0,
+    mismatchFromStageA: 0,
+    mismatchFromStageB: 0,
+    mismatchFromStageBForced: 0,
+    mismatchFromDomainUnsafe: 0,
+    mismatchFromDomainUnsafeStageA: 0,
+    mismatchFromDomainUnsafeStageB: 0,
+    mismatchDomainStageBOutside: 0,
+    mismatchDomainStageBWithTransitionTie: 0,
+    mismatchDomainStageBWithProbeFallback: 0,
+    mismatchDomainStageBNearBoundary: 0,
+    mismatchDomainStageBWithStageAInsideHint: 0,
+    mismatchDomainStageBWithStageAOutsideHint: 0,
+    mismatchDomainStageBWithStageAUncertainHint: 0,
+  };
+}
+
+const localUvClassifierTelemetryState: LocalUvClassifierTelemetry = {
+  totals: createLocalUvClassifierAggregateBucket(),
+  bySurface: {},
+  byFace: {},
+};
+
+function accumulateLocalUvClassifierBucket(
+  bucket: LocalUvClassifierAggregateBucket,
+  summary: LocalUvClassifierSummary,
+  occCallsGrid: number,
+  occCallsTriangleGate: number
+): void {
+  bucket.patches += 1;
+  bucket.gridPoints += summary.gridPoints;
+  bucket.occDecisions += summary.occDecisions;
+  bucket.occCallsGrid += occCallsGrid;
+  bucket.occCallsTriangleGate += occCallsTriangleGate;
+  bucket.localInside += summary.localInside;
+  bucket.localOutside += summary.localOutside;
+  bucket.localUncertain += summary.localUncertain;
+  bucket.localFallbackCalls += summary.localFallbackCalls;
+  bucket.boundaryBandSamples += summary.boundaryBandSamples;
+  bucket.seamProximateSamples += summary.seamProximateSamples;
+  bucket.mismatchCount += summary.mismatchCount;
+  bucket.effectiveMismatchCount += summary.effectiveMismatchCount;
+  bucket.mismatchBoundaryBand += summary.mismatchBoundaryBand;
+  bucket.mismatchInterior += summary.mismatchInterior;
+  bucket.mismatchSeamProximate += summary.mismatchSeamProximate;
+  bucket.mismatchNonSeam += summary.mismatchNonSeam;
+  bucket.falseInsideCount += summary.falseInsideCount;
+  bucket.falseOutsideCount += summary.falseOutsideCount;
+  bucket.stageAEvaluations += summary.stageAEvaluations;
+  bucket.stageAInside += summary.stageAInside;
+  bucket.stageAOutside += summary.stageAOutside;
+  bucket.stageAUncertain += summary.stageAUncertain;
+  bucket.stageABadWire += summary.stageABadWire;
+  bucket.stageBEvaluations += summary.stageBEvaluations;
+  bucket.stageBForcedEvaluations += summary.stageBForcedEvaluations;
+  bucket.stageBTriggeredByUncertain += summary.stageBTriggeredByUncertain;
+  bucket.stageBTriggeredByBadWire += summary.stageBTriggeredByBadWire;
+  bucket.stageBInside += summary.stageBInside;
+  bucket.stageBOutside += summary.stageBOutside;
+  bucket.stageBUncertain += summary.stageBUncertain;
+  bucket.stageBResolvedByUncertain += summary.stageBResolvedByUncertain;
+  bucket.stageBResolvedByBadWire += summary.stageBResolvedByBadWire;
+  bucket.stageBProbeFallbacks += summary.stageBProbeFallbacks;
+  bucket.stageBBundleSkips += summary.stageBBundleSkips;
+  bucket.stageBSkippedNearVertexHits += summary.stageBSkippedNearVertexHits;
+  bucket.stageBTransitionTies += summary.stageBTransitionTies;
+  bucket.decisionFromStageA += summary.decisionFromStageA;
+  bucket.decisionFromStageB += summary.decisionFromStageB;
+  bucket.decisionFromStageBForced += summary.decisionFromStageBForced;
+  bucket.decisionFromDomainUnsafeStageA += summary.decisionFromDomainUnsafeStageA;
+  bucket.decisionFromDomainUnsafeStageB += summary.decisionFromDomainUnsafeStageB;
+  bucket.mismatchFromStageA += summary.mismatchFromStageA;
+  bucket.mismatchFromStageB += summary.mismatchFromStageB;
+  bucket.mismatchFromStageBForced += summary.mismatchFromStageBForced;
+  bucket.mismatchFromDomainUnsafe += summary.mismatchFromDomainUnsafe;
+  bucket.mismatchFromDomainUnsafeStageA += summary.mismatchFromDomainUnsafeStageA;
+  bucket.mismatchFromDomainUnsafeStageB += summary.mismatchFromDomainUnsafeStageB;
+  bucket.mismatchDomainStageBOutside += summary.mismatchDomainStageBOutside;
+  bucket.mismatchDomainStageBWithTransitionTie += summary.mismatchDomainStageBWithTransitionTie;
+  bucket.mismatchDomainStageBWithProbeFallback += summary.mismatchDomainStageBWithProbeFallback;
+  bucket.mismatchDomainStageBNearBoundary += summary.mismatchDomainStageBNearBoundary;
+  bucket.mismatchDomainStageBWithStageAInsideHint += summary.mismatchDomainStageBWithStageAInsideHint;
+  bucket.mismatchDomainStageBWithStageAOutsideHint += summary.mismatchDomainStageBWithStageAOutsideHint;
+  bucket.mismatchDomainStageBWithStageAUncertainHint += summary.mismatchDomainStageBWithStageAUncertainHint;
+}
+
+function recordLocalUvClassifierSummary(
+  faceIndex: number,
+  surfaceType: string,
+  summary: LocalUvClassifierSummary,
+  occCallsGrid: number,
+  occCallsTriangleGate: number
+): void {
+  accumulateLocalUvClassifierBucket(
+    localUvClassifierTelemetryState.totals,
+    summary,
+    occCallsGrid,
+    occCallsTriangleGate
+  );
+
+  const surfaceKey = surfaceType || 'unknown';
+  if (!localUvClassifierTelemetryState.bySurface[surfaceKey]) {
+    localUvClassifierTelemetryState.bySurface[surfaceKey] = {
+      surfaceType: surfaceKey,
+      ...createLocalUvClassifierAggregateBucket(),
+    };
+  }
+  accumulateLocalUvClassifierBucket(
+    localUvClassifierTelemetryState.bySurface[surfaceKey],
+    summary,
+    occCallsGrid,
+    occCallsTriangleGate
+  );
+
+  const faceKey = String(faceIndex);
+  if (!localUvClassifierTelemetryState.byFace[faceKey]) {
+    localUvClassifierTelemetryState.byFace[faceKey] = {
+      faceIndex,
+      surfaceType: surfaceKey,
+      ...createLocalUvClassifierAggregateBucket(),
+    };
+  }
+  accumulateLocalUvClassifierBucket(
+    localUvClassifierTelemetryState.byFace[faceKey],
+    summary,
+    occCallsGrid,
+    occCallsTriangleGate
+  );
+}
+
+export function resetLocalUvClassifierTelemetry(): void {
+  localUvClassifierTelemetryState.totals = createLocalUvClassifierAggregateBucket();
+  localUvClassifierTelemetryState.bySurface = {};
+  localUvClassifierTelemetryState.byFace = {};
+}
+
+export function getLocalUvClassifierTelemetry(): LocalUvClassifierTelemetry {
+  return {
+    totals: { ...localUvClassifierTelemetryState.totals },
+    bySurface: Object.fromEntries(
+      Object.entries(localUvClassifierTelemetryState.bySurface).map(([key, value]) => [
+        key,
+        { ...value },
+      ])
+    ),
+    byFace: Object.fromEntries(
+      Object.entries(localUvClassifierTelemetryState.byFace).map(([key, value]) => [
+        key,
+        { ...value },
+      ])
+    ),
+  };
+}
+
 export function resetTessellationProfile() {
   for (const key of Object.keys(tessellationProfile)) {
     tessellationProfile[key as keyof typeof tessellationProfile] = { total: 0, calls: 0 };
   }
+  resetLocalUvClassifierTelemetry();
 }
 
 export function getTessellationProfileReport(): string {
@@ -74,6 +382,79 @@ export function getTessellationProfileReport(): string {
   }
   return lines.join('\n');
 }
+
+function recordTessProfileSample(key: keyof typeof tessellationProfile, elapsedMs: number): void {
+  const detailedOnlyCurvedKeys: ReadonlySet<string> = new Set([
+    'curved_initOC',
+    'curved_getFaceTrimLoops',
+    'curved_trim_setup',
+    'curved_trim_tessellate',
+    'curved_occ_filter',
+    'curved_mesh_convert',
+    'curved_fallback_tessellate',
+    'curved_trim_phase_hole_triangulation',
+    'curved_trim_phase_hole_triangle_gate',
+    'curved_trim_phase_hole_evaluate_mesh',
+    'curved_trim_phase_gpu_classify_build',
+    'curved_trim_phase_gpu_dense_eval',
+    'curved_trim_phase_gpu_mask_classify',
+    'curved_trim_phase_gpu_mask_triangles',
+    'curved_trim_phase_cpu_grid_classify',
+    'curved_trim_phase_cpu_triangle_build',
+    'curved_trim_phase_final_evaluate_mesh',
+    'curved_trim_phase_uvmesh_gpu_eval',
+    'curved_trim_phase_uvmesh_cpu_eval',
+    'curved_batch_max_trim_hole_triangulation',
+    'curved_batch_max_trim_hole_evaluate_mesh',
+    'curved_batch_max_trim_gpu_classify_build',
+    'curved_batch_max_trim_gpu_dense_eval',
+    'curved_batch_max_trim_gpu_mask_classify',
+    'curved_batch_max_trim_gpu_mask_triangles',
+    'curved_batch_max_trim_cpu_grid_classify',
+    'curved_batch_max_trim_cpu_triangle_build',
+    'curved_batch_max_trim_final_evaluate_mesh',
+    'curved_batch_max_trim_uvmesh_gpu_eval',
+    'curved_batch_max_trim_uvmesh_cpu_eval',
+  ]);
+  if (
+    detailedOnlyCurvedKeys.has(key) &&
+    (globalThis as any)?.__ENABLE_DETAILED_TESSELLATION_PROFILING__ !== true
+  ) {
+    return;
+  }
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return;
+  tessellationProfile[key].total += elapsedMs;
+  tessellationProfile[key].calls++;
+}
+
+const trimPhaseProfileKeyMap: Record<TrimmedSurfaceProfilePhase, keyof typeof tessellationProfile> = {
+  hole_triangulation: 'curved_trim_phase_hole_triangulation',
+  hole_triangle_gate: 'curved_trim_phase_hole_triangle_gate',
+  hole_evaluate_mesh: 'curved_trim_phase_hole_evaluate_mesh',
+  gpu_classify_build: 'curved_trim_phase_gpu_classify_build',
+  gpu_dense_eval: 'curved_trim_phase_gpu_dense_eval',
+  gpu_mask_classify: 'curved_trim_phase_gpu_mask_classify',
+  gpu_mask_triangles: 'curved_trim_phase_gpu_mask_triangles',
+  cpu_grid_classify: 'curved_trim_phase_cpu_grid_classify',
+  cpu_triangle_build: 'curved_trim_phase_cpu_triangle_build',
+  final_evaluate_mesh: 'curved_trim_phase_final_evaluate_mesh',
+  uvmesh_gpu_eval: 'curved_trim_phase_uvmesh_gpu_eval',
+  uvmesh_cpu_eval: 'curved_trim_phase_uvmesh_cpu_eval',
+};
+
+const trimPhaseBatchMaxKeyMap: Partial<Record<TrimmedSurfaceProfilePhase, keyof typeof tessellationProfile>> = {
+  hole_triangulation: 'curved_batch_max_trim_hole_triangulation',
+  hole_evaluate_mesh: 'curved_batch_max_trim_hole_evaluate_mesh',
+  gpu_classify_build: 'curved_batch_max_trim_gpu_classify_build',
+  gpu_dense_eval: 'curved_batch_max_trim_gpu_dense_eval',
+  gpu_mask_classify: 'curved_batch_max_trim_gpu_mask_classify',
+  gpu_mask_triangles: 'curved_batch_max_trim_gpu_mask_triangles',
+  cpu_grid_classify: 'curved_batch_max_trim_cpu_grid_classify',
+  cpu_triangle_build: 'curved_batch_max_trim_cpu_triangle_build',
+  final_evaluate_mesh: 'curved_batch_max_trim_final_evaluate_mesh',
+  uvmesh_gpu_eval: 'curved_batch_max_trim_uvmesh_gpu_eval',
+  uvmesh_cpu_eval: 'curved_batch_max_trim_uvmesh_cpu_eval',
+};
 import {
   tessellateCylinder,
   tessellateSphere,
@@ -81,13 +462,30 @@ import {
   tessellateTorus,
   tessellateBSplineSurface,
   tessellateTrimmedSurface,
+  type LocalUvClassifierEdgeInput,
+  type LocalUvClassifierWireInput,
+  type LocalUvClassifierSummary,
+  type TrimmedSurfaceProfilePhase,
   type TrimmedSurfaceBuildOptions,
 } from './surface-tessellation';
+import { computeSmoothNormalsGPUFlat } from './smooth-normals-gpu';
+import { assembleMeshBatchGPU } from './mesh-batch-assembly-gpu';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 
 // Set to true to enable debug logging (significantly impacts performance)
 const DEBUG_OCC = false;
+const DEBUG_TESSELLATION_VERBOSE = false;
+
+function tessellationVerboseEnabled(): boolean {
+  return DEBUG_TESSELLATION_VERBOSE || (globalThis as any)?.__TESSELLATION_VERBOSE_LOGS__ === true;
+}
+
+function tessellationVerboseLog(...args: unknown[]): void {
+  if (tessellationVerboseEnabled()) {
+    console.log(...args);
+  }
+}
 
 function logOCC(...args: unknown[]): void {
   if (DEBUG_OCC) {
@@ -95,8 +493,12 @@ function logOCC(...args: unknown[]): void {
   }
 }
 
+function curveDebugEnabled(): boolean {
+  return (globalThis as any)?.__CURVE_VERBOSE_LOGS__ === true;
+}
+
 function curveDebugLog(...args: unknown[]): void {
-  if ((globalThis as any)?.__CURVE_VERBOSE_LOGS__ === true) {
+  if (curveDebugEnabled()) {
     console.log(...args);
   }
 }
@@ -120,6 +522,138 @@ interface RGBColor {
 }
 
 let oc: OpenCascadeInstance | null = null;
+let perfBasicStepReader: any | null = null;
+let perfBasicStepReaderOc: OpenCascadeInstance | null = null;
+const PERF_STEP_TEMP_FILE_PATH = '/__perf_geometry_input.step';
+
+function createBasicStepReader(ocInst: OpenCascadeInstance): any {
+  if (ocInst.STEPControl_Reader_1) {
+    return new ocInst.STEPControl_Reader_1();
+  }
+  if (ocInst.STEPControl_Reader) {
+    return new ocInst.STEPControl_Reader();
+  }
+  throw new Error('STEPControl_Reader not found');
+}
+
+function getBasicStepReader(ocInst: OpenCascadeInstance, reuseReader: boolean): any {
+  if (!reuseReader) {
+    return createBasicStepReader(ocInst);
+  }
+
+  if (perfBasicStepReader && perfBasicStepReaderOc === ocInst) {
+    return perfBasicStepReader;
+  }
+
+  perfBasicStepReader = createBasicStepReader(ocInst);
+  perfBasicStepReaderOc = ocInst;
+  return perfBasicStepReader;
+}
+
+function isStepReadDone(ocInst: OpenCascadeInstance, readResult: any): boolean {
+  return readResult === ocInst.IFSelect_ReturnStatus?.IFSelect_RetDone ||
+         readResult === 0 ||
+         (typeof readResult === 'object' && (readResult.value === 0 || readResult.value === 1)) ||
+         readResult === 1;
+}
+
+function makeEmptyStepLoadResult(shape: any, colorTool: any = null, shapeTool: any = null, doc: any = null): StepLoadResult {
+  return {
+    shape,
+    colorTool,
+    shapeTool,
+    doc,
+    stepColors: new Map<number, RGBColor>(),
+    shapeColorMap: new Map<number, RGBColor>(),
+    faceIdOrder: [],
+    geometryColorMap: new Map<string, RGBColor>(),
+    solidMatchedColors: new Map<number, RGBColor>(),
+    faceToSolid: new Map<number, number>(),
+    solidToColor: new Map<number, RGBColor>(),
+  };
+}
+
+function cleanupStepFsPath(ocInst: OpenCascadeInstance, path: string): void {
+  const cleanupStart = performance.now();
+  try {
+    ocInst.FS.unlink(path);
+  } catch (cleanupErr) {
+    logOCC(`[loadStepFile] FS.unlink failed for ${path}:`, cleanupErr);
+  }
+  tessellationProfile.loadStepFile_fsCleanup.total += performance.now() - cleanupStart;
+  tessellationProfile.loadStepFile_fsCleanup.calls++;
+}
+
+function transferReaderRoots(
+  ocInst: OpenCascadeInstance,
+  reader: any,
+  preferSingleRootTransfer: boolean
+): void {
+  const transferStart = performance.now();
+  let transferDone = false;
+
+  if (preferSingleRootTransfer && typeof reader.NbRootsForTransfer === 'function' && typeof reader.TransferRoot === 'function') {
+    try {
+      const roots = reader.NbRootsForTransfer();
+      if (Number.isFinite(roots) && roots === 1) {
+        try {
+          reader.TransferRoot(1);
+          transferDone = true;
+        } catch (e1) {
+          try {
+            reader.TransferRoot(0);
+            transferDone = true;
+          } catch (e2) {
+            reader.TransferRoot();
+            transferDone = true;
+          }
+        }
+      }
+    } catch {
+      // Fall through to generic path.
+    }
+  }
+
+  if (!transferDone) {
+    if (reader.TransferRoots) {
+      try {
+        reader.TransferRoots();
+        transferDone = true;
+      } catch {
+        if (ocInst.Message_ProgressRange_1) {
+          try {
+            reader.TransferRoots(new ocInst.Message_ProgressRange_1());
+            transferDone = true;
+          } catch {
+            // Fall through.
+          }
+        } else if (ocInst.Message_ProgressRange) {
+          try {
+            reader.TransferRoots(new ocInst.Message_ProgressRange());
+            transferDone = true;
+          } catch {
+            // Fall through.
+          }
+        }
+      }
+    }
+  }
+
+  if (!transferDone && reader.TransferRoot) {
+    try {
+      reader.TransferRoot(1);
+    } catch {
+      try {
+        reader.TransferRoot(0);
+      } catch {
+        reader.TransferRoot();
+      }
+    }
+  }
+
+  tessellationProfile.loadStepFile_transfer.total += performance.now() - transferStart;
+  tessellationProfile.loadStepFile_transfer.calls++;
+}
 
 async function initOC(): Promise<OpenCascadeInstance> {
   if (oc) return oc;
@@ -1892,6 +2426,7 @@ function buildOCCSolidFaceCounts(oc: any, shape: any): {
   solidMap: Map<number, { faceCount: number; faceHashCodes: number[] }>;
   faceToSolid: Map<number, number>;
 } {
+  const enableLoadDiagnostics = loadDiagnosticsEnabled();
   const solidMap = new Map<number, { faceCount: number; faceHashCodes: number[] }>();
   const faceToSolid = new Map<number, number>(); // face hash code → solid index
 
@@ -1928,12 +2463,16 @@ function buildOCCSolidFaceCounts(oc: any, shape: any): {
       solidExplorer.Next();
     }
 
-    console.log(`[OCC_Solids] Found ${solidMap.size} solids, ${faceToSolid.size} face→solid mappings`);
-    for (const [idx, data] of solidMap) {
-      console.log(`[OCC_Solids] Solid ${idx}: ${data.faceCount} faces`);
+    if (enableLoadDiagnostics) {
+      console.log(`[OCC_Solids] Found ${solidMap.size} solids, ${faceToSolid.size} face→solid mappings`);
+      for (const [idx, data] of solidMap) {
+        console.log(`[OCC_Solids] Solid ${idx}: ${data.faceCount} faces`);
+      }
     }
   } catch (e) {
-    console.log('[OCC_Solids] Error iterating solids:', e);
+    if (enableLoadDiagnostics) {
+      console.log('[OCC_Solids] Error iterating solids:', e);
+    }
   }
 
   return { solidMap, faceToSolid };
@@ -1949,6 +2488,7 @@ function matchSolidsAndBuildColorMap(
   stepSolidMap: Map<number, { color: RGBColor; faceCount: number; faceIds: number[] }>,
   occSolidMap: Map<number, { faceCount: number; faceHashCodes: number[] }>
 ): { faceColorMap: Map<number, RGBColor>; solidToColor: Map<number, RGBColor> } {
+  const enableLoadDiagnostics = loadDiagnosticsEnabled();
   const faceColorMap = new Map<number, RGBColor>();
   const solidToColor = new Map<number, RGBColor>(); // OCC solid index -> color
 
@@ -1993,7 +2533,9 @@ function matchSolidsAndBuildColorMap(
       }
       matchedSolids++;
 
-      console.log(`[SolidMatch] Matched STEP #${stepSolids[0].solidId} to OCC solid ${occSolidIdx} (${faceCount} faces) -> RGB(${color.r.toFixed(2)}, ${color.g.toFixed(2)}, ${color.b.toFixed(2)})`);
+      if (enableLoadDiagnostics) {
+        console.log(`[SolidMatch] Matched STEP #${stepSolids[0].solidId} to OCC solid ${occSolidIdx} (${faceCount} faces) -> RGB(${color.r.toFixed(2)}, ${color.g.toFixed(2)}, ${color.b.toFixed(2)})`);
+      }
     } else if (stepSolids.length > 0 && occSolids.length > 0) {
       // Multiple solids with same face count - try to match by order (imperfect but better than nothing)
       const minCount = Math.min(stepSolids.length, occSolids.length);
@@ -2009,11 +2551,15 @@ function matchSolidsAndBuildColorMap(
         }
         matchedSolids++;
       }
-      console.log(`[SolidMatch] Matched ${minCount} solids with ${faceCount} faces each (ambiguous)`);
+      if (enableLoadDiagnostics) {
+        console.log(`[SolidMatch] Matched ${minCount} solids with ${faceCount} faces each (ambiguous)`);
+      }
     }
   }
 
-  console.log(`[SolidMatch] Total: ${matchedSolids} solids matched, ${matchedFaces} faces colored`);
+  if (enableLoadDiagnostics) {
+    console.log(`[SolidMatch] Total: ${matchedSolids} solids matched, ${matchedFaces} faces colored`);
+  }
   return { faceColorMap, solidToColor };
 }
 
@@ -2021,12 +2567,83 @@ function matchSolidsAndBuildColorMap(
  * Load a STEP file and return the TopoDS_Shape with color information
  * Accepts either Uint8Array (for large files) or string
  */
+async function loadStepFileGeometryOnlyFast(
+  ocInst: OpenCascadeInstance,
+  fileData: Uint8Array,
+  fileName: string
+): Promise<StepLoadResult> {
+  const reuseReader = readGlobalBoolean('__LOAD_REUSE_STEP_READER__', true);
+  const useStableTempPath = readGlobalBoolean('__LOAD_REUSE_TEMP_PATH__', true);
+  const skipCleanup = readGlobalBoolean('__LOAD_SKIP_FS_CLEANUP__', useStableTempPath);
+  const preferSingleRootTransfer = readGlobalBoolean('__LOAD_PREFER_SINGLE_ROOT_TRANSFER__', true);
+
+  const tempFilePath = useStableTempPath ? PERF_STEP_TEMP_FILE_PATH : `/${fileName}`;
+
+  const fsWriteStart = performance.now();
+  ocInst.FS.writeFile(tempFilePath, fileData);
+  tessellationProfile.loadStepFile_fsWrite.total += performance.now() - fsWriteStart;
+  tessellationProfile.loadStepFile_fsWrite.calls++;
+
+  const readShapeWithReader = (reader: any): any => {
+    const readFileStart = performance.now();
+    const readResult = reader.ReadFile(tempFilePath);
+    tessellationProfile.loadStepFile_readFile.total += performance.now() - readFileStart;
+    tessellationProfile.loadStepFile_readFile.calls++;
+
+    if (!isStepReadDone(ocInst, readResult)) {
+      throw new Error(`Failed to read STEP file: ${typeof readResult === 'object' ? JSON.stringify(readResult) : readResult}`);
+    }
+
+    transferReaderRoots(ocInst, reader, preferSingleRootTransfer);
+
+    const oneShapeStart = performance.now();
+    const shape = reader.OneShape();
+    tessellationProfile.loadStepFile_oneShape.total += performance.now() - oneShapeStart;
+    tessellationProfile.loadStepFile_oneShape.calls++;
+    return shape;
+  };
+
+  let shape: any = null;
+  try {
+    shape = readShapeWithReader(getBasicStepReader(ocInst, reuseReader));
+  } catch (readerErr) {
+    // A reused reader can end up in a bad state. Retry once with a fresh reader.
+    perfBasicStepReader = null;
+    perfBasicStepReaderOc = null;
+    const freshReader = getBasicStepReader(ocInst, false);
+    shape = readShapeWithReader(freshReader);
+    if (reuseReader) {
+      perfBasicStepReader = freshReader;
+      perfBasicStepReaderOc = ocInst;
+    }
+    logOCC('[loadStepFileFast] Retried with fresh STEP reader after failure:', readerErr);
+  } finally {
+    if (!skipCleanup) {
+      cleanupStepFsPath(ocInst, tempFilePath);
+    }
+  }
+
+  if (!shape || shape.IsNull?.()) {
+    throw new Error('Geometry-only load returned null shape');
+  }
+
+  return makeEmptyStepLoadResult(shape);
+}
+
 async function loadStepFile(fileContent: Uint8Array | string, fileName: string): Promise<StepLoadResult> {
   // Profile: initOC
   const initOCStart = performance.now();
   const oc = await initOC();
   tessellationProfile.loadStepFile_initOC.total += performance.now() - initOCStart;
   tessellationProfile.loadStepFile_initOC.calls++;
+
+  // Perf-mode switches (used by benchmark harness to isolate geometry throughput).
+  const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+  const useXCAFReader = readGlobalBoolean('__ENABLE_XCAF_READER__', !preferGeometryOnlyLoad);
+  const enableStepColorParsing = readGlobalBoolean('__ENABLE_STEP_COLOR_PARSING__', !preferGeometryOnlyLoad);
+  // Expensive load-time diagnostics are opt-in. Keep disabled by default so
+  // perf runs and normal interactive loads avoid heavy introspection/log spam.
+  const enableLoadDiagnostics = loadDiagnosticsEnabled();
 
   // Debug APIs logged only when DEBUG_OCC is true
   if (DEBUG_OCC) {
@@ -2038,7 +2655,7 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
 
   // Convert to Uint8Array if string was passed
   let fileData: Uint8Array;
-  let fileContentString: string;
+  let fileContentString: string | null = null;
 
   if (typeof fileContent === 'string') {
     // Legacy string input - convert to Uint8Array
@@ -2048,13 +2665,26 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   } else {
     // Uint8Array input (preferred for large files)
     fileData = fileContent;
-    // Decode to string for STEP color parsing (done lazily later if needed)
-    const decoder = new TextDecoder('utf-8');
-    fileContentString = decoder.decode(fileContent);
   }
 
+  if (preferGeometryOnlyLoad && !useXCAFReader && !enableStepColorParsing) {
+    try {
+      return await loadStepFileGeometryOnlyFast(oc, fileData, fileName);
+    } catch (fastErr) {
+      if (enableLoadDiagnostics) {
+        console.warn('[loadStepFileFast] Falling back to default loader:', fastErr);
+      }
+    }
+  }
+
+  const tempFilePath = '/' + fileName;
+  const cleanupTempFile = () => cleanupStepFsPath(oc, tempFilePath);
+
   // Write file to virtual filesystem using writeFile (handles large files better)
-  oc.FS.writeFile('/' + fileName, fileData);
+  const fsWriteStart = performance.now();
+  oc.FS.writeFile(tempFilePath, fileData);
+  tessellationProfile.loadStepFile_fsWrite.total += performance.now() - fsWriteStart;
+  tessellationProfile.loadStepFile_fsWrite.calls++;
 
   let shape: any = null;
   let colorTool: any = null;
@@ -2063,7 +2693,7 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   let xcafDocHandle: any = null;  // Handle for XCAFPrs_DocumentExplorer
 
   // Try XCAF reader first (supports colors)
-  const hasXCAF = oc.STEPCAFControl_Reader_1 || oc.STEPCAFControl_Reader;
+  const hasXCAF = useXCAFReader && (oc.STEPCAFControl_Reader_1 || oc.STEPCAFControl_Reader);
 
   if (hasXCAF) {
     try {
@@ -2107,7 +2737,9 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
       }
       if (cafReader.SetMatMode) {
         cafReader.SetMatMode(true);
-        console.log('[XCAF] SetMatMode(true) - materials');
+        if (enableLoadDiagnostics) {
+          console.log('[XCAF] SetMatMode(true) - materials');
+        }
       }
       if (cafReader.SetGDTMode) {
         cafReader.SetGDTMode(true);
@@ -2115,7 +2747,7 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
 
       // Profile: ReadFile
       const readFileStart = performance.now();
-      const readResult = cafReader.ReadFile('/' + fileName);
+      const readResult = cafReader.ReadFile(tempFilePath);
       tessellationProfile.loadStepFile_readFile.total += performance.now() - readFileStart;
       tessellationProfile.loadStepFile_readFile.calls++;
       logOCC('[XCAF] ReadFile result:', readResult?.value);
@@ -2315,34 +2947,47 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
             labelsLength = labels.Length();
           }
         } catch (labelErr) {
-          console.log('[ColorDiag] TDF_LabelSequence not available:', labelErr);
-          // List what TDF APIs ARE available
-          const tdfApis = Object.keys(oc).filter(k => k.startsWith('TDF_')).slice(0, 20);
-          console.log('[ColorDiag] Available TDF APIs:', tdfApis.join(', '));
+          if (enableLoadDiagnostics) {
+            console.log('[ColorDiag] TDF_LabelSequence not available:', labelErr);
+            // List what TDF APIs ARE available
+            const tdfApis = Object.keys(oc).filter(k => k.startsWith('TDF_')).slice(0, 20);
+            console.log('[ColorDiag] Available TDF APIs:', tdfApis.join(', '));
+          }
         }
 
         // Alternative: try to get shape directly from reader
         if (labelsLength === 0 && cafReader) {
-          console.log('[ColorDiag] Trying alternative shape extraction...');
+          if (enableLoadDiagnostics) {
+            console.log('[ColorDiag] Trying alternative shape extraction...');
+          }
 
           // Check what methods the reader has
-          const readerMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(cafReader) || {})
-            .filter(k => typeof cafReader[k] === 'function');
-          console.log('[ColorDiag] cafReader methods:', readerMethods.slice(0, 20).join(', '));
+          if (enableLoadDiagnostics) {
+            const readerMethods = Object.getOwnPropertyNames(Object.getPrototypeOf(cafReader) || {})
+              .filter(k => typeof cafReader[k] === 'function');
+            console.log('[ColorDiag] cafReader methods:', readerMethods.slice(0, 20).join(', '));
+          }
 
           // Try Reader().OneShape() pattern
           if (cafReader.Reader && typeof cafReader.Reader === 'function') {
             try {
               const innerReader = cafReader.Reader();
               if (innerReader && innerReader.OneShape) {
+                const oneShapeStart = performance.now();
                 shape = innerReader.OneShape();
-                const isNull = shape?.IsNull?.() ?? true;
-                const shapeType = shape?.ShapeType?.() ?? 'unknown';
-                console.log('[ColorDiag] Got shape from cafReader.Reader().OneShape()',
-                  'IsNull:', isNull, 'ShapeType:', shapeType);
+                tessellationProfile.loadStepFile_oneShape.total += performance.now() - oneShapeStart;
+                tessellationProfile.loadStepFile_oneShape.calls++;
+                if (enableLoadDiagnostics) {
+                  const isNull = shape?.IsNull?.() ?? true;
+                  const shapeType = shape?.ShapeType?.() ?? 'unknown';
+                  console.log('[ColorDiag] Got shape from cafReader.Reader().OneShape()',
+                    'IsNull:', isNull, 'ShapeType:', shapeType);
+                }
               }
             } catch (e) {
-              console.log('[ColorDiag] cafReader.Reader().OneShape() failed:', e);
+              if (enableLoadDiagnostics) {
+                console.log('[ColorDiag] cafReader.Reader().OneShape() failed:', e);
+              }
             }
           }
 
@@ -2350,7 +2995,9 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
           if ((!shape || shape.IsNull?.()) && cafReader.NbRootsForTransfer) {
             try {
               const numRoots = cafReader.NbRootsForTransfer();
-              console.log('[ColorDiag] NbRootsForTransfer:', numRoots);
+              if (enableLoadDiagnostics) {
+                console.log('[ColorDiag] NbRootsForTransfer:', numRoots);
+              }
             } catch (e) {
               // Not available
             }
@@ -2360,73 +3007,75 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
         logOCC('Free shapes count:', labelsLength);
 
         if (labelsLength > 0 && labels) {
-          // DIAGNOSTIC: Try to extract colors from labels
-          console.log('[ColorDiag] Trying to extract colors from', labels.Length(), 'free shapes...');
+          if (enableLoadDiagnostics) {
+            // DIAGNOSTIC: Try to extract colors from labels
+            console.log('[ColorDiag] Trying to extract colors from', labels.Length(), 'free shapes...');
 
-          // Get the actual colorTool (unwrap if needed)
-          let actualColorTool = colorTool;
-          if (typeof colorTool?.get === 'function' && !colorTool.IsNull?.()) {
-            try {
-              actualColorTool = colorTool.get();
-            } catch (e) {
-              console.log('[ColorDiag] Could not unwrap colorTool');
-            }
-          }
-
-          // Try different color extraction approaches on the first label
-          const firstLabel = labels.Value(1);
-          const firstShape = shapeTool.GetShape(firstLabel);
-
-          // Systematically test all GetColor variants on both label and shape
-          if (actualColorTool) {
-            const color = new oc.Quantity_Color_1();
-            const methodNames = ['GetColor_1', 'GetColor_2', 'GetColor_4', 'GetColor_5', 'GetColor_6', 'GetColor_7', 'GetColor_8'];
-
-            console.log('[ColorDiag] Testing GetColor methods on first shape/label...');
-
-            // Test each method with shape (colorType 1 = Surface)
-            for (const methodName of methodNames) {
-              if (typeof actualColorTool[methodName] === 'function') {
-                try {
-                  const result = actualColorTool[methodName](firstShape, 1, color);
-                  if (result) {
-                    console.log(`[ColorDiag] ${methodName}(shape, 1, color) = TRUE! RGB(${color.Red().toFixed(2)}, ${color.Green().toFixed(2)}, ${color.Blue().toFixed(2)})`);
-                  }
-                } catch (e) {
-                  // Method signature didn't match - that's OK
-                }
+            // Get the actual colorTool (unwrap if needed)
+            let actualColorTool = colorTool;
+            if (typeof colorTool?.get === 'function' && !colorTool.IsNull?.()) {
+              try {
+                actualColorTool = colorTool.get();
+              } catch (e) {
+                console.log('[ColorDiag] Could not unwrap colorTool');
               }
             }
 
-            // Test each method with label (colorType 1 = Surface)
-            for (const methodName of methodNames) {
-              if (typeof actualColorTool[methodName] === 'function') {
-                try {
-                  const result = actualColorTool[methodName](firstLabel, 1, color);
-                  if (result) {
-                    console.log(`[ColorDiag] ${methodName}(label, 1, color) = TRUE! RGB(${color.Red().toFixed(2)}, ${color.Green().toFixed(2)}, ${color.Blue().toFixed(2)})`);
+            // Try different color extraction approaches on the first label
+            const firstLabel = labels.Value(1);
+            const firstShape = shapeTool.GetShape(firstLabel);
+
+            // Systematically test all GetColor variants on both label and shape
+            if (actualColorTool) {
+              const color = new oc.Quantity_Color_1();
+              const methodNames = ['GetColor_1', 'GetColor_2', 'GetColor_4', 'GetColor_5', 'GetColor_6', 'GetColor_7', 'GetColor_8'];
+
+              console.log('[ColorDiag] Testing GetColor methods on first shape/label...');
+
+              // Test each method with shape (colorType 1 = Surface)
+              for (const methodName of methodNames) {
+                if (typeof actualColorTool[methodName] === 'function') {
+                  try {
+                    const result = actualColorTool[methodName](firstShape, 1, color);
+                    if (result) {
+                      console.log(`[ColorDiag] ${methodName}(shape, 1, color) = TRUE! RGB(${color.Red().toFixed(2)}, ${color.Green().toFixed(2)}, ${color.Blue().toFixed(2)})`);
+                    }
+                  } catch (e) {
+                    // Method signature didn't match - that's OK
                   }
-                } catch (e) {
-                  // Method signature didn't match - that's OK
                 }
               }
-            }
 
-            // Try IsSet variants
-            const isSetMethods = ['IsSet_1', 'IsSet_2'];
-            for (const methodName of isSetMethods) {
-              if (typeof actualColorTool[methodName] === 'function') {
-                try {
-                  const result = actualColorTool[methodName](firstLabel, 1);
-                  console.log(`[ColorDiag] ${methodName}(label, 1) = ${result}`);
-                } catch (e) {
-                  // Signature didn't match
+              // Test each method with label (colorType 1 = Surface)
+              for (const methodName of methodNames) {
+                if (typeof actualColorTool[methodName] === 'function') {
+                  try {
+                    const result = actualColorTool[methodName](firstLabel, 1, color);
+                    if (result) {
+                      console.log(`[ColorDiag] ${methodName}(label, 1, color) = TRUE! RGB(${color.Red().toFixed(2)}, ${color.Green().toFixed(2)}, ${color.Blue().toFixed(2)})`);
+                    }
+                  } catch (e) {
+                    // Method signature didn't match - that's OK
+                  }
                 }
-                try {
-                  const result = actualColorTool[methodName](firstShape, 1);
-                  console.log(`[ColorDiag] ${methodName}(shape, 1) = ${result}`);
-                } catch (e) {
-                  // Signature didn't match
+              }
+
+              // Try IsSet variants
+              const isSetMethods = ['IsSet_1', 'IsSet_2'];
+              for (const methodName of isSetMethods) {
+                if (typeof actualColorTool[methodName] === 'function') {
+                  try {
+                    const result = actualColorTool[methodName](firstLabel, 1);
+                    console.log(`[ColorDiag] ${methodName}(label, 1) = ${result}`);
+                  } catch (e) {
+                    // Signature didn't match
+                  }
+                  try {
+                    const result = actualColorTool[methodName](firstShape, 1);
+                    console.log(`[ColorDiag] ${methodName}(shape, 1) = ${result}`);
+                  } catch (e) {
+                    // Signature didn't match
+                  }
                 }
               }
             }
@@ -2455,46 +3104,27 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   // Fallback to basic reader if XCAF failed
   if (!shape || (shape.IsNull && shape.IsNull())) {
     logOCC('Using basic STEPControl_Reader (no color support)...');
+    const reader = createBasicStepReader(oc);
 
-    let reader;
-    if (oc.STEPControl_Reader_1) {
-      reader = new oc.STEPControl_Reader_1();
-    } else if (oc.STEPControl_Reader) {
-      reader = new oc.STEPControl_Reader();
-    } else {
-      throw new Error('STEPControl_Reader not found');
-    }
-
-    const readResult = reader.ReadFile('/' + fileName);
+    const fallbackReadStart = performance.now();
+    const readResult = reader.ReadFile(tempFilePath);
+    tessellationProfile.loadStepFile_readFile.total += performance.now() - fallbackReadStart;
+    tessellationProfile.loadStepFile_readFile.calls++;
     logOCC('ReadFile result:', readResult);
 
-    // IFSelect_RetDone is typically 0 in OpenCascade
-    // ReadFile returns an object with .value in emscripten bindings
-    const isDone = readResult === oc.IFSelect_ReturnStatus?.IFSelect_RetDone ||
-                   readResult === 0 ||
-                   (typeof readResult === 'object' && (readResult.value === 0 || readResult.value === 1));
-    if (!isDone) {
-      oc.FS.unlink('/' + fileName);
+    if (!isStepReadDone(oc, readResult)) {
+      cleanupTempFile();
       const resultValue = typeof readResult === 'object' ? JSON.stringify(readResult) : readResult;
       throw new Error(`Failed to read STEP file: ${resultValue}`);
     }
 
     logOCC('Transferring roots...');
-    if (reader.TransferRoots) {
-      try {
-        reader.TransferRoots();
-      } catch (e) {
-        if (oc.Message_ProgressRange_1) {
-          reader.TransferRoots(new oc.Message_ProgressRange_1());
-        } else if (oc.Message_ProgressRange) {
-          reader.TransferRoots(new oc.Message_ProgressRange());
-        }
-      }
-    } else if (reader.TransferRoot) {
-      reader.TransferRoot();
-    }
+    transferReaderRoots(oc, reader, false);
 
+    const fallbackOneShapeStart = performance.now();
     shape = reader.OneShape();
+    tessellationProfile.loadStepFile_oneShape.total += performance.now() - fallbackOneShapeStart;
+    tessellationProfile.loadStepFile_oneShape.calls++;
   }
 
   // Debug shape info only when DEBUG_OCC is true
@@ -2522,34 +3152,10 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   }
 
   // Clean up
-  oc.FS.unlink('/' + fileName);
+  cleanupTempFile();
 
-  // Profile: Color parsing
-  const colorParsingStart = performance.now();
-  logOCC('Parsing colors from STEP text...');
-
-  // Sub-profile: parseStepColors
-  let t0 = performance.now();
-  const colorEntities = parseStepColors(fileContentString);
-  const parseStepColorsTime = performance.now() - t0;
-
-  // FAST PATH: If no color entities found, skip all expensive color extraction
-  if (colorEntities.size === 0) {
-    const colorParsingTotal = performance.now() - colorParsingStart;
-    tessellationProfile.loadStepFile_colorParsing.total += colorParsingTotal;
-    tessellationProfile.loadStepFile_colorParsing.calls++;
-    console.log(`[ColorParsing] No colors in file, skipped in ${colorParsingTotal.toFixed(1)}ms`);
-
-    // Return empty color maps
-    const emptyStepColors = new Map<number, RGBColor>();
-    const emptyFaceIdOrder: number[] = [];
-    const emptyGeometryColorMap = new Map<string, RGBColor>();
-    const emptySolidMatchedColors = new Map<number, RGBColor>();
-    const emptyFaceToSolid = new Map<number, number>();
-    const emptySolidToColor = new Map<number, RGBColor>();
-    const emptyShapeColorMap = new Map<number, RGBColor>();
-
-    // Still need to unwrap tools
+  const buildEmptyColorResult = (): StepLoadResult => {
+    // Still need to unwrap tools before returning.
     let unwrappedColorTool = colorTool;
     let unwrappedShapeTool = shapeTool;
     if (colorTool && typeof colorTool.get === 'function' && !colorTool.IsNull?.()) {
@@ -2564,14 +3170,48 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
       colorTool: unwrappedColorTool,
       shapeTool: unwrappedShapeTool,
       doc,
-      stepColors: emptyStepColors,
-      shapeColorMap: emptyShapeColorMap,
-      faceIdOrder: emptyFaceIdOrder,
-      geometryColorMap: emptyGeometryColorMap,
-      solidMatchedColors: emptySolidMatchedColors,
-      faceToSolid: emptyFaceToSolid,
-      solidToColor: emptySolidToColor,
+      stepColors: new Map<number, RGBColor>(),
+      shapeColorMap: new Map<number, RGBColor>(),
+      faceIdOrder: [],
+      geometryColorMap: new Map<string, RGBColor>(),
+      solidMatchedColors: new Map<number, RGBColor>(),
+      faceToSolid: new Map<number, number>(),
+      solidToColor: new Map<number, RGBColor>(),
     };
+  };
+
+  // Profile: Color parsing
+  const colorParsingStart = performance.now();
+  if (!enableStepColorParsing) {
+    const colorParsingTotal = performance.now() - colorParsingStart;
+    tessellationProfile.loadStepFile_colorParsing.total += colorParsingTotal;
+    tessellationProfile.loadStepFile_colorParsing.calls++;
+    if (enableLoadDiagnostics) {
+      console.log(`[ColorParsing] Disabled by __ENABLE_STEP_COLOR_PARSING__/__PERF_GEOMETRY_ONLY_LOAD__, skipped in ${colorParsingTotal.toFixed(1)}ms`);
+    }
+    return buildEmptyColorResult();
+  }
+
+  if (fileContentString === null) {
+    const decoder = new TextDecoder('utf-8');
+    fileContentString = decoder.decode(fileData);
+  }
+  logOCC('Parsing colors from STEP text...');
+
+  // Sub-profile: parseStepColors
+  let t0 = performance.now();
+  const colorEntities = parseStepColors(fileContentString);
+  const parseStepColorsTime = performance.now() - t0;
+
+  // FAST PATH: If no color entities found, skip all expensive color extraction
+  if (colorEntities.size === 0) {
+    const colorParsingTotal = performance.now() - colorParsingStart;
+    tessellationProfile.loadStepFile_colorParsing.total += colorParsingTotal;
+    tessellationProfile.loadStepFile_colorParsing.calls++;
+    if (enableLoadDiagnostics) {
+      console.log(`[ColorParsing] No colors in file, skipped in ${colorParsingTotal.toFixed(1)}ms`);
+    }
+    return buildEmptyColorResult();
   }
 
   // Sub-profile: buildFaceColorMap
@@ -2620,7 +3260,9 @@ async function loadStepFile(fileContent: Uint8Array | string, fileName: string):
   tessellationProfile.loadStepFile_colorParsing.calls++;
 
   // Log color parsing breakdown (always, for now)
-  console.log(`[ColorParsing] Breakdown: parseStepColors=${parseStepColorsTime.toFixed(1)}ms, buildFaceColorMap=${buildFaceColorMapTime.toFixed(1)}ms, extractFaceIdOrder=${extractFaceIdOrderTime.toFixed(1)}ms, buildGeometryColorMap=${buildGeometryColorMapTime.toFixed(1)}ms, buildSolidColorMap=${buildSolidColorMapTime.toFixed(1)}ms, buildOCCSolidFaceCounts=${buildOCCSolidFaceCountsTime.toFixed(1)}ms, matchSolids=${matchSolidsTime.toFixed(1)}ms, buildShapeColorMap=${buildShapeColorMapTime.toFixed(1)}ms, total=${colorParsingTotal.toFixed(1)}ms`);
+  if (enableLoadDiagnostics) {
+    console.log(`[ColorParsing] Breakdown: parseStepColors=${parseStepColorsTime.toFixed(1)}ms, buildFaceColorMap=${buildFaceColorMapTime.toFixed(1)}ms, extractFaceIdOrder=${extractFaceIdOrderTime.toFixed(1)}ms, buildGeometryColorMap=${buildGeometryColorMapTime.toFixed(1)}ms, buildSolidColorMap=${buildSolidColorMapTime.toFixed(1)}ms, buildOCCSolidFaceCounts=${buildOCCSolidFaceCountsTime.toFixed(1)}ms, matchSolids=${matchSolidsTime.toFixed(1)}ms, buildShapeColorMap=${buildShapeColorMapTime.toFixed(1)}ms, total=${colorParsingTotal.toFixed(1)}ms`);
+  }
 
   // IMPORTANT: Unwrap colorTool and shapeTool handles before returning
   // The tools from XCAFDoc_DocumentTool are Handles - getFaceColor needs the actual tool
@@ -3245,21 +3887,69 @@ async function extractFaceEdges(oc: any, face: any, faceIndex: number): Promise<
                 const angleDegrees = (paramRange * 180 / Math.PI).toFixed(1);
                 faceExtractionLog(`[extractFaceEdges] Face ${faceIndex} Wire ${wireIndex} Edge ${edgeIndex}: Circle arc ${angleDegrees}° (params: ${first.toFixed(3)} to ${last.toFixed(3)})`);
               }
-              const MIN_SAMPLES = 32;
-              const MAX_SAMPLES = 256;
-              let numSamples = 64; // Default for curved edges (better detail)
+              // Keep extraction sampling moderate by default so planar/trim loops
+              // do not explode in vertex count. Values remain runtime-tunable.
+              const MIN_SAMPLES = Math.max(4, Math.floor(readGlobalNumber('__EDGE_MIN_SAMPLES__') ?? 6));
+              const MAX_SAMPLES = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_MAX_SAMPLES__') ?? 64));
+              let numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_DEFAULT_SAMPLES__') ?? 16));
 
               if (curveType === 'Circle') {
-                // Angle step ~5.6 degrees (π/32) => ~64 samples for full circle
-                const angleStep = Math.PI / 32;
+                // Adaptive circular sampling (deflection-guided) to prevent very dense
+                // planar boundaries from exploding triangle counts on large models.
+                const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
+                const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+                const defaultAngleStep = face.surfaceType === 'Plane'
+                  ? (preferGeometryOnlyLoad ? (Math.PI / 18) : (Math.PI / 24))
+                  : (preferGeometryOnlyLoad ? (Math.PI / 9) : (Math.PI / 12));
+                const angleStepKey = face.surfaceType === 'Plane'
+                  ? '__EDGE_CIRCLE_ANGLE_STEP_PLANE__'
+                  : '__EDGE_CIRCLE_ANGLE_STEP__';
+                let angleStep = readGlobalNumber(angleStepKey) ?? defaultAngleStep;
+
+                if ((readGlobalBoolean('__EDGE_CIRCLE_ADAPTIVE_SAMPLING__', true)) && typeof curveAdaptor.Circle === 'function') {
+                  try {
+                    const circle = curveAdaptor.Circle();
+                    const radius = Math.max(1e-6, Math.abs(circle.Radius?.() ?? 0));
+                    if (radius > 1e-6) {
+                      const ratioDefault = face.surfaceType === 'Plane'
+                        ? (preferGeometryOnlyLoad ? 0.018 : 0.012)
+                        : (preferGeometryOnlyLoad ? 0.026 : 0.018);
+                      const deflRatio = Math.max(
+                        0.001,
+                        readGlobalNumber('__EDGE_CIRCLE_DEFLECTION_RATIO__') ?? ratioDefault
+                      );
+                      const deflAbs = readGlobalNumber('__EDGE_CIRCLE_DEFLECTION_ABS__');
+                      const targetDeflection = Math.max(1e-6, deflAbs ?? (radius * deflRatio));
+                      const cosArg = clamp(1 - (targetDeflection / radius), -1, 1);
+                      const stepByDeflection = 2 * Math.acos(cosArg);
+                      const maxAngleStepDefault = face.surfaceType === 'Plane'
+                        ? (preferGeometryOnlyLoad ? 0.36 : 0.28)
+                        : (preferGeometryOnlyLoad ? 0.45 : 0.35);
+                      const maxAngleStep = Math.max(
+                        0.06,
+                        readGlobalNumber('__EDGE_CIRCLE_MAX_ANGLE_STEP__') ?? maxAngleStepDefault
+                      );
+                      const minAngleStep = Math.max(
+                        0.02,
+                        Math.min(maxAngleStep, readGlobalNumber('__EDGE_CIRCLE_MIN_ANGLE_STEP__') ?? (preferGeometryOnlyLoad ? 0.1 : 0.08))
+                      );
+                      if (Number.isFinite(stepByDeflection) && stepByDeflection > 1e-6) {
+                        angleStep = clamp(stepByDeflection, minAngleStep, maxAngleStep);
+                      }
+                    }
+                    circle.delete?.();
+                  } catch {
+                    // Fall back to configured/default angle step.
+                  }
+                }
                 numSamples = Math.ceil(Math.abs(paramRange) / angleStep);
               } else if (curveType === 'Ellipse') {
-                numSamples = 96;
+                numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_ELLIPSE_SAMPLES__') ?? 20));
               } else if (curveType === 'BSplineCurve') {
-                numSamples = 96;
+                numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_BSPLINE_SAMPLES__') ?? 16));
               }
 
-              if (!isFinite(numSamples)) numSamples = 64;
+              if (!isFinite(numSamples)) numSamples = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__EDGE_DEFAULT_SAMPLES__') ?? 16));
               numSamples = Math.max(MIN_SAMPLES, Math.min(MAX_SAMPLES, numSamples));
 
               sampledPoints = [];
@@ -4215,8 +4905,13 @@ async function runCheckpoint3(stepFileContent: string): Promise<{
  * For line edges: just use the start point
  * For curved edges: use the sampled points (excluding the last one to avoid duplicates)
  */
-function occEdgesToPolygon(edges: EdgeInfo[], debugLabel?: string): Vec3[] {
+function occEdgesToPolygon(
+  edges: EdgeInfo[],
+  debugLabel?: string,
+  options?: { lineSubdivideStep?: number }
+): Vec3[] {
   if (edges.length === 0) return [];
+  const lineSubdivideStep = options?.lineSubdivideStep ?? 0;
 
   const polygon: Vec3[] = [];
 
@@ -4224,7 +4919,7 @@ function occEdgesToPolygon(edges: EdgeInfo[], debugLabel?: string): Vec3[] {
     const edge = edges[i];
     const hasSamples = edge.sampledPoints && edge.sampledPoints.length > 0;
     if (debugLabel) {
-      console.log(`[occEdgesToPolygon ${debugLabel}] edge ${i}: type=${edge.curveType}, sampledPoints=${edge.sampledPoints?.length || 0}`);
+      tessellationVerboseLog(`[occEdgesToPolygon ${debugLabel}] edge ${i}: type=${edge.curveType}, sampledPoints=${edge.sampledPoints?.length || 0}`);
     }
 
     if (hasSamples) {
@@ -4238,23 +4933,23 @@ function occEdgesToPolygon(edges: EdgeInfo[], debugLabel?: string): Vec3[] {
       // We don't skip end point for LINE edges because they need proper polygon closure
       polygon.push([edge.startPoint.x, edge.startPoint.y, edge.startPoint.z]);
 
-      // For LINE edges, also add intermediate points if the edge is long
-      // This helps with UV projection on curved surfaces like cylinders
-      const dx = edge.endPoint.x - edge.startPoint.x;
-      const dy = edge.endPoint.y - edge.startPoint.y;
-      const dz = edge.endPoint.z - edge.startPoint.z;
-      const length = Math.sqrt(dx*dx + dy*dy + dz*dz);
-
-      // Add intermediate points for lines longer than 0.1 units
-      if (length > 0.1) {
-        const numSegments = Math.max(2, Math.ceil(length / 0.1));
-        for (let j = 1; j < numSegments; j++) {
-          const t = j / numSegments;
-          polygon.push([
-            edge.startPoint.x + t * dx,
-            edge.startPoint.y + t * dy,
-            edge.startPoint.z + t * dz
-          ]);
+      // Optional line densification for UV projection on curved periodic faces.
+      // Keep it off by default for planar tessellation to avoid triangle blowups.
+      if (lineSubdivideStep > 1e-9) {
+        const dx = edge.endPoint.x - edge.startPoint.x;
+        const dy = edge.endPoint.y - edge.startPoint.y;
+        const dz = edge.endPoint.z - edge.startPoint.z;
+        const length = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (length > lineSubdivideStep) {
+          const numSegments = Math.max(2, Math.ceil(length / lineSubdivideStep));
+          for (let j = 1; j < numSegments; j++) {
+            const t = j / numSegments;
+            polygon.push([
+              edge.startPoint.x + t * dx,
+              edge.startPoint.y + t * dy,
+              edge.startPoint.z + t * dz
+            ]);
+          }
         }
       }
     }
@@ -4287,12 +4982,12 @@ async function tessellatePlanarFaceFromOCC(
   tessellationProfile.occEdgesToPolygon.calls++;
 
   // Diagnostic logging for planar faces with holes
-  console.log(`[tessellatePlanarFace] outerLoop: ${face.outerLoop.length} edges -> ${outer.length} vertices`);
-  console.log(`[tessellatePlanarFace] innerLoops: ${face.innerLoops.length} loops`);
+  tessellationVerboseLog(`[tessellatePlanarFace] outerLoop: ${face.outerLoop.length} edges -> ${outer.length} vertices`);
+  tessellationVerboseLog(`[tessellatePlanarFace] innerLoops: ${face.innerLoops.length} loops`);
   for (let i = 0; i < face.innerLoops.length; i++) {
     const loop = face.innerLoops[i];
     const holeVerts = holes[i];
-    console.log(`  - hole ${i}: ${loop.length} edges -> ${holeVerts.length} vertices, types: [${loop.map(e => e.curveType).join(', ')}]`);
+    tessellationVerboseLog(`  - hole ${i}: ${loop.length} edges -> ${holeVerts.length} vertices, types: [${loop.map(e => e.curveType).join(', ')}]`);
   }
 
   if (outer.length < 3) {
@@ -4336,10 +5031,10 @@ async function tessellatePlanarFaceFromOCC(
   let triangles: number[][];
   let vertices3d: Vec3[];
 
-  console.log(`[tessellatePlanarFace] After projection: outer2d=${normalized.outer2d.length} verts, holes2d=${normalized.holes2d.length} holes`);
+  tessellationVerboseLog(`[tessellatePlanarFace] After projection: outer2d=${normalized.outer2d.length} verts, holes2d=${normalized.holes2d.length} holes`);
   if (normalized.holes2d.length > 0) {
     for (let i = 0; i < normalized.holes2d.length; i++) {
-      console.log(`  - hole2d ${i}: ${normalized.holes2d[i].length} vertices`);
+      tessellationVerboseLog(`  - hole2d ${i}: ${normalized.holes2d[i].length} vertices`);
     }
   }
 
@@ -4347,9 +5042,9 @@ async function tessellatePlanarFaceFromOCC(
     // HAS HOLES: Use earcut with native hole support (no bridging needed)
     // triangulateWithHoles expects vertices in order: outer, then holes concatenated
     // and returns indices into that combined array
-    console.log(`[tessellatePlanarFace] Using earcut with holes: outer=${normalized.outer2d.length}, holes=${normalized.holes2d.map(h => h.length).join(',')}`);
+    tessellationVerboseLog(`[tessellatePlanarFace] Using earcut with holes: outer=${normalized.outer2d.length}, holes=${normalized.holes2d.map(h => h.length).join(',')}`);
     triangles = triangulateWithHoles(normalized.outer2d, normalized.holes2d);
-    console.log(`[tessellatePlanarFace] earcut produced ${triangles.length} triangles`);
+    tessellationVerboseLog(`[tessellatePlanarFace] earcut produced ${triangles.length} triangles`);
 
     // Build combined 3D vertices: outer + all holes
     vertices3d = [...oriented3d.outer];
@@ -4357,10 +5052,18 @@ async function tessellatePlanarFaceFromOCC(
       vertices3d.push(...hole);
     }
   } else {
-    // NO HOLES: Use GPU tessellation (faster for simple polygons)
-    console.log(`[tessellatePlanarFace] Using GPU tessellation (no holes)`);
+    // NO HOLES: Use hybrid triangulation (earcut for medium loops, GPU for large loops)
+    tessellationVerboseLog(`[tessellatePlanarFace] Using hybrid triangulation (no holes)`);
     const points2dAsVec3: Vec3[] = normalized.outer2d.map(p => [p[0], p[1], 0]);
-    triangles = await earClipping(points2dAsVec3);
+    try {
+      triangles = await triangulateFast(points2dAsVec3);
+      if (triangles.length === 0 && points2dAsVec3.length >= 3) {
+        // Safety fallback for rare degenerate/predictor misses.
+        triangles = await earClipping(points2dAsVec3);
+      }
+    } catch {
+      triangles = await earClipping(points2dAsVec3);
+    }
     vertices3d = oriented3d.outer;
   }
 
@@ -4376,21 +5079,54 @@ async function tessellatePlanarFaceFromOCC(
 /**
  * Helper to convert TessellatedMesh to vertices/triangles format
  */
-function tessellatedMeshToVerticesAndTriangles(mesh: { positions: Float32Array; indices: Uint32Array }): {
+interface FaceTessellationResult {
   vertices: Vec3[];
   triangles: number[][];
+  flat?: {
+    positions: Float32Array;
+    indices: Uint32Array;
+  };
+  trimPhaseTimes?: Partial<Record<TrimmedSurfaceProfilePhase, number>>;
+}
+
+function tessellatedMeshToVerticesAndTriangles(mesh: { positions: Float32Array; indices: Uint32Array }): FaceTessellationResult {
+  return {
+    vertices: [],
+    triangles: [],
+    flat: {
+      positions: mesh.positions,
+      indices: mesh.indices,
+    },
+  };
+}
+
+function getFaceResultFlatArrays(result: FaceTessellationResult): {
+  positions: Float32Array;
+  indices: Uint32Array;
 } {
-  const vertices: Vec3[] = [];
-  for (let i = 0; i < mesh.positions.length; i += 3) {
-    vertices.push([mesh.positions[i], mesh.positions[i + 1], mesh.positions[i + 2]]);
+  if (result.flat) {
+    return result.flat;
   }
 
-  const triangles: number[][] = [];
-  for (let i = 0; i < mesh.indices.length; i += 3) {
-    triangles.push([mesh.indices[i], mesh.indices[i + 1], mesh.indices[i + 2]]);
+  const positions = new Float32Array(result.vertices.length * 3);
+  for (let i = 0; i < result.vertices.length; i++) {
+    const v = result.vertices[i];
+    const base = i * 3;
+    positions[base + 0] = v[0];
+    positions[base + 1] = v[1];
+    positions[base + 2] = v[2];
   }
 
-  return { vertices, triangles };
+  const indices = new Uint32Array(result.triangles.length * 3);
+  for (let i = 0; i < result.triangles.length; i++) {
+    const tri = result.triangles[i];
+    const base = i * 3;
+    indices[base + 0] = tri[0];
+    indices[base + 1] = tri[1];
+    indices[base + 2] = tri[2];
+  }
+
+  return { positions, indices };
 }
 
 function topAbsStateToValue(state: any): number | undefined {
@@ -4425,6 +5161,14 @@ function readGlobalNumber(key: string): number | undefined {
 function readGlobalBoolean(key: string, fallback: boolean): boolean {
   const raw = (globalThis as any)?.[key];
   return typeof raw === 'boolean' ? raw : fallback;
+}
+
+function loadDiagnosticsEnabled(): boolean {
+  // Perf geometry-only mode should never pay for diagnostic branches.
+  if (readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false)) {
+    return false;
+  }
+  return readGlobalBoolean('__ENABLE_LOAD_DIAGNOSTICS__', false);
 }
 
 function readDebugModeFromGlobal(key: string, fallback: DebugMode): DebugMode {
@@ -4672,6 +5416,7 @@ interface TrimLoopsUV {
   uvOuter: Vec2[];
   uvHoles: Vec2[][];
   uvOuterRawWrapped?: Vec2[];
+  classifierWires?: LocalUvClassifierWireInput[];
 }
 
 interface TrimLoopValidationResult {
@@ -5024,9 +5769,15 @@ function simplifyClosedLoopRDP(loopInput: Vec2[], tolerance: number, minPoints: 
   return simplifiedClosed.length >= minPoints ? simplifiedClosed : loop;
 }
 
-function simplifyLoopForMeshing(loopInput: Vec2[], targetPoints: number, maxAreaErrorRatio: number): Vec2[] {
+function simplifyLoopForMeshing(
+  loopInput: Vec2[],
+  targetPoints: number,
+  maxAreaErrorRatio: number,
+  minPoints: number = 3
+): Vec2[] {
   const loop = simplifyLoop2D(loopInput);
-  if (loop.length <= 3 || loop.length <= targetPoints) {
+  const effectiveMinPoints = Math.max(3, Math.floor(minPoints));
+  if (loop.length <= effectiveMinPoints || loop.length <= targetPoints) {
     return loop;
   }
 
@@ -5043,8 +5794,8 @@ function simplifyLoopForMeshing(loopInput: Vec2[], targetPoints: number, maxArea
 
   for (let iter = 0; iter < 22; iter++) {
     const mid = (lo + hi) * 0.5;
-    const candidate = simplifyClosedLoopRDP(loop, mid, 3);
-    if (candidate.length < 3) {
+    const candidate = simplifyClosedLoopRDP(loop, mid, effectiveMinPoints);
+    if (candidate.length < effectiveMinPoints) {
       hi = mid;
       continue;
     }
@@ -5061,7 +5812,7 @@ function simplifyLoopForMeshing(loopInput: Vec2[], targetPoints: number, maxArea
     }
   }
 
-  if (best.length <= targetPoints) {
+  if (best.length <= targetPoints && best.length >= effectiveMinPoints) {
     return best;
   }
 
@@ -5072,7 +5823,7 @@ function simplifyLoopForMeshing(loopInput: Vec2[], targetPoints: number, maxArea
     decimated.push(best[i]);
   }
   const decimatedLoop = simplifyLoop2D(decimated);
-  if (decimatedLoop.length < 3) {
+  if (decimatedLoop.length < effectiveMinPoints) {
     return best;
   }
   const decimatedArea = loopAreaAbs2D(decimatedLoop);
@@ -5093,7 +5844,7 @@ function simplifyLoopForMeshing(loopInput: Vec2[], targetPoints: number, maxArea
       hardDecimated.push(best[i]);
     }
     const hardLoop = simplifyLoop2D(hardDecimated);
-    if (hardLoop.length >= 3) {
+    if (hardLoop.length >= effectiveMinPoints) {
       return hardLoop;
     }
   }
@@ -5392,12 +6143,26 @@ function splitConeTrimLoopsIntoTwoPatches(
 
   const leftOuter = clipLoopByUHalfPlane(sourceValidation.uvOuter, uSplit, true);
   const rightOuter = clipLoopByUHalfPlane(sourceValidation.uvOuter, uSplit, false);
-  const leftHoles = sourceValidation.uvHoles
-    .map((hole) => clipLoopByUHalfPlane(hole, uSplit, true))
-    .filter((loop) => loop.length >= 3);
-  const rightHoles = sourceValidation.uvHoles
-    .map((hole) => clipLoopByUHalfPlane(hole, uSplit, false))
-    .filter((loop) => loop.length >= 3);
+  const leftHoles: Vec2[][] = [];
+  const rightHoles: Vec2[][] = [];
+  for (const hole of sourceValidation.uvHoles) {
+    const hb = getLoopUBounds(hole);
+    // Preserve non-crossing holes exactly; clipping those can distort hole shape.
+    if (hb.maxU <= uSplit + 1e-9) {
+      leftHoles.push(hole);
+      continue;
+    }
+    if (hb.minU >= uSplit - 1e-9) {
+      rightHoles.push(hole);
+      continue;
+    }
+
+    // Hole crosses split line: clip into both patches.
+    const leftClip = clipLoopByUHalfPlane(hole, uSplit, true);
+    const rightClip = clipLoopByUHalfPlane(hole, uSplit, false);
+    if (leftClip.length >= 3) leftHoles.push(leftClip);
+    if (rightClip.length >= 3) rightHoles.push(rightClip);
+  }
 
   const leftValidation = validateAndSanitizeTrimLoops(leftOuter, leftHoles, {
     minAreaAbs: 1e-7,
@@ -5555,17 +6320,17 @@ function curveTypeNameFromGeomAbs(curveTypeEnum: any): string {
 }
 
 function curveSampleCount(curveType: string, paramRange: number): number {
-  const MIN_SAMPLES = 2;
-  const MAX_SAMPLES = 256;
-  let count = 32;
+  const MIN_SAMPLES = Math.max(2, Math.floor(readGlobalNumber('__PCURVE_MIN_SAMPLES__') ?? 6));
+  const MAX_SAMPLES = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__PCURVE_MAX_SAMPLES__') ?? 96));
+  let count = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__PCURVE_DEFAULT_SAMPLES__') ?? 20));
   if (curveType === 'Line') {
     count = 2;
   } else if (curveType === 'Circle') {
-    // ~5.6 degree step
-    const angleStep = Math.PI / 32;
+    // ~15 degree step for trimmed p-curves (full circle ~= 24 samples).
+    const angleStep = Math.PI / 12;
     count = Math.ceil(Math.abs(paramRange) / angleStep);
   } else if (curveType === 'Ellipse' || curveType === 'BSplineCurve') {
-    count = 96;
+    count = Math.max(MIN_SAMPLES, Math.floor(readGlobalNumber('__PCURVE_COMPLEX_SAMPLES__') ?? 28));
   }
   if (!isFinite(count)) count = 32;
   return Math.max(MIN_SAMPLES, Math.min(MAX_SAMPLES, count));
@@ -5592,11 +6357,18 @@ function appendLoopSegment(loop: Vec2[], segment: Vec2[], eps: number = 1e-8): v
   }
 }
 
+interface PcurveEdgeSample {
+  points: Vec2[];
+  vertexToleranceMax: number;
+  hasHighVertexTolerance: boolean;
+  isDegenerate: boolean;
+}
+
 function sampleEdgePcurveUV(
   oc: any,
   edge: any,
   occFace: any
-): Vec2[] | null {
+): PcurveEdgeSample | null {
   if (!oc.BRepAdaptor_Curve2d_2) return null;
 
   let adaptor2d: any | null = null;
@@ -5621,6 +6393,16 @@ function sampleEdgePcurveUV(
 
     // Re-align to topological orientation so edge chaining is stable.
     let startUV: Vec2 | null = null;
+    let vertexToleranceMax = 0;
+    const readVertexTolerance = (vertex: any): number => {
+      if (!vertex || vertex.IsNull?.() || !oc.BRep_Tool?.Tolerance) return 0;
+      try {
+        const tol = oc.BRep_Tool.Tolerance(vertex);
+        return Number.isFinite(tol) ? Math.max(0, tol) : 0;
+      } catch {
+        return 0;
+      }
+    };
     if (oc.TopExp?.FirstVertex && oc.BRep_Tool?.Parameters) {
       try {
         const firstVertex = oc.TopExp.FirstVertex(edge, true);
@@ -5630,10 +6412,20 @@ function sampleEdgePcurveUV(
             startUV = [uvFirst.X(), uvFirst.Y()];
             uvFirst.delete?.();
           }
+          vertexToleranceMax = Math.max(vertexToleranceMax, readVertexTolerance(firstVertex));
         }
         firstVertex?.delete?.();
       } catch {
         // Keep sampled order when vertex UV lookup fails.
+      }
+    }
+    if (oc.TopExp?.LastVertex) {
+      try {
+        const lastVertex = oc.TopExp.LastVertex(edge, true);
+        vertexToleranceMax = Math.max(vertexToleranceMax, readVertexTolerance(lastVertex));
+        lastVertex?.delete?.();
+      } catch {
+        // Best-effort tolerance hint only.
       }
     }
     if (startUV && sampled.length >= 2) {
@@ -5644,8 +6436,31 @@ function sampleEdgePcurveUV(
       }
     }
 
+    const edgePoints: Vec2[] = [];
+    for (const [u, v] of sampled) {
+      if (!Number.isFinite(u) || !Number.isFinite(v)) continue;
+      if (edgePoints.length === 0) {
+        edgePoints.push([u, v]);
+        continue;
+      }
+      const [pu, pv] = edgePoints[edgePoints.length - 1];
+      if (Math.abs(u - pu) <= 1e-10 && Math.abs(v - pv) <= 1e-10) {
+        continue;
+      }
+      edgePoints.push([u, v]);
+    }
+    const highVertexToleranceThreshold = Math.max(
+      1e-8,
+      readGlobalNumber('__LOCAL_UV_EDGE_HIGH_VERTEX_TOL__') ?? 1e-4
+    );
+
     adaptor2d.delete?.();
-    return simplifyLoop2D(sampled);
+    return {
+      points: edgePoints,
+      vertexToleranceMax,
+      hasHighVertexTolerance: vertexToleranceMax > highVertexToleranceThreshold,
+      isDegenerate: edgePoints.length < 2,
+    };
   } catch {
     adaptor2d?.delete?.();
     return null;
@@ -5665,6 +6480,8 @@ function loopPerimeterUV(points: Vec2[]): number {
 
 interface PcurveWireLoopsResult {
   wires: Vec2[][];
+  wireEdges: LocalUvClassifierEdgeInput[][];
+  wireHasBadEdges: boolean[];
   wireHashes: number[];
   outerWireHash: number | null;
 }
@@ -5689,6 +6506,8 @@ function getFaceTrimWireLoopsUVFromPCurves(
   }
 
   const wires: Vec2[][] = [];
+  const wireEdges: LocalUvClassifierEdgeInput[][] = [];
+  const wireHasBadEdges: boolean[] = [];
   const wireHashes: number[] = [];
   let outerWireHash: number | null = null;
   if (oc.BRepTools?.OuterWire) {
@@ -5719,13 +6538,25 @@ function getFaceTrimWireLoopsUVFromPCurves(
         ? new oc.BRepTools_WireExplorer_3(wire, face.occFace)
         : new oc.BRepTools_WireExplorer_2(wire);
       const loopUV: Vec2[] = [];
+      const classifierEdgeChains: LocalUvClassifierEdgeInput[] = [];
+      let hasBadEdges = false;
 
       while (edgeExplorer.More()) {
         const edgeShape = edgeExplorer.Current();
         const edge = oc.TopoDS.Edge_1(edgeShape);
         const sampled = sampleEdgePcurveUV(oc, edge, face.occFace);
-        if (sampled && sampled.length >= 2) {
-          appendLoopSegment(loopUV, sampled);
+        if (sampled && sampled.points.length >= 2) {
+          appendLoopSegment(loopUV, sampled.points);
+          const edgeInput: LocalUvClassifierEdgeInput = {
+            points: sampled.points,
+            vertexToleranceMax: sampled.vertexToleranceMax,
+            hasHighVertexTolerance: sampled.hasHighVertexTolerance,
+            isDegenerate: sampled.isDegenerate,
+          };
+          classifierEdgeChains.push(edgeInput);
+          if (sampled.hasHighVertexTolerance || sampled.isDegenerate) {
+            hasBadEdges = true;
+          }
         }
         edgeExplorer.Next();
       }
@@ -5734,6 +6565,8 @@ function getFaceTrimWireLoopsUVFromPCurves(
       const simplified = simplifyLoop2D(loopUV);
       if (simplified.length >= 3) {
         wires.push(simplified);
+        wireEdges.push(classifierEdgeChains);
+        wireHasBadEdges.push(hasBadEdges);
         wireHashes.push(wireHash);
       }
       wireExplorer.Next();
@@ -5747,7 +6580,7 @@ function getFaceTrimWireLoopsUVFromPCurves(
     return null;
   }
 
-  return { wires, wireHashes, outerWireHash };
+  return { wires, wireEdges, wireHasBadEdges, wireHashes, outerWireHash };
 }
 
 function buildOcctInspiredConeTrimDomainFromPCurves(
@@ -5767,6 +6600,7 @@ function buildOcctInspiredConeTrimDomainFromPCurves(
   if (unwrappedWires.length === 0) {
     return null;
   }
+  const hasTrimHoles = face.innerLoops.length > 0;
 
   // Align all wires to a shared U band so the domain rectangle is compact/stable.
   const referenceMeanU = meanLoopU(unwrappedWires[0]);
@@ -5807,15 +6641,52 @@ function buildOcctInspiredConeTrimDomainFromPCurves(
     uMax += shiftU;
   }
 
+  // When holeless cone p-curves overrun by a fractional period, the rectangular
+  // domain leaves a visible seam wedge. Snap the U span to the nearest whole
+  // period count for full-wrap cones so seam edges coincide in 3D.
+  const uSpan = uMax - uMin;
+  if (
+    !hasTrimHoles &&
+    uSpan > period * 1.05 &&
+    readGlobalBoolean('__OCCT_INSPIRED_TRIM_SNAP_PERIOD_SPAN_NO_HOLES__', true)
+  ) {
+    const snappedPeriods = Math.max(1, Math.round(uSpan / period));
+    const snappedSpan = snappedPeriods * period;
+    const maxSnapDelta = period * 0.35;
+    if (Math.abs(snappedSpan - uSpan) <= maxSnapDelta) {
+      const centerU = 0.5 * (uMin + uMax);
+      uMin = centerU - snappedSpan * 0.5;
+      uMax = centerU + snappedSpan * 0.5;
+    }
+  }
+
   const padFactor = Math.max(0, readGlobalNumber('__OCCT_INSPIRED_TRIM_DOMAIN_PAD_FACTOR__') ?? 0.03);
   const minPad = Math.max(1e-6, readGlobalNumber('__OCCT_INSPIRED_TRIM_DOMAIN_PAD_MIN__') ?? 1e-4);
-  const padU = Math.max(minPad, (uMax - uMin) * padFactor);
+  let padU = Math.max(minPad, (uMax - uMin) * padFactor);
   const padV = Math.max(minPad, (vMax - vMin) * padFactor);
+  // Preserve periodic seam alignment on holeless cones by avoiding fractional U padding.
+  if (!hasTrimHoles && readGlobalBoolean('__OCCT_INSPIRED_TRIM_DISABLE_U_PAD_NO_HOLES__', true)) {
+    padU = 0;
+  }
 
   const sourcePointCount = alignedWires.reduce((sum, wire) => sum + wire.length, 0);
-  const gridScale = Math.max(0.1, readGlobalNumber('__OCCT_INSPIRED_TRIM_GRID_SCALE__') ?? 1.35);
-  const minGrid = Math.max(8, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID__') ?? 24));
-  const maxGrid = Math.max(minGrid, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID__') ?? 64));
+  const gridScale = Math.max(0.1, readGlobalNumber('__OCCT_INSPIRED_TRIM_GRID_SCALE__') ?? 0.9);
+  let minGrid = Math.max(8, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID__') ?? 14));
+  let maxGrid = Math.max(minGrid, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID__') ?? 32));
+  if (!hasTrimHoles) {
+    // Holeless cones were under-sampled in strict local-classifier mode, causing
+    // visible seam wedges and quality-gate triangle underflow on cone/conical fixtures.
+    const minGridNoHoles = Math.max(
+      minGrid,
+      Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID_NO_HOLES__') ?? 32)
+    );
+    const maxGridNoHoles = Math.max(
+      minGridNoHoles,
+      Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID_NO_HOLES__') ?? 56)
+    );
+    minGrid = minGridNoHoles;
+    maxGrid = Math.max(maxGrid, maxGridNoHoles);
+  }
   const gridDensity = Math.max(
     minGrid,
     Math.min(maxGrid, Math.ceil(Math.sqrt(sourcePointCount) * gridScale))
@@ -5841,12 +6712,12 @@ function buildOcctInspiredConeTrimDomainFromPCurves(
 function getFaceTrimLoopsUVFromPCurves(
   oc: any,
   face: FaceWithEdgesInfo
-): { uvOuter: Vec2[]; uvHoles: Vec2[][] } | null {
+): { uvOuter: Vec2[]; uvHoles: Vec2[][]; classifierWires: LocalUvClassifierWireInput[] } | null {
   const pcurveLoops = getFaceTrimWireLoopsUVFromPCurves(oc, face);
   if (!pcurveLoops || pcurveLoops.wires.length === 0) {
     return null;
   }
-  const { wires, wireHashes, outerWireHash } = pcurveLoops;
+  const { wires, wireEdges, wireHasBadEdges, wireHashes, outerWireHash } = pcurveLoops;
 
   // Cone seam faces are sensitive to wire ordering/hash mismatches.
   // Build loop labels from p-curve geometry directly:
@@ -5886,16 +6757,22 @@ function getFaceTrimLoopsUVFromPCurves(
 
     const holeIdx: number[] = [];
     const alignedHolesForValidation: Vec2[][] = [];
+    const holeUShifts: number[] = [];
     let totalHoleAreaAbs = 0;
     for (let i = 0; i < classifiedWires.length; i++) {
       if (i === outerIdx || classifiedWires[i].length < 3 || areasAbs[i] <= minAreaAbs) continue;
       let aligned = classifiedWires[i];
+      let totalShiftU = 0;
       if (outerShiftK !== 0) {
-        aligned = shiftLoopU(aligned, outerShiftK * period);
+        const shift = outerShiftK * period;
+        aligned = shiftLoopU(aligned, shift);
+        totalShiftU += shift;
       }
       const alignK = Math.round((outerMidU - meanLoopU(aligned)) / period);
       if (alignK !== 0) {
-        aligned = shiftLoopU(aligned, alignK * period);
+        const shift = alignK * period;
+        aligned = shiftLoopU(aligned, shift);
+        totalShiftU += shift;
       }
       if (!isLoopInsidePolygonInclusive2D(aligned, outerClassified)) {
         console.warn(
@@ -5912,6 +6789,7 @@ function getFaceTrimLoopsUVFromPCurves(
       }
       holeIdx.push(i);
       alignedHolesForValidation.push(aligned);
+      holeUShifts.push(totalShiftU);
       totalHoleAreaAbs += areasAbs[i];
     }
 
@@ -5936,14 +6814,54 @@ function getFaceTrimLoopsUVFromPCurves(
       return null;
     }
 
-    const uvOuter = wires[outerIdx];
-    const uvHoles = holeIdx.map((idx) => wires[idx]);
+    const uvOuter = outerClassified;
+    const uvHoles = alignedHolesForValidation;
+    const outerClassifierEdges = (wireEdges[outerIdx] ?? []).map((edge) => {
+      let points = unwrapPeriodicLoopComponent(edge.points, 0, period);
+      if (outerShiftK !== 0) {
+        points = shiftLoopU(points, outerShiftK * period);
+      }
+      return {
+        ...edge,
+        points,
+      };
+    });
+    const holeClassifierEdges = holeIdx.map((idx, holePosition) => {
+      const totalShiftU = holeUShifts[holePosition] ?? 0;
+      return (wireEdges[idx] ?? []).map((edge) => {
+        let points = unwrapPeriodicLoopComponent(edge.points, 0, period);
+        if (totalShiftU !== 0) {
+          points = shiftLoopU(points, totalShiftU);
+        }
+        return {
+          ...edge,
+          points,
+        };
+      });
+    });
     curveDebugLog(
       `[pcurve-loop-label] face ${face.faceIndex} Cone: outerIdx=${outerIdx}, ` +
       `outerPts=${uvOuter.length}, holes=${uvHoles.length}, ` +
       `outerArea=${bestAreaAbs.toExponential(3)}, holeArea=${totalHoleAreaAbs.toExponential(3)}`
     );
-    return { uvOuter, uvHoles };
+    return {
+      uvOuter,
+      uvHoles,
+      classifierWires: [
+        {
+          loop: uvOuter,
+          orientationBit: 1,
+          edges: outerClassifierEdges,
+          hasBadEdges: wireHasBadEdges[outerIdx] === true,
+        },
+        ...uvHoles.map((loop, holePosition) => ({
+          loop,
+          orientationBit: 0 as const,
+          edges: holeClassifierEdges[holePosition] ?? [],
+          hasBadEdges: wireHasBadEdges[holeIdx[holePosition]] === true,
+        })),
+      ],
+    };
   }
 
   let outerIdx = 0;
@@ -5964,11 +6882,34 @@ function getFaceTrimLoopsUVFromPCurves(
   }
 
   const uvOuter = wires[outerIdx];
-  const uvHoles = wires.filter((_, i) => i !== outerIdx && wires[i].length >= 3);
+  const holeWireIndices = wires
+    .map((loop, index) => ({ loop, index }))
+    .filter(({ loop, index }) => index !== outerIdx && loop.length >= 3);
+  const uvHoles = holeWireIndices.map(({ loop }) => loop);
   if (!uvOuter || uvOuter.length < 3) {
     return null;
   }
-  return { uvOuter, uvHoles };
+  return {
+    uvOuter,
+    uvHoles,
+    classifierWires: [
+      {
+        loop: uvOuter,
+        orientationBit: 1,
+        edges: wireEdges[outerIdx] ?? [],
+        hasBadEdges: wireHasBadEdges[outerIdx] === true,
+      },
+      ...uvHoles.map((loop, holePosition) => {
+        const sourceWireIdx = holeWireIndices[holePosition]?.index ?? -1;
+        return {
+          loop,
+          orientationBit: 0 as const,
+          edges: sourceWireIdx >= 0 ? (wireEdges[sourceWireIdx] ?? []) : [],
+          hasBadEdges: sourceWireIdx >= 0 ? wireHasBadEdges[sourceWireIdx] === true : false,
+        };
+      }),
+    ],
+  };
 }
 
 function getFaceTrimLoopsUV(
@@ -5976,6 +6917,7 @@ function getFaceTrimLoopsUV(
   face: FaceWithEdgesInfo
 ): TrimLoopsUV | null {
   if (!face.occSurface) return null;
+  const curveVerboseLogs = curveDebugEnabled();
 
   const isUPeriodic = ['Cylinder', 'Sphere', 'Cone', 'Torus'].includes(face.surfaceType);
   const isVPeriodic = face.surfaceType === 'Torus';
@@ -5990,28 +6932,86 @@ function getFaceTrimLoopsUV(
     let normalizedHoles = uvHoles;
     const shouldNormalizePeriodicTrimLoops = face.surfaceType === 'Cone' || face.surfaceType === 'Torus';
     if (shouldNormalizePeriodicTrimLoops && normalizedOuter.length >= 3) {
-      const beforeUBounds = getLoopComponentBounds(normalizedOuter, 0);
-      const beforeVBounds = getLoopComponentBounds(normalizedOuter, 1);
+      const beforeUBounds = curveVerboseLogs ? getLoopComponentBounds(normalizedOuter, 0) : null;
+      const beforeVBounds = curveVerboseLogs ? getLoopComponentBounds(normalizedOuter, 1) : null;
       const normalized = normalizePeriodicTrimLoops(normalizedOuter, normalizedHoles, {
         periodicU: isUPeriodic,
         periodicV: isVPeriodic,
       });
       normalizedOuter = normalized.uvOuter;
       normalizedHoles = normalized.uvHoles;
-      const afterUBounds = getLoopComponentBounds(normalizedOuter, 0);
-      const afterVBounds = getLoopComponentBounds(normalizedOuter, 1);
-      curveDebugLog(
-        `[trim-loop-normalize] face ${face.faceIndex} ${face.surfaceType} source=${source}: ` +
-        `U [${beforeUBounds.min.toFixed(3)}, ${beforeUBounds.max.toFixed(3)}] -> ` +
-        `[${afterUBounds.min.toFixed(3)}, ${afterUBounds.max.toFixed(3)}], ` +
-        `V [${beforeVBounds.min.toFixed(3)}, ${beforeVBounds.max.toFixed(3)}] -> ` +
-        `[${afterVBounds.min.toFixed(3)}, ${afterVBounds.max.toFixed(3)}]`
-      );
+      if (curveVerboseLogs && beforeUBounds && beforeVBounds) {
+        const afterUBounds = getLoopComponentBounds(normalizedOuter, 0);
+        const afterVBounds = getLoopComponentBounds(normalizedOuter, 1);
+        curveDebugLog(
+          `[trim-loop-normalize] face ${face.faceIndex} ${face.surfaceType} source=${source}: ` +
+          `U [${beforeUBounds.min.toFixed(3)}, ${beforeUBounds.max.toFixed(3)}] -> ` +
+          `[${afterUBounds.min.toFixed(3)}, ${afterUBounds.max.toFixed(3)}], ` +
+          `V [${beforeVBounds.min.toFixed(3)}, ${beforeVBounds.max.toFixed(3)}] -> ` +
+          `[${afterVBounds.min.toFixed(3)}, ${afterVBounds.max.toFixed(3)}]`
+        );
+      }
     }
 
     // Ensure closed loops for robust polygon tests; duplicate endpoint is removed by simplifyLoop2D.
     normalizedOuter = simplifyLoop2D(normalizedOuter);
     normalizedHoles = normalizedHoles.map((h) => simplifyLoop2D(h));
+    const localUvClassifierModeActive =
+      readGlobalBoolean('__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__', false) ||
+      readGlobalBoolean('__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__', false);
+    const preserveConeLoopsForClassifier =
+      face.surfaceType === 'Cone' &&
+      localUvClassifierModeActive;
+
+    // Perf-mode: apply conservative trim-loop simplification across all curved
+    // surfaces before grid selection/CDT. This is benchmark-oriented and off
+    // unless geometry-only perf mode is enabled.
+    const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+    const enablePerfTrimSimplify = readGlobalBoolean('__PERF_TRIM_SIMPLIFY_LOOPS__', true);
+    if (preferGeometryOnlyLoad && enablePerfTrimSimplify && !preserveConeLoopsForClassifier) {
+      const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber('__PERF_TRIM_MAX_AREA_ERR_RATIO__') ?? 0.03);
+      const maxOuterAreaErrorNoHoles = Math.max(
+        maxAreaErrorRatio,
+        readGlobalNumber('__PERF_TRIM_MAX_OUTER_AREA_ERR_RATIO_NO_HOLES__') ?? 0.06
+      );
+      const defaultOuterCap = normalizedHoles.length === 0 ? 88 : 112;
+      const maxOuterPts = Math.max(24, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_OUTER_PTS__') ?? defaultOuterCap));
+      const maxHolePts = Math.max(8, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_HOLE_PTS__') ?? 16));
+      const beforeOuterPts = normalizedOuter.length;
+      const beforeHolePts = normalizedHoles.reduce((sum, h) => sum + h.length, 0);
+
+      const outerAreaErrRatio = normalizedHoles.length === 0 ? maxOuterAreaErrorNoHoles : maxAreaErrorRatio;
+      const simplifiedOuter = simplifyLoopForMeshing(normalizedOuter, maxOuterPts, outerAreaErrRatio);
+      const simplifiedHoles = normalizedHoles
+        .map((hole) => simplifyLoopForMeshing(hole, maxHolePts, maxAreaErrorRatio))
+        .filter((hole) => hole.length >= 3);
+
+      const simplifiedValidation = validateAndSanitizeTrimLoops(simplifiedOuter, simplifiedHoles, {
+        minAreaAbs: 1e-7,
+        maxHoleToOuterRatio: 0.98,
+        failOnHoleOutside: true,
+        failOnHugeHole: true,
+      });
+
+      if (simplifiedValidation.ok) {
+        normalizedOuter = simplifiedValidation.uvOuter;
+        normalizedHoles = simplifiedValidation.uvHoles;
+      } else {
+        curveDebugLog(
+          `[perf-trim-simplify] face ${face.faceIndex} ${face.surfaceType} source=${source}: skipped ` +
+          `(${simplifiedValidation.reason ?? 'unknown'})`
+        );
+      }
+
+      const afterHolePts = normalizedHoles.reduce((sum, h) => sum + h.length, 0);
+      if (beforeOuterPts !== normalizedOuter.length || beforeHolePts !== afterHolePts) {
+        curveDebugLog(
+          `[perf-trim-simplify] face ${face.faceIndex} ${face.surfaceType} source=${source}: ` +
+          `outer ${beforeOuterPts} -> ${normalizedOuter.length}, holes ${beforeHolePts} -> ${afterHolePts} ` +
+          `(count=${normalizedHoles.length})`
+        );
+      }
+    }
 
     // OCCT-inspired stability: keep trim loops geometrically equivalent but bounded in
     // complexity before triangulation. This avoids pathological CDT inputs on cone seams.
@@ -6023,13 +7023,36 @@ function getFaceTrimLoopsUV(
         maxAreaErrorRatio,
         readGlobalNumber('__CONE_TRIM_MAX_AREA_ERR_RATIO_NO_HOLES__') ?? 0.08
       );
+      const minOuterPtsDefault = source === 'pcurve' ? 48 : 24;
+      const minOuterPts = Math.max(
+        8,
+        Math.floor(readGlobalNumber('__CONE_TRIM_MIN_OUTER_PTS__') ?? minOuterPtsDefault)
+      );
+      const minHolePts = Math.max(
+        6,
+        Math.floor(readGlobalNumber('__CONE_TRIM_MIN_HOLE_PTS__') ?? 8)
+      );
       const beforeOuterPts = normalizedOuter.length;
       const beforeHolePts = normalizedHoles.reduce((sum, h) => sum + h.length, 0);
 
       const outerAreaErrRatio = normalizedHoles.length === 0 ? maxOuterAreaErrorNoHoles : maxAreaErrorRatio;
-      const simplifiedOuter = simplifyLoopForMeshing(normalizedOuter, maxOuterPts, outerAreaErrRatio);
-      const simplifiedHoles = normalizedHoles
-        .map((hole) => simplifyLoopForMeshing(hole, maxHolePts, maxAreaErrorRatio))
+      const simplifiedOuter = preserveConeLoopsForClassifier
+        ? normalizedOuter
+        : simplifyLoopForMeshing(
+            normalizedOuter,
+            maxOuterPts,
+            outerAreaErrRatio,
+            Math.min(minOuterPts, beforeOuterPts)
+          );
+      const simplifiedHoles = (preserveConeLoopsForClassifier ? normalizedHoles : normalizedHoles
+        .map((hole) =>
+          simplifyLoopForMeshing(
+            hole,
+            maxHolePts,
+            maxAreaErrorRatio,
+            Math.min(minHolePts, hole.length)
+          )
+        ))
         .filter((hole) => hole.length >= 3);
 
       const simplifiedValidation = validateAndSanitizeTrimLoops(simplifiedOuter, simplifiedHoles, {
@@ -6062,6 +7085,11 @@ function getFaceTrimLoopsUV(
           `outer ${beforeOuterPts} -> ${normalizedOuter.length}, holes ${beforeHolePts} -> ${afterHolePts} ` +
           `(count=${normalizedHoles.length})`
         );
+      } else if (preserveConeLoopsForClassifier) {
+        curveDebugLog(
+          `[trim-loop-simplify] face ${face.faceIndex} Cone source=${source}: ` +
+          `preserved unsimplified loops for local classifier parity`
+        );
       }
     }
 
@@ -6073,20 +7101,22 @@ function getFaceTrimLoopsUV(
   if (pcurveLoops && pcurveLoops.uvOuter.length >= 3) {
     const finalized = normalizeAndFinalize('pcurve', pcurveLoops.uvOuter, pcurveLoops.uvHoles);
     if (finalized) {
+      finalized.classifierWires = pcurveLoops.classifierWires;
       curveDebugLog(`[trim-loop-source] face ${face.faceIndex} ${face.surfaceType}: source=pcurve`);
       return finalized;
     }
   }
 
   const sa = new oc.ShapeAnalysis_Surface(face.occSurface);
-  const outer3d = occEdgesToPolygon(face.outerLoop);
+  const lineSubdivideStep = Math.max(0.25, readGlobalNumber('__CURVED_UV_LINE_SUBDIVIDE_STEP__') ?? 2.0);
+  const outer3d = occEdgesToPolygon(face.outerLoop, undefined, { lineSubdivideStep });
   if (outer3d.length < 3) {
     sa.delete?.();
     return null;
   }
 
   // Debug: show outer3d for cone and torus
-  if (face.surfaceType === 'Torus' || face.surfaceType === 'Cone') {
+  if (curveVerboseLogs && (face.surfaceType === 'Torus' || face.surfaceType === 'Cone')) {
     curveDebugLog(`[getFaceTrimLoopsUV] ${face.surfaceType} outer3d has ${outer3d.length} points`);
     if (outer3d.length > 0) {
       curveDebugLog(`[getFaceTrimLoopsUV] First 5 points: ${outer3d.slice(0, 5).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)}, ${p[2].toFixed(3)})`).join(', ')}`);
@@ -6100,7 +7130,7 @@ function getFaceTrimLoopsUV(
   const uvOuter = projectPointsToUV(oc, sa, outer3d, { wrapU: isUPeriodic, wrapV: isVPeriodic });
 
   // Debug: show uvOuter for cone and torus
-  if (face.surfaceType === 'Torus' || face.surfaceType === 'Cone') {
+  if (curveVerboseLogs && (face.surfaceType === 'Torus' || face.surfaceType === 'Cone')) {
     curveDebugLog(`[getFaceTrimLoopsUV] ${face.surfaceType} uvOuter has ${uvOuter.length} points after projection`);
     if (uvOuter.length > 0) {
       curveDebugLog(`[getFaceTrimLoopsUV] UV First 10: ${uvOuter.slice(0, 10).map(p => `(${p[0].toFixed(3)}, ${p[1].toFixed(3)})`).join(', ')}`);
@@ -6111,7 +7141,7 @@ function getFaceTrimLoopsUV(
     }
   }
   // Debug: log inner loop edge info for cylinders
-  if (face.surfaceType === 'Cylinder' && face.innerLoops.length > 0) {
+  if (curveVerboseLogs && face.surfaceType === 'Cylinder' && face.innerLoops.length > 0) {
     curveDebugLog(`[getFaceTrimLoopsUV] Cylinder has ${face.innerLoops.length} inner loops`);
     face.innerLoops.forEach((loop, loopIdx) => {
       curveDebugLog(`[getFaceTrimLoopsUV] Inner loop ${loopIdx}: ${loop.length} edges`);
@@ -6123,8 +7153,8 @@ function getFaceTrimLoopsUV(
 
   const uvHoles = face.innerLoops
     .map((loop, loopIdx) => {
-      const poly3d = occEdgesToPolygon(loop);
-      if (face.surfaceType === 'Cylinder') {
+      const poly3d = occEdgesToPolygon(loop, undefined, { lineSubdivideStep });
+      if (curveVerboseLogs && face.surfaceType === 'Cylinder') {
         curveDebugLog(`[getFaceTrimLoopsUV] Inner loop ${loopIdx} -> 3D polygon: ${poly3d.length} points`);
         if (poly3d.length > 0) {
           curveDebugLog(`  First 5 3D: ${poly3d.slice(0, 5).map((p, i) => `[${i}](${p[0].toFixed(2)},${p[1].toFixed(2)},${p[2].toFixed(2)})`).join(' ')}`);
@@ -6142,26 +7172,119 @@ function getFaceTrimLoopsUV(
 }
 
 function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles: Vec2[][]): number {
+  const isPeriodicSeamSensitiveTrim = (): boolean => {
+    if (uvOuter.length < 3) return false;
+    const period = Math.PI * 2;
+    const seamJumpThreshold = period * 0.75;
+    let maxJump = 0;
+    for (let i = 0; i < uvOuter.length; i++) {
+      const u1 = uvOuter[i][0];
+      const u2 = uvOuter[(i + 1) % uvOuter.length][0];
+      const jump = Math.abs(u2 - u1);
+      if (jump > maxJump) maxJump = jump;
+    }
+    const nearPosPI = uvOuter.filter((p) => p[0] > Math.PI - 0.3).length;
+    const nearNegPI = uvOuter.filter((p) => p[0] < -Math.PI + 0.3).length;
+    const uBounds = getLoopUBounds(uvOuter);
+    const uSpan = uBounds.uMax - uBounds.uMin;
+    const crossesByCounts = nearPosPI >= 2 && nearNegPI >= 2;
+    const crossesByJump = maxJump > seamJumpThreshold && uSpan > Math.PI;
+    return crossesByCounts || crossesByJump;
+  };
+
   const totalPts = uvHoles.reduce((acc, h) => acc + h.length, uvOuter.length);
-  // Heuristic: keep grid roughly proportional to boundary complexity.
-  let base = Math.ceil(Math.sqrt(totalPts) * 4);
+  // Keep trim-grid growth sublinear and capped by default. This is a key speed
+  // control for complex trims where boundary sampling can be very dense.
+  const trimGridScale = Math.max(0.25, readGlobalNumber('__TRIM_GRID_SCALE__') ?? 0.85);
+  const trimDensityBias = Math.max(0.5, readGlobalNumber('__TRIM_DENSITY_BIAS__') ?? 1.0);
+  let base = Math.ceil(Math.sqrt(totalPts) * trimGridScale);
+  base = Math.ceil(base * trimDensityBias);
+
+  const minGrid = Math.max(8, Math.floor(readGlobalNumber('__TRIM_MIN_GRID_DENSITY__') ?? 10));
+  let effectiveMinGrid = minGrid;
+  const maxGridGlobal = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY__') ?? 32));
+  const maxGridNoHoles = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 20));
+  const maxGridWithHoles = Math.max(minGrid, Math.floor(readGlobalNumber('__TRIM_MAX_GRID_DENSITY_WITH_HOLES__') ?? 24));
+  let effectiveMaxGrid = uvHoles.length === 0 ? maxGridNoHoles : maxGridWithHoles;
 
   // OCCT-inspired guardrail: trim mesh density should not explode just because
   // trim loops are densely sampled. Cone seam faces are especially sensitive.
   if (face.surfaceType === 'Cone') {
-    const coneMaxGrid = Math.max(16, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_GRID_DENSITY__') ?? 36));
-    const coneMaxGridNoHoles = Math.max(12, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 16));
-    const outerPointSoftCap = Math.max(128, Math.floor(readGlobalNumber('__CONE_TRIM_OUTER_POINT_SOFT_CAP__') ?? 768));
+    const coneMaxGrid = Math.max(14, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_GRID_DENSITY__') ?? 24));
+    const coneMaxGridNoHoles = Math.max(10, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 14));
+    const outerPointSoftCap = Math.max(128, Math.floor(readGlobalNumber('__CONE_TRIM_OUTER_POINT_SOFT_CAP__') ?? 512));
 
     if (uvOuter.length > outerPointSoftCap || uvHoles.length > 0) {
-      base = Math.min(base, coneMaxGrid);
+      effectiveMaxGrid = Math.min(effectiveMaxGrid, coneMaxGrid);
     }
     if (uvHoles.length === 0) {
-      base = Math.min(base, coneMaxGridNoHoles);
+      effectiveMaxGrid = Math.min(effectiveMaxGrid, coneMaxGridNoHoles);
     }
   }
 
-  return Math.max(16, Math.min(128, base));
+  // Additional throttle for highly sampled trims to curb triangle inflation.
+  const highComplexPointThreshold = Math.max(256, Math.floor(readGlobalNumber('__TRIM_HIGH_COMPLEXITY_POINT_THRESHOLD__') ?? 600));
+  if (totalPts > highComplexPointThreshold) {
+    const complexityGridCap = Math.max(minGrid, Math.floor(effectiveMaxGrid * 0.75));
+    effectiveMaxGrid = Math.min(effectiveMaxGrid, complexityGridCap);
+  }
+
+  // Perf benchmark mode: tighten trim density budgets so complex no-hole curved
+  // faces do not dominate runtime via over-sampled grids.
+  const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+  if (preferGeometryOnlyLoad) {
+    const perfMinGrid = Math.max(4, Math.floor(readGlobalNumber('__PERF_TRIM_MIN_GRID_DENSITY__') ?? 4));
+    const perfGridScaleMult = Math.max(0.35, readGlobalNumber('__PERF_TRIM_GRID_SCALE_MULT__') ?? 0.6);
+    const perfNoHolesMax = Math.max(perfMinGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_NO_HOLES__') ?? 7));
+    const perfWithHolesMax = Math.max(perfMinGrid, Math.floor(readGlobalNumber('__PERF_TRIM_MAX_GRID_DENSITY_WITH_HOLES__') ?? 10));
+
+    effectiveMinGrid = Math.min(effectiveMinGrid, perfMinGrid);
+    base = Math.ceil(base * perfGridScaleMult);
+    effectiveMaxGrid = Math.min(effectiveMaxGrid, uvHoles.length === 0 ? perfNoHolesMax : perfWithHolesMax);
+
+    // Dense trim loops can still over-sample UV grids after regular caps.
+    // Apply an additional complexity-aware downscale only in perf mode.
+    const perfHighComplexPts = Math.max(
+      256,
+      Math.floor(readGlobalNumber('__PERF_TRIM_HIGH_COMPLEXITY_POINT_THRESHOLD__') ?? 700)
+    );
+    if (totalPts > perfHighComplexPts) {
+      const perfScale = Math.sqrt(perfHighComplexPts / totalPts);
+      const perfHighNoHolesMax = Math.max(
+        perfMinGrid,
+        Math.floor(readGlobalNumber('__PERF_TRIM_HIGH_COMPLEXITY_NO_HOLES_MAX_GRID__') ?? 5)
+      );
+      const perfHighWithHolesMax = Math.max(
+        perfMinGrid,
+        Math.floor(readGlobalNumber('__PERF_TRIM_HIGH_COMPLEXITY_WITH_HOLES_MAX_GRID__') ?? 8)
+      );
+      base = Math.max(effectiveMinGrid, Math.ceil(base * perfScale));
+      effectiveMaxGrid = Math.min(
+        effectiveMaxGrid,
+        uvHoles.length === 0 ? perfHighNoHolesMax : perfHighWithHolesMax
+      );
+    }
+  }
+
+  // Keep seam-sensitive periodic trims away from under-sampled fold artifacts.
+  // This applies to cone/cylinder trims that cross the U seam and is intentionally
+  // scoped so we do not globally increase cost.
+  if ((face.surfaceType === 'Cone' || face.surfaceType === 'Cylinder') && isPeriodicSeamSensitiveTrim()) {
+    const seamMinGrid = Math.max(
+      effectiveMinGrid,
+      Math.floor(
+        readGlobalNumber(
+          face.surfaceType === 'Cone'
+            ? '__CONE_PERIODIC_SEAM_MIN_GRID_DENSITY__'
+            : '__CYLINDER_PERIODIC_SEAM_MIN_GRID_DENSITY__'
+        ) ?? (face.surfaceType === 'Cone' ? 18 : 22)
+      )
+    );
+    base = Math.max(base, seamMinGrid);
+    effectiveMaxGrid = Math.max(effectiveMaxGrid, seamMinGrid);
+  }
+
+  return Math.max(effectiveMinGrid, Math.min(effectiveMaxGrid, base));
 }
 
 function estimateFaceSizeFromLoops(face: FaceWithEdgesInfo): number {
@@ -6342,11 +7465,21 @@ async function tessellateFaceFromOcctTriangulation(face: FaceWithEdgesInfo): Pro
 /**
  * Tessellate a curved surface face using existing surface-tessellation functions
  */
-async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
-  vertices: Vec3[];
-  triangles: number[][];
-}> {
+async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<FaceTessellationResult> {
   const faceStart = performance.now();
+  const curveVerboseLogs = curveDebugEnabled();
+  const preferGeometryOnlyLoadRaw = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+  const preserveConeQualityInPerfMode = readGlobalBoolean('__PERF_PRESERVE_CONE_QUALITY__', true);
+  const preferGeometryOnlyLoad =
+    preferGeometryOnlyLoadRaw &&
+    !(preserveConeQualityInPerfMode && face.surfaceType === 'Cone');
+  const perfCurvedSegmentScale = preferGeometryOnlyLoad
+    ? Math.max(0.25, readGlobalNumber('__PERF_CURVED_SEGMENT_SCALE__') ?? 0.6)
+    : 1.0;
+  const scaleSegments = (base: number, minSegments: number): number => {
+    if (!preferGeometryOnlyLoad) return base;
+    return Math.max(minSegments, Math.round(base * perfCurvedSegmentScale));
+  };
   const STRICT_CLASSIFIER_FACE_IDS = readFaceIdsFromGlobal('__STRICT_CLASSIFIER_FACE_IDS__', [14, 63, 64, 65, 66, 994]);
   const PERIODIC_PROOF_FACE_IDS = readFaceIdsFromGlobal('__PERIODIC_PROOF_FACE_IDS__', []);
   // Default-on for the OCCT-inspired cone path. Face filters remain opt-in:
@@ -6354,6 +7487,10 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   const enableConeSeamSplit = readGlobalBoolean('__ENABLE_CONE_SEAM_SPLIT__', true);
   const coneSeamSplitFaceIdsRaw = (globalThis as any)?.__CONE_SEAM_SPLIT_FACE_IDS__;
   const coneSeamSplitFaceIds = readFaceIdsFromGlobal('__CONE_SEAM_SPLIT_FACE_IDS__', []);
+  // Default-on for cylinder seam split (trimmed seam-crossing cylinders only).
+  const enableCylinderSeamSplit = readGlobalBoolean('__ENABLE_CYLINDER_SEAM_SPLIT__', true);
+  const cylinderSeamSplitFaceIdsRaw = (globalThis as any)?.__CYLINDER_SEAM_SPLIT_FACE_IDS__;
+  const cylinderSeamSplitFaceIds = readFaceIdsFromGlobal('__CYLINDER_SEAM_SPLIT_FACE_IDS__', []);
   const enableOcctInspiredTrimGraph = readGlobalBoolean('__ENABLE_OCCT_INSPIRED_TRIM_GRAPH__', true);
   const occtInspiredTrimGraphFaceIdsRaw = (globalThis as any)?.__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__;
   const occtInspiredTrimGraphFaceIds = readFaceIdsFromGlobal('__OCCT_INSPIRED_TRIM_GRAPH_FACE_IDS__', []);
@@ -6383,6 +7520,49 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   //   globalThis.__SLIVER_EPS__ = 0.005
   const SLIVER_EPS = readGlobalNumber('__SLIVER_EPS__') ?? 0.005;
   const SLIVER_DEBUG_MODE = readDebugModeFromGlobal('__SLIVER_DEBUG_MODE__', 'off');
+  const enableDetailedTrimPhaseProfiling =
+    (globalThis as any)?.__ENABLE_DETAILED_TESSELLATION_PROFILING__ === true;
+  const trimPhaseTimes: Partial<Record<TrimmedSurfaceProfilePhase, number>> = {};
+  let occClassifierGridCalls = 0;
+  let occClassifierTriangleGateCalls = 0;
+  let occClassifierGridCallsReported = 0;
+  let occClassifierTriangleGateCallsReported = 0;
+  const recordLocalUvSummaryForFace = (summary: LocalUvClassifierSummary): void => {
+    const deltaGridCalls = Math.max(0, occClassifierGridCalls - occClassifierGridCallsReported);
+    const deltaGateCalls = Math.max(0, occClassifierTriangleGateCalls - occClassifierTriangleGateCallsReported);
+    occClassifierGridCallsReported = occClassifierGridCalls;
+    occClassifierTriangleGateCallsReported = occClassifierTriangleGateCalls;
+    recordLocalUvClassifierSummary(
+      face.faceIndex,
+      face.surfaceType,
+      summary,
+      deltaGridCalls,
+      deltaGateCalls
+    );
+  };
+  const recordTrimPhaseSample = (phase: TrimmedSurfaceProfilePhase, elapsedMs: number): void => {
+    if (!enableDetailedTrimPhaseProfiling || !Number.isFinite(elapsedMs) || elapsedMs < 0) {
+      return;
+    }
+    trimPhaseTimes[phase] = (trimPhaseTimes[phase] ?? 0) + elapsedMs;
+    const mappedKey = trimPhaseProfileKeyMap[phase];
+    recordTessProfileSample(mappedKey, elapsedMs);
+  };
+  const withTrimPhaseProfiling = (
+    options: TrimmedSurfaceBuildOptions | undefined
+  ): TrimmedSurfaceBuildOptions | undefined => {
+    if (!options && !enableDetailedTrimPhaseProfiling) return options;
+    const mergedOptions: TrimmedSurfaceBuildOptions = {
+      ...(options ?? {}),
+      classifierFaceIndex: face.faceIndex,
+      classifierSurfaceType: face.surfaceType,
+      recordLocalUvClassifierSummary: recordLocalUvSummaryForFace,
+    };
+    if (enableDetailedTrimPhaseProfiling) {
+      mergedOptions.recordProfileSample = recordTrimPhaseSample;
+    }
+    return mergedOptions;
+  };
 
   if (allowOcctOraclePath && enableOcctNativeFaceTessellation && occtNativeFaceIds.has(face.faceIndex)) {
     const occtNativeMesh = await tessellateFaceFromOcctTriangulation(face);
@@ -6410,11 +7590,14 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   // Prefer UV-trimmed tessellation using the actual face boundary wires.
   // The previous approach tessellated the whole (u,v) bounds rectangle, which drops trim details.
   try {
+    const initOcStart = performance.now();
     const oc = await initOC();
+    recordTessProfileSample('curved_initOC', performance.now() - initOcStart);
 
     const shouldTryOcctInspiredTrimGraph =
       face.surfaceType === 'Cone' &&
       enableOcctInspiredTrimGraph &&
+      (face.innerLoops.length > 0 || readGlobalBoolean('__OCCT_INSPIRED_TRIM_ENABLE_NO_HOLES__', false)) &&
       (occtInspiredTrimGraphFaceIdsRaw == null || occtInspiredTrimGraphFaceIds.has(face.faceIndex));
     if (
       shouldTryOcctInspiredTrimGraph &&
@@ -6432,12 +7615,28 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
       } else if (oc?.BRepTopAdaptor_FClass2d && oc?.gp_Pnt2d_3 && oc?.TopAbs_State) {
         let occBuildClassifier: any | undefined;
         try {
+          const hasTrimHoles = face.innerLoops.length > 0;
+          const pcurveClassifierLoops = getFaceTrimLoopsUVFromPCurves(oc, face);
+          const localUvClassifierWires = pcurveClassifierLoops?.classifierWires;
           occBuildClassifier = new oc.BRepTopAdaptor_FClass2d(face.occFace, 1e-7);
+          const useTriangleGate = hasTrimHoles || readGlobalBoolean('__OCCT_INSPIRED_TRIM_GATE_NO_HOLES__', false);
           const maxOutSamples = Math.max(
             0,
-            Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_OUT_SAMPLES__') ?? 1)
+            Math.floor(
+              readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_OUT_SAMPLES__') ??
+              (hasTrimHoles ? 1 : 3)
+            )
           );
-          const classifyInside = (u: number, v: number): boolean => {
+          const allowPartialCellTriangles = readGlobalBoolean(
+            '__OCCT_INSPIRED_TRIM_ALLOW_PARTIAL_CELL_TRIANGLES__',
+            !hasTrimHoles
+          );
+          const classifyInside = (u: number, v: number, source: 'grid' | 'gate'): boolean => {
+            if (source === 'gate') {
+              occClassifierTriangleGateCalls++;
+            } else {
+              occClassifierGridCalls++;
+            }
             const uvPoint = new oc.gp_Pnt2d_3(u, v);
             try {
               const state = occBuildClassifier.Perform(uvPoint, true);
@@ -6449,21 +7648,27 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             }
           };
           const buildOptions: TrimmedSurfaceBuildOptions = {
-            uvInsideTest: classifyInside,
-            keepTriangle: (samples) => {
-              let outCount = 0;
-              for (const [u, v] of samples) {
-                if (!classifyInside(u, v)) {
-                  outCount++;
-                  if (outCount > maxOutSamples) {
-                    return false;
+            uvInsideTest: (u, v) => classifyInside(u, v, 'grid'),
+            keepTriangle: useTriangleGate
+              ? (samples) => {
+                  let outCount = 0;
+                  for (const [u, v] of samples) {
+                    if (!classifyInside(u, v, 'gate')) {
+                      outCount++;
+                      if (outCount > maxOutSamples) {
+                        return false;
+                      }
+                    }
                   }
+                  return true;
                 }
-              }
-              return true;
-            },
-            allowPartialCellTriangles: false,
+              : undefined,
+            allowPartialCellTriangles,
             logLabel: `occt-inspired-face-${face.faceIndex}`,
+            localUvClassifierWires:
+              localUvClassifierWires && localUvClassifierWires.length > 0
+                ? localUvClassifierWires
+                : undefined,
           };
           const coneSurface = {
             type: 'CONICAL_SURFACE' as const,
@@ -6471,14 +7676,16 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             radius: params.radius,
             semiAngle: params.semiAngle,
           };
+          const trimTessStart = performance.now();
           const mesh = await tessellateTrimmedSurface(
             coneSurface,
             domain.uvOuter,
             domain.gridDensity,
             [],
             undefined,
-            buildOptions
+            withTrimPhaseProfiling(buildOptions)
           );
+          recordTessProfileSample('curved_trim_tessellate', performance.now() - trimTessStart);
           if (mesh.indices.length > 0) {
             console.log(
               `[occt-inspired-trim] face ${face.faceIndex} ${face.surfaceType}: ` +
@@ -6489,7 +7696,13 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             );
             tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
             tessellationProfile.tessellateCurvedFace.calls++;
-            return tessellatedMeshToVerticesAndTriangles(mesh);
+            const meshConvertStart = performance.now();
+            const converted = tessellatedMeshToVerticesAndTriangles(mesh);
+            if (enableDetailedTrimPhaseProfiling && Object.keys(trimPhaseTimes).length > 0) {
+              converted.trimPhaseTimes = { ...trimPhaseTimes };
+            }
+            recordTessProfileSample('curved_mesh_convert', performance.now() - meshConvertStart);
+            return converted;
           }
           console.warn(
             `[occt-inspired-trim] face ${face.faceIndex} ${face.surfaceType}: ` +
@@ -6512,13 +7725,21 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
       }
     }
 
+    const trimLoopsStart = performance.now();
     const loops = getFaceTrimLoopsUV(oc, face);
+    recordTessProfileSample('curved_getFaceTrimLoops', performance.now() - trimLoopsStart);
     if (loops) {
+      const trimSetupStart = performance.now();
       let coneCrossesSeam = false;
       let coneWrappedOuterForSplit: Vec2[] | null = null;
       let cylinderCrossesSeam = false;
+      let cylinderWrappedOuterForSplit: Vec2[] | null = null;
       let torusCrossesSeam = false;
       let degeneratePeriodicTrim = false;
+      const localUvClassifierWires =
+        loops.classifierWires && loops.classifierWires.length > 0
+          ? loops.classifierWires
+          : undefined;
 
       // Check if the UV boundary is degenerate (all points have same U or same V)
       // This happens for complete periodic surfaces like full torus where the boundary
@@ -6542,8 +7763,10 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         const fullPeriodSpanThreshold = (2 * Math.PI) - fullPeriodTolerance;
         const centerU = (uMin + uMax) / 2;
         const centerV = (vMin + vMax) / 2;
-        curveDebugLog(`[tessellateCurvedFace] UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
-        curveDebugLog(`[tessellateCurvedFace] UV center: (${centerU.toFixed(3)}, ${centerV.toFixed(3)}), spans: uSpan=${uSpan.toFixed(3)}, vSpan=${vSpan.toFixed(3)}`);
+        if (curveVerboseLogs) {
+          curveDebugLog(`[tessellateCurvedFace] UV bounds: U=[${uMin.toFixed(3)}, ${uMax.toFixed(3)}], V=[${vMin.toFixed(3)}, ${vMax.toFixed(3)}]`);
+          curveDebugLog(`[tessellateCurvedFace] UV center: (${centerU.toFixed(3)}, ${centerV.toFixed(3)}), spans: uSpan=${uSpan.toFixed(3)}, vSpan=${vSpan.toFixed(3)}`);
+        }
         const isSliver = Math.abs(uSpan) < SLIVER_EPS || Math.abs(vSpan) < SLIVER_EPS;
         if (SLIVER_DEBUG_MODE === 'skip' && isSliver) {
           console.warn(
@@ -6770,25 +7993,25 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           }
         }
 
-        // For cylinders with full-circle (U spans ~2π), the UV boundary forms a "seam rectangle":
-        // two circles at different V values connected by seam lines. This causes CDT to fail
-        // because constraint edges that cross the ±π seam cannot be recovered.
-        //
-        // We detect seam boundaries by checking if the boundary has points near BOTH +π AND -π.
-        // The point-in-polygon test is NOT reliable here because the center (0, midV) appears
-        // "inside" in 2D, but the boundary doesn't properly enclose the 3D surface.
+        // For cylinders with full-circle U span, seam-crossing trims need periodic unwrap.
+        // For trimmed faces (holes/slots), prefer continuity unwrap and optional split later.
+        // For non-trimmed full wraps, keep the rectangular fallback for stability.
         if (face.surfaceType === 'Cylinder' && uSpan > 5.5) {
+          const seamProbeOuter = (loops.uvOuterRawWrapped && loops.uvOuterRawWrapped.length >= 3)
+            ? loops.uvOuterRawWrapped
+            : uvOuter;
+
           // Check if boundary crosses the seam (has points near both +π and -π)
-          const nearPosPI = uvOuter.filter(p => p[0] > PI - 0.3).length;
-          const nearNegPI = uvOuter.filter(p => p[0] < -PI + 0.3).length;
+          const nearPosPI = seamProbeOuter.filter(p => p[0] > PI - 0.3).length;
+          const nearNegPI = seamProbeOuter.filter(p => p[0] < -PI + 0.3).length;
           const crossesByCounts = nearPosPI > 2 && nearNegPI > 2;
           const period = 2 * PI;
           const seamJumpThreshold = period * 0.75;
           let maxJump = 0;
           let crossesByJump = false;
-          for (let i = 0; i < uvOuter.length; i++) {
-            const u1 = uvOuter[i][0];
-            const u2 = uvOuter[(i + 1) % uvOuter.length][0];
+          for (let i = 0; i < seamProbeOuter.length; i++) {
+            const u1 = seamProbeOuter[i][0];
+            const u2 = seamProbeOuter[(i + 1) % seamProbeOuter.length][0];
             const jump = Math.abs(u2 - u1);
             maxJump = Math.max(maxJump, jump);
             if (jump > seamJumpThreshold) {
@@ -6799,171 +8022,47 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           cylinderCrossesSeam = crossesSeam;
           if (crossesSeam) {
             avoidFullSurfaceFallback = true;
+            cylinderWrappedOuterForSplit = seamProbeOuter.map(([u, v]): Vec2 => [u, v]);
           }
 
           curveDebugLog(`[tessellateCurvedFace] Cylinder seam check: nearPosPI=${nearPosPI}, nearNegPI=${nearNegPI}, maxJump=${maxJump.toFixed(3)}, byCounts=${crossesByCounts}, byJump=${crossesByJump}, crossesSeam=${crossesSeam}`);
           curveDebugLog(`[tessellateCurvedFace] Cylinder has ${loops.uvHoles.length} holes`);
 
           if (crossesSeam) {
-            // DETAILED LOGGING: Analyze the actual boundary before replacing
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Analyzing boundary before rectangle replacement`);
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary has ${uvOuter.length} points`);
-
-            // Log first 10 and last 10 points
-            const first10 = uvOuter.slice(0, 10).map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
-            const last10 = uvOuter.slice(-10).map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: First 10 points: ${first10}`);
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Last 10 points: ${last10}`);
-
-            // Find the actual V range at different U positions
-            const pointsNearU0 = uvOuter.filter(p => Math.abs(p[0]) < 0.5);
-            const pointsNearUPosPI = uvOuter.filter(p => p[0] > PI - 0.5);
-            const pointsNearUNegPI = uvOuter.filter(p => p[0] < -PI + 0.5);
-
-            if (pointsNearU0.length > 0) {
-              const vAtU0 = pointsNearU0.map(p => p[1]);
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈0: [${Math.min(...vAtU0).toFixed(2)}, ${Math.max(...vAtU0).toFixed(2)}]`);
+            // Preserve true seam-crossing trim topology by continuity unwrapping
+            // both outer loop and holes; sign-shift can distort hole footprints
+            // when a loop straddles U=0.
+            let unwrappedOuter = unwrapPeriodicLoopU(loops.uvOuter, period);
+            const unwrappedBounds = getLoopUBounds(unwrappedOuter);
+            const outerShiftK = chooseShiftToRange(unwrappedBounds.uMin, unwrappedBounds.uMax, period, 0, period);
+            if (outerShiftK !== 0) {
+              unwrappedOuter = shiftLoopU(unwrappedOuter, outerShiftK * period);
             }
-            if (pointsNearUPosPI.length > 0) {
-              const vAtPosPI = pointsNearUPosPI.map(p => p[1]);
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈+π: [${Math.min(...vAtPosPI).toFixed(2)}, ${Math.max(...vAtPosPI).toFixed(2)}]`);
-            }
-            if (pointsNearUNegPI.length > 0) {
-              const vAtNegPI = pointsNearUNegPI.map(p => p[1]);
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: V range at U≈-π: [${Math.min(...vAtNegPI).toFixed(2)}, ${Math.max(...vAtNegPI).toFixed(2)}]`);
-            }
+            loops.uvOuter = unwrappedOuter;
 
-            // Check if boundary has any points at low V values
-            const pointsBelowV5 = uvOuter.filter(p => p[1] < 5);
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Points with V < 5: ${pointsBelowV5.length}`);
-            if (pointsBelowV5.length > 0 && pointsBelowV5.length < 20) {
-              const lowVPoints = pointsBelowV5.map(p => `(${p[0].toFixed(2)},${p[1].toFixed(2)})`).join(' ');
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Low V points: ${lowVPoints}`);
-            }
-
-            // Convert some UV points to 3D to see where they actually are
-            // Use the surface to evaluate 3D positions at boundary corners
-            let zVals: number[] = [];  // Declare outside so it's accessible later
-            if (face.occSurface) {
-              try {
-                // Get the actual Geom_Surface from the handle
-                const surfHandle = face.occSurface;
-                const surf = typeof surfHandle.get === 'function' ? surfHandle.get() : surfHandle;
-
-                // Sample a few key UV points and show their 3D coordinates
-                const testPoints: Array<{ label: string; u: number; v: number }> = [
-                  { label: 'vMin at U=0', u: 0, v: vMin },
-                  { label: 'vMax at U=0', u: 0, v: vMax },
-                  { label: 'vMin at U=π', u: PI, v: vMin },
-                  { label: 'vMax at U=π', u: PI, v: vMax },
-                ];
-
-                for (const pt of testPoints) {
-                  // Use Value method which returns a gp_Pnt
-                  const pnt = surf.Value(pt.u, pt.v);
-                  curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: 3D at ${pt.label}: (${pnt.X().toFixed(2)}, ${pnt.Y().toFixed(2)}, ${pnt.Z().toFixed(2)})`);
-                  pnt.delete();
-                }
-
-                // Also check some points at the actual boundary's low V locations
-                if (pointsBelowV5.length > 0) {
-                  const lowestVPoint = pointsBelowV5.reduce((min, p) => p[1] < min[1] ? p : min, pointsBelowV5[0]);
-                  const pnt = surf.Value(lowestVPoint[0], lowestVPoint[1]);
-                  curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: 3D at lowest V boundary point (U=${lowestVPoint[0].toFixed(2)}, V=${lowestVPoint[1].toFixed(2)}): (${pnt.X().toFixed(2)}, ${pnt.Y().toFixed(2)}, ${pnt.Z().toFixed(2)})`);
-                  pnt.delete();
-                }
-
-                // Sample 3D points across the ACTUAL boundary to see the range of X, Y, Z values
-                const xVals: number[] = [];
-                const yVals: number[] = [];
-                const sampleStep = Math.max(1, Math.floor(uvOuter.length / 30)); // Sample ~30 points
-                for (let i = 0; i < uvOuter.length; i += sampleStep) {
-                  const [u, v] = uvOuter[i];
-                  const pnt = surf.Value(u, v);
-                  xVals.push(pnt.X());
-                  yVals.push(pnt.Y());
-                  zVals.push(pnt.Z());
-                  pnt.delete();
-                }
-                curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary 3D ranges: X=[${Math.min(...xVals).toFixed(2)}, ${Math.max(...xVals).toFixed(2)}], Y=[${Math.min(...yVals).toFixed(2)}, ${Math.max(...yVals).toFixed(2)}], Z=[${Math.min(...zVals).toFixed(2)}, ${Math.max(...zVals).toFixed(2)}]`);
-              } catch (e) {
-                curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Could not evaluate 3D points: ${e}`);
-              }
-            }
-
-            // Log what the rectangle will be
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Rectangle will be: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
-            curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: This fills ${(vMax - vMin).toFixed(2)} units of V`);
-
-            // Decide whether to use rectangle or preserve actual boundary
-            // Check if the boundary's 3D extent matches what a rectangle would produce
-            // by comparing the Z range of the boundary to the V span
-            let useRectangle = true;
-            if (face.occSurface && zVals && zVals.length > 0) {
-              const zRange = Math.max(...zVals) - Math.min(...zVals);
-              const vRange = vMax - vMin;
-              // If Z range is much smaller than V range, the boundary is trimmed
-              // and we should preserve it rather than using a rectangle
-              const zToVRatio = zRange / vRange;
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Z range=${zRange.toFixed(2)}, V range=${vRange.toFixed(2)}, ratio=${zToVRatio.toFixed(3)}`);
-
-              // If Z range is less than 50% of V range, boundary is significantly trimmed
-              if (zToVRatio < 0.5) {
-                useRectangle = false;
-                curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: Boundary is trimmed (ratio < 0.5) - will preserve actual boundary`);
-              }
-            }
-
-            if (useRectangle) {
-              // The boundary crosses the ±π seam. CDT constraint recovery will fail on edges
-              // that span the seam. Use a rectangular boundary in [0, 2π] range instead.
-              curveDebugLog(`[tessellateCurvedFace] Full cylinder crosses seam - using rectangular UV boundary`);
-
-              const rectBoundary: Vec2[] = [
-                [0, vMin],
-                [2 * PI, vMin],
-                [2 * PI, vMax],
-                [0, vMax]
-              ];
-
-              loops.uvOuter = rectBoundary;
-              curveDebugLog(`[tessellateCurvedFace] Using rectangular boundary: U=[0, 2π], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
-            } else {
-              // Boundary is trimmed - preserve actual shape but shift U to [0, 2π]
-              curveDebugLog(`[tessellateCurvedFace] Trimmed cylinder - shifting U to [0, 2π], preserving actual boundary`);
-
-              // Shift U coordinates from [-π, π] to [0, 2π] for continuous boundary
-              const shiftedOuter = uvOuter.map(([u, v]): Vec2 => {
-                if (u < 0) {
-                  return [u + 2 * PI, v];
-                }
-                return [u, v];
-              });
-
-              // Log boundary before and after shift
-              const beforeUs = uvOuter.slice(0, 5).map(p => p[0].toFixed(2)).join(', ');
-              const afterUs = shiftedOuter.slice(0, 5).map(p => p[0].toFixed(2)).join(', ');
-              curveDebugLog(`[SEAM DEBUG] Face ${face.faceIndex}: U shift: before=[${beforeUs}...], after=[${afterUs}...]`);
-
-              loops.uvOuter = shiftedOuter;
-
-              const shiftedUMin = Math.min(...shiftedOuter.map(p => p[0]));
-              const shiftedUMax = Math.max(...shiftedOuter.map(p => p[0]));
-              curveDebugLog(`[tessellateCurvedFace] Shifted boundary: U=[${shiftedUMin.toFixed(3)}, ${shiftedUMax.toFixed(3)}], V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`);
-            }
-
-            // Shift holes to [0, 2π] range to match the outer boundary
+            const shiftedBounds = getLoopUBounds(loops.uvOuter);
+            const outerMidU = meanLoopU(loops.uvOuter);
+            curveDebugLog(
+              `[tessellateCurvedFace] Cylinder unwrapped boundary: U=[${shiftedBounds.uMin.toFixed(3)}, ${shiftedBounds.uMax.toFixed(3)}], ` +
+              `shiftK=${outerShiftK}, meanU=${outerMidU.toFixed(3)}, V=[${vMin.toFixed(2)}, ${vMax.toFixed(2)}]`
+            );
             if (loops.uvHoles.length > 0) {
               loops.uvHoles = loops.uvHoles.map((hole, h) => {
-                const shiftedHole = hole.map(([u, v]): Vec2 => {
-                  if (u < 0) {
-                    return [u + 2 * PI, v];
-                  }
-                  return [u, v];
-                });
-                const holeUs = shiftedHole.map(p => p[0]);
-                curveDebugLog(`[tessellateCurvedFace] Hole ${h} shifted to [0, 2π]: U=[${Math.min(...holeUs).toFixed(3)}, ${Math.max(...holeUs).toFixed(3)}]`);
-                return shiftedHole;
+                let alignedHole = unwrapPeriodicLoopU(hole, period);
+                if (outerShiftK !== 0) {
+                  alignedHole = shiftLoopU(alignedHole, outerShiftK * period);
+                }
+                const holeMidU = meanLoopU(alignedHole);
+                const alignK = Math.round((outerMidU - holeMidU) / period);
+                if (alignK !== 0) {
+                  alignedHole = shiftLoopU(alignedHole, alignK * period);
+                }
+                const holeBounds = getLoopUBounds(alignedHole);
+                curveDebugLog(
+                  `[tessellateCurvedFace] Cylinder hole ${h} unwrapped: ` +
+                  `U=[${holeBounds.uMin.toFixed(3)}, ${holeBounds.uMax.toFixed(3)}], alignK=${alignK}`
+                );
+                return alignedHole;
               });
             }
           }
@@ -7011,14 +8110,119 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
       }
 
       if (surface) {
+        const isNoHoleCylinderSurface =
+          face.surfaceType === 'Cylinder' &&
+          surface.type === 'CYLINDRICAL_SURFACE' &&
+          loops.uvHoles.length === 0 &&
+          loops.uvOuter.length >= 3;
+        if (isNoHoleCylinderSurface) {
+          // For no-hole cylinders, use the dedicated cylindrical patch tessellator.
+          // This avoids coarse square-grid artifacts from generic trimmed-surface meshing.
+          const uBounds = getLoopUBounds(loops.uvOuter);
+          const vBounds = getLoopComponentBounds(loops.uvOuter, 1);
+          const uSpanLocal = uBounds.uMax - uBounds.uMin;
+          const vSpanLocal = vBounds.max - vBounds.min;
+          const uSpanAbs = Math.max(1e-6, Math.abs(uSpanLocal));
+          const vSpanAbs = Math.max(1e-6, Math.abs(vSpanLocal));
+          const period = Math.PI * 2;
+          const isFullWrap = uSpanAbs > (period * 0.95);
+          const preferGeometryOnlyLoadForPatch = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+          const clampSample = (value: number, min: number, max: number) =>
+            Math.max(min, Math.min(max, Math.round(value)));
+
+          // Adaptive angular sampling based on cylinder radius + chord deflection.
+          // This keeps full-wrap cylinders smooth while avoiding heavy over-tessellation
+          // on small partial arcs (common in large STEP assemblies).
+          const radius = Math.max(1e-6, Math.abs(surface.radius));
+          const targetDeflectionRatio = Math.max(
+            0.0005,
+            readGlobalNumber('__CYLINDER_PATCH_TARGET_DEFLECTION_RATIO__') ?? (preferGeometryOnlyLoadForPatch ? 0.018 : 0.012)
+          );
+          const targetDeflectionAbs = readGlobalNumber('__CYLINDER_PATCH_TARGET_DEFLECTION_ABS__');
+          const targetDeflection = Math.max(1e-6, targetDeflectionAbs ?? (radius * targetDeflectionRatio));
+          const cosArg = Math.max(-1, Math.min(1, 1 - (targetDeflection / radius)));
+          const stepByDeflection = 2 * Math.acos(cosArg);
+          const maxAngularStep = Math.max(
+            0.08,
+            Math.min(Math.PI / 2, readGlobalNumber('__CYLINDER_PATCH_MAX_ANGULAR_STEP__') ?? (preferGeometryOnlyLoadForPatch ? 0.45 : 0.35))
+          );
+          const minAngularStep = Math.max(
+            0.04,
+            Math.min(maxAngularStep, readGlobalNumber('__CYLINDER_PATCH_MIN_ANGULAR_STEP__') ?? (preferGeometryOnlyLoadForPatch ? 0.12 : 0.1))
+          );
+          const effectiveAngularStep = Number.isFinite(stepByDeflection) && stepByDeflection > 1e-6
+            ? Math.max(minAngularStep, Math.min(maxAngularStep, stepByDeflection))
+            : maxAngularStep;
+          const adaptiveFullUSamples = Math.ceil(period / effectiveAngularStep);
+
+          const minPartialUSamples = Math.max(
+            3,
+            Math.floor(readGlobalNumber('__CYLINDER_PATCH_U_SAMPLES_PARTIAL_MIN__') ?? 4)
+          );
+          const minFullWrapUSamples = Math.max(
+            minPartialUSamples,
+            Math.floor(readGlobalNumber('__CYLINDER_PATCH_U_SAMPLES_FULL_MIN__') ?? (preferGeometryOnlyLoadForPatch ? 20 : 24))
+          );
+          const maxUSamples = Math.max(
+            minFullWrapUSamples,
+            Math.floor(readGlobalNumber('__CYLINDER_PATCH_U_SAMPLES_MAX__') ?? (preferGeometryOnlyLoadForPatch ? 64 : 96))
+          );
+          let numUSamples = Math.ceil(adaptiveFullUSamples * (uSpanAbs / period));
+          numUSamples = isFullWrap
+            ? Math.max(numUSamples, minFullWrapUSamples)
+            : Math.max(numUSamples, minPartialUSamples);
+
+          const axialStep = Math.max(
+            0.25,
+            readGlobalNumber('__CYLINDER_PATCH_V_STEP__') ?? (preferGeometryOnlyLoadForPatch ? 6.0 : 4.0)
+          );
+          const minVSamples = Math.max(1, Math.floor(readGlobalNumber('__CYLINDER_PATCH_V_SAMPLES_MIN__') ?? 1));
+          const maxVSamples = Math.max(
+            minVSamples,
+            Math.floor(readGlobalNumber('__CYLINDER_PATCH_V_SAMPLES_MAX__') ?? (preferGeometryOnlyLoadForPatch ? 8 : 12))
+          );
+          let numVSamples = Math.ceil(vSpanAbs / axialStep);
+          if (isFullWrap) {
+            numVSamples = Math.max(numVSamples, preferGeometryOnlyLoadForPatch ? 1 : 2);
+          }
+
+          const manualUSamples = readGlobalNumber('__CYLINDER_PATCH_U_SAMPLES__');
+          const manualVSamples = readGlobalNumber('__CYLINDER_PATCH_V_SAMPLES__');
+          if (manualUSamples != null) {
+            numUSamples = manualUSamples;
+          }
+          if (manualVSamples != null) {
+            numVSamples = manualVSamples;
+          }
+
+          numUSamples = clampSample(numUSamples, minPartialUSamples, maxUSamples);
+          numVSamples = clampSample(numVSamples, minVSamples, maxVSamples);
+          const mesh = await tessellateCylinder(
+            surface,
+            uBounds.uMin,
+            uBounds.uMax,
+            vBounds.min,
+            vBounds.max,
+            numUSamples,
+            numVSamples
+          );
+          tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
+          tessellationProfile.tessellateCurvedFace.calls++;
+          return tessellatedMeshToVerticesAndTriangles(mesh);
+        }
+
         const gridDensity = chooseTrimGridDensity(face, loops.uvOuter, loops.uvHoles);
 
-        // For cylinders, compute 3D bounding box from boundary edges to filter
-        // grid points whose 3D positions fall outside the intended region.
-        // This is essential for horizontal cylinders where UV spans full circle
-        // but we only want a portion of the surface (e.g., upper half of a hole).
+        // For selected cylinder trims, compute a 3D bbox from boundary edges and
+        // use it to reject grid points whose evaluated 3D position is outside the
+        // intended region. This path is expensive, so keep it for known seam-
+        // sensitive/degenerate periodic cases only (plus an explicit override).
         let bbox3d: { xMin: number; xMax: number; yMin: number; yMax: number; zMin: number; zMax: number } | undefined;
-        if (face.surfaceType === 'Cylinder') {
+        const forceCylinderBbox3d = readGlobalBoolean('__FORCE_CYLINDER_BBOX3D__', false);
+        const shouldUseCylinderBbox3d =
+          face.surfaceType === 'Cylinder' &&
+          (forceCylinderBbox3d || cylinderCrossesSeam || degeneratePeriodicTrim);
+        if (shouldUseCylinderBbox3d) {
           const outer3d = occEdgesToPolygon(face.outerLoop);
           if (outer3d.length > 0) {
             const xs = outer3d.map(p => p[0]);
@@ -7034,11 +8238,290 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             curveDebugLog(`  Y: [${bbox3d.yMin.toFixed(2)}, ${bbox3d.yMax.toFixed(2)}]`);
             curveDebugLog(`  Z: [${bbox3d.zMin.toFixed(2)}, ${bbox3d.zMax.toFixed(2)}]`);
           }
+        } else if (face.surfaceType === 'Cylinder' && curveDebugEnabled()) {
+          curveDebugLog(
+            `[tessellateCurvedFace] Face ${face.faceIndex}: skipped cylinder 3D bbox ` +
+            `(force=${forceCylinderBbox3d}, crossesSeam=${cylinderCrossesSeam}, degenerate=${degeneratePeriodicTrim})`
+          );
         }
 
         let occBuildClassifier: any | undefined;
         let usedOccBuildClassifier = false;
-        let trimmedBuildOptions: TrimmedSurfaceBuildOptions | undefined;
+        let trimmedBuildOptions: TrimmedSurfaceBuildOptions | undefined = localUvClassifierWires
+          ? { localUvClassifierWires }
+          : undefined;
+
+        const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+        const clampInt = (value: number, min: number, max: number) =>
+          Math.max(min, Math.min(max, Math.round(value)));
+        const applyAnisotropicTrimTriangleBudget = (
+          mode: 'cylinder' | 'cone',
+          params: {
+            hasTrimHoles: boolean;
+            seamSensitive: boolean;
+            holePointCount: number;
+            gridDensityU: number;
+            gridDensityV: number;
+            minUSamples: number;
+            maxUSamples: number;
+            minUSamplesWithHoles: number;
+            seamMinUSamples: number;
+            minVDensity: number;
+            maxVDensity: number;
+            minVDensityWithHoles: number;
+            seamMinVDensity: number;
+          }
+        ): { gridDensityU: number; gridDensityV: number } => {
+          let { gridDensityU, gridDensityV } = params;
+          if (!preferGeometryOnlyLoad) {
+            return { gridDensityU, gridDensityV };
+          }
+
+          const budgetKeyPrefix = mode === 'cylinder' ? '__PERF_CYLINDER_TRIM_TRI_BUDGET' : '__PERF_CONE_TRIM_TRI_BUDGET';
+          const defaultNoHoles = mode === 'cylinder' ? 520 : 900;
+          const defaultWithHoles = mode === 'cylinder' ? 760 : 780;
+          const baseBudget = Math.max(
+            96,
+            Math.floor(
+              readGlobalNumber(
+                params.hasTrimHoles ? `${budgetKeyPrefix}_WITH_HOLES__` : `${budgetKeyPrefix}_NO_HOLES__`
+              ) ?? (params.hasTrimHoles ? defaultWithHoles : defaultNoHoles)
+            )
+          );
+
+          // Slightly relax budget for very dense hole boundaries to avoid visual breakage.
+          const holeBonus = params.hasTrimHoles
+            ? Math.min(1.25, 1 + Math.max(0, params.holePointCount - 120) / 1000)
+            : 1.0;
+          const targetTriangles = Math.floor(baseBudget * holeBonus);
+          const estimatedTriangles = 2 * gridDensityU * gridDensityV;
+          if (estimatedTriangles <= targetTriangles) {
+            return { gridDensityU, gridDensityV };
+          }
+
+          const scale = Math.sqrt(targetTriangles / estimatedTriangles);
+          gridDensityU = clampInt(gridDensityU * scale, params.minUSamples, params.maxUSamples);
+          gridDensityV = clampInt(gridDensityV * scale, params.minVDensity, params.maxVDensity);
+
+          if (params.hasTrimHoles) {
+            gridDensityU = Math.max(gridDensityU, params.minUSamplesWithHoles);
+            gridDensityV = Math.max(gridDensityV, params.minVDensityWithHoles);
+          }
+          if (params.seamSensitive) {
+            gridDensityU = Math.max(gridDensityU, params.seamMinUSamples);
+            gridDensityV = Math.max(gridDensityV, params.seamMinVDensity);
+          }
+
+          const budgetDebug = readGlobalBoolean('__TRIM_TRI_BUDGET_DEBUG__', false);
+          if (budgetDebug) {
+            const afterTriangles = 2 * gridDensityU * gridDensityV;
+            console.log(
+              `[trim-tri-budget] face=${face.faceIndex} type=${mode} est=${estimatedTriangles} target=${targetTriangles} -> est2=${afterTriangles} (u=${gridDensityU}, v=${gridDensityV})`
+            );
+          }
+
+          return { gridDensityU, gridDensityV };
+        };
+
+        const isCylinderSurfaceForTrim = face.surfaceType === 'Cylinder' && surface.type === 'CYLINDRICAL_SURFACE';
+        if (isCylinderSurfaceForTrim) {
+          const period = Math.PI * 2;
+          const uBounds = getLoopUBounds(loops.uvOuter);
+          const vBounds = getLoopComponentBounds(loops.uvOuter, 1);
+          const uSpan = Math.max(1e-6, uBounds.uMax - uBounds.uMin);
+          const vSpan = Math.max(1e-6, vBounds.max - vBounds.min);
+          const hasTrimHoles = loops.uvHoles.length > 0;
+
+          // Adaptive circumferential sampling:
+          // Use a mild deflection target so we can lower triangle count while
+          // keeping circular walls visually stable.
+          const radius = Math.max(1e-6, Math.abs(surface.radius));
+          const targetDeflectionRatio = Math.max(
+            0.0025,
+            readGlobalNumber('__CYLINDER_TRIM_TARGET_DEFLECTION_RATIO__') ?? (preferGeometryOnlyLoad ? 0.016 : 0.012)
+          );
+          const targetDeflectionAbs = readGlobalNumber('__CYLINDER_TRIM_TARGET_DEFLECTION_ABS__');
+          const targetDeflection = Math.max(
+            1e-6,
+            targetDeflectionAbs ?? (radius * targetDeflectionRatio)
+          );
+          const cosArg = Math.max(-1, Math.min(1, 1 - (targetDeflection / radius)));
+          const stepByDeflection = 2 * Math.acos(cosArg);
+          const maxAngularStep = Math.max(
+            0.08,
+            Math.min(Math.PI / 3, readGlobalNumber('__CYLINDER_TRIM_MAX_ANGULAR_STEP__') ?? (preferGeometryOnlyLoad ? 0.24 : 0.2))
+          );
+          const minAngularStep = Math.max(
+            0.05,
+            Math.min(maxAngularStep, readGlobalNumber('__CYLINDER_TRIM_MIN_ANGULAR_STEP__') ?? (preferGeometryOnlyLoad ? 0.12 : 0.1))
+          );
+          const effectiveAngularStep = Number.isFinite(stepByDeflection) && stepByDeflection > 1e-6
+            ? Math.max(minAngularStep, Math.min(maxAngularStep, stepByDeflection))
+            : maxAngularStep;
+          const adaptiveFullUSamples = Math.ceil(period / effectiveAngularStep);
+
+          const fullUSamples = Math.max(
+            preferGeometryOnlyLoad ? 20 : 24,
+            Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_FULL__') ?? adaptiveFullUSamples)
+          );
+          const minUSamples = Math.max(16, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 20 : 24)));
+          const maxUSamples = Math.max(minUSamples, Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 72 : 96)));
+          const minUSamplesWithHoles = Math.max(
+            minUSamples,
+            Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_HOLES_MIN__') ?? (preferGeometryOnlyLoad ? 24 : 28))
+          );
+          const seamMinUSamples = Math.max(
+            minUSamples,
+            Math.floor(readGlobalNumber('__CYLINDER_TRIM_U_SAMPLES_SEAM_MIN__') ?? (preferGeometryOnlyLoad ? 26 : 30))
+          );
+          let gridDensityU = Math.round(fullUSamples * (uSpan / period));
+          if (hasTrimHoles) {
+            gridDensityU = Math.max(gridDensityU, minUSamplesWithHoles);
+          }
+          if (cylinderCrossesSeam || degeneratePeriodicTrim) {
+            gridDensityU = Math.max(gridDensityU, seamMinUSamples);
+          }
+
+          const holePointCount = loops.uvHoles.reduce((sum, loop) => sum + loop.length, 0);
+          if (holePointCount > (preferGeometryOnlyLoad ? 220 : 120)) {
+            gridDensityU = Math.max(gridDensityU, Math.ceil(minUSamplesWithHoles * 1.1));
+          }
+          gridDensityU = clampInt(gridDensityU, minUSamples, maxUSamples);
+
+          const vStep = Math.max(0.2, readGlobalNumber('__CYLINDER_TRIM_V_STEP__') ?? (preferGeometryOnlyLoad ? 3.5 : 3.0));
+          const minVDensity = Math.max(3, Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 4 : 5)));
+          const maxVDensity = Math.max(minVDensity, Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 14 : 18)));
+          const minVDensityWithHoles = Math.max(
+            minVDensity,
+            Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_HOLES_MIN__') ?? (preferGeometryOnlyLoad ? 6 : 7))
+          );
+          const seamMinVDensity = Math.max(
+            minVDensity,
+            Math.floor(readGlobalNumber('__CYLINDER_TRIM_V_SAMPLES_SEAM_MIN__') ?? (preferGeometryOnlyLoad ? 7 : 8))
+          );
+          let gridDensityV = Math.ceil(vSpan / vStep);
+          if (hasTrimHoles) {
+            gridDensityV = Math.max(gridDensityV, minVDensityWithHoles);
+          }
+          if (cylinderCrossesSeam || degeneratePeriodicTrim) {
+            gridDensityV = Math.max(gridDensityV, seamMinVDensity);
+          }
+          if (holePointCount > (preferGeometryOnlyLoad ? 220 : 120)) {
+            gridDensityV += 1;
+          }
+          gridDensityV = clampInt(gridDensityV, minVDensity, maxVDensity);
+          ({ gridDensityU, gridDensityV } = applyAnisotropicTrimTriangleBudget('cylinder', {
+            hasTrimHoles,
+            seamSensitive: cylinderCrossesSeam || degeneratePeriodicTrim,
+            holePointCount,
+            gridDensityU,
+            gridDensityV,
+            minUSamples,
+            maxUSamples,
+            minUSamplesWithHoles,
+            seamMinUSamples,
+            minVDensity,
+            maxVDensity,
+            minVDensityWithHoles,
+            seamMinVDensity,
+          }));
+
+          trimmedBuildOptions = {
+            ...trimmedBuildOptions,
+            // Cylinder trims are best represented by anisotropic UV grids.
+            gridDensityU,
+            gridDensityV,
+            // Keep the OCCT-inspired cylinder hole path enabled by default.
+            // This is the known-stable visual mode (with slight corner curvature).
+            preferGridForHoles: true,
+          };
+        }
+        const isConeSurfaceForTrim = face.surfaceType === 'Cone';
+        if (isConeSurfaceForTrim) {
+          const period = Math.PI * 2;
+          const uBounds = getLoopUBounds(loops.uvOuter);
+          const vBounds = getLoopComponentBounds(loops.uvOuter, 1);
+          const uSpan = Math.max(1e-6, uBounds.uMax - uBounds.uMin);
+          const vSpan = Math.max(1e-6, vBounds.max - vBounds.min);
+          const hasTrimHoles = loops.uvHoles.length > 0;
+          const holePointCount = loops.uvHoles.reduce((sum, loop) => sum + loop.length, 0);
+
+          const targetAngularStep = Math.max(
+            0.08,
+            Math.min(
+              Math.PI / 3,
+              readGlobalNumber('__CONE_TRIM_TARGET_ANGULAR_STEP__') ?? (hasTrimHoles ? (preferGeometryOnlyLoad ? 0.2 : 0.16) : (preferGeometryOnlyLoad ? 0.24 : 0.2))
+            )
+          );
+          const adaptiveFullUSamples = Math.ceil(period / targetAngularStep);
+          const fullUSamples = Math.max(
+            preferGeometryOnlyLoad ? 18 : 20,
+            Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_FULL__') ?? adaptiveFullUSamples)
+          );
+          const minUSamples = Math.max(12, Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 12 : 20)));
+          const maxUSamples = Math.max(minUSamples, Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 48 : 72)));
+          const minUSamplesWithHoles = Math.max(
+            minUSamples,
+            Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_HOLES_MIN__') ?? (preferGeometryOnlyLoad ? 20 : 24))
+          );
+          const seamMinUSamples = Math.max(
+            minUSamples,
+            Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_SEAM_MIN__') ?? (preferGeometryOnlyLoad ? 30 : 26))
+          );
+          let gridDensityU = Math.round(fullUSamples * (uSpan / period));
+          if (hasTrimHoles) {
+            gridDensityU = Math.max(gridDensityU, minUSamplesWithHoles);
+          }
+          if (coneCrossesSeam || degeneratePeriodicTrim) {
+            gridDensityU = Math.max(gridDensityU, seamMinUSamples);
+          }
+          gridDensityU = clampInt(gridDensityU, minUSamples, maxUSamples);
+
+          const defaultVStep = hasTrimHoles
+            ? (preferGeometryOnlyLoad ? 4.0 : 3.5)
+            : (preferGeometryOnlyLoad ? 5.5 : 3.5);
+          const vStep = Math.max(0.2, readGlobalNumber('__CONE_TRIM_V_STEP__') ?? defaultVStep);
+          const minVDensity = Math.max(3, Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_MIN__') ?? (preferGeometryOnlyLoad ? 3 : 4)));
+          const maxVDensity = Math.max(minVDensity, Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_MAX__') ?? (preferGeometryOnlyLoad ? 10 : 14)));
+          const minVDensityWithHoles = Math.max(
+            minVDensity,
+            Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_HOLES_MIN__') ?? (preferGeometryOnlyLoad ? 5 : 6))
+          );
+          const seamMinVDensity = Math.max(
+            minVDensity,
+            Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_SEAM_MIN__') ?? (preferGeometryOnlyLoad ? 10 : 7))
+          );
+          let gridDensityV = Math.ceil(vSpan / vStep);
+          if (hasTrimHoles) {
+            gridDensityV = Math.max(gridDensityV, minVDensityWithHoles);
+          }
+          if (coneCrossesSeam || degeneratePeriodicTrim) {
+            gridDensityV = Math.max(gridDensityV, seamMinVDensity);
+          }
+          gridDensityV = clampInt(gridDensityV, minVDensity, maxVDensity);
+          ({ gridDensityU, gridDensityV } = applyAnisotropicTrimTriangleBudget('cone', {
+            hasTrimHoles,
+            seamSensitive: coneCrossesSeam || degeneratePeriodicTrim,
+            holePointCount,
+            gridDensityU,
+            gridDensityV,
+            minUSamples,
+            maxUSamples,
+            minUSamplesWithHoles,
+            seamMinUSamples,
+            minVDensity,
+            maxVDensity,
+            minVDensityWithHoles,
+            seamMinVDensity,
+          }));
+
+          trimmedBuildOptions = {
+            ...trimmedBuildOptions,
+            // Cone trims benefit from denser angular sampling than radial sampling.
+            gridDensityU,
+            gridDensityV,
+          };
+        }
         const useOccPrimaryBuildForKnownFace = isKnownLidFace && !!face.occFace;
         if (useOccPrimaryBuildForKnownFace && oc?.BRepTopAdaptor_FClass2d && oc?.gp_Pnt2d_3 && oc?.TopAbs_State) {
           try {
@@ -7046,7 +8529,12 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             // This avoids destructive post-filtering that can drop most of a valid face.
             occBuildClassifier = new oc.BRepTopAdaptor_FClass2d(face.occFace, 1e-7);
             usedOccBuildClassifier = true;
-            const classifyInside = (u: number, v: number): boolean => {
+            const classifyInside = (u: number, v: number, source: 'grid' | 'gate'): boolean => {
+              if (source === 'gate') {
+                occClassifierTriangleGateCalls++;
+              } else {
+                occClassifierGridCalls++;
+              }
               const uvPoint = new oc.gp_Pnt2d_3(u, v);
               try {
                 const state = occBuildClassifier.Perform(uvPoint, true);
@@ -7060,11 +8548,12 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             };
             const maxOutSamples = 1;
             trimmedBuildOptions = {
-              uvInsideTest: classifyInside,
+              ...trimmedBuildOptions,
+              uvInsideTest: (u, v) => classifyInside(u, v, 'grid'),
               keepTriangle: (samples) => {
                 let outCount = 0;
                 for (const [u, v] of samples) {
-                  if (!classifyInside(u, v)) {
+                  if (!classifyInside(u, v, 'gate')) {
                     outCount++;
                     if (outCount > maxOutSamples) {
                       return false;
@@ -7083,17 +8572,70 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
           }
         }
 
+        const simplifySeamPatch = (
+          patch: { uvOuter: Vec2[]; uvHoles: Vec2[][] },
+          mode: 'cone' | 'cylinder'
+        ) => {
+          const defaultOuterPts = mode === 'cone' ? 192 : 256;
+          const defaultHolePts = mode === 'cone' ? 32 : 64;
+          const defaultAreaErr = mode === 'cone' ? 0.03 : 0.02;
+          const defaultAreaErrNoHoles = mode === 'cone' ? 0.08 : 0.06;
+          const keyPrefix = mode === 'cone' ? '__CONE_TRIM' : '__CYLINDER_TRIM';
+
+          const maxOuterPts = Math.max(64, Math.floor(readGlobalNumber(`${keyPrefix}_MAX_OUTER_PTS__`) ?? defaultOuterPts));
+          const maxHolePts = Math.max(12, Math.floor(readGlobalNumber(`${keyPrefix}_MAX_HOLE_PTS__`) ?? defaultHolePts));
+          const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber(`${keyPrefix}_MAX_AREA_ERR_RATIO__`) ?? defaultAreaErr);
+          const maxOuterAreaErrorNoHoles = Math.max(
+            maxAreaErrorRatio,
+            readGlobalNumber(`${keyPrefix}_MAX_AREA_ERR_RATIO_NO_HOLES__`) ?? defaultAreaErrNoHoles
+          );
+
+          const outerAreaErrRatio = patch.uvHoles.length === 0 ? maxOuterAreaErrorNoHoles : maxAreaErrorRatio;
+          const simplifiedOuter = simplifyLoopForMeshing(patch.uvOuter, maxOuterPts, outerAreaErrRatio);
+          const simplifiedHoles = patch.uvHoles
+            .map((hole) => simplifyLoopForMeshing(hole, maxHolePts, maxAreaErrorRatio))
+            .filter((hole) => hole.length >= 3);
+          const validation = validateAndSanitizeTrimLoops(simplifiedOuter, simplifiedHoles, {
+            minAreaAbs: 1e-7,
+            maxHoleToOuterRatio: 0.98,
+            failOnHoleOutside: true,
+            failOnHugeHole: true,
+          });
+          if (validation.ok) {
+            return { uvOuter: validation.uvOuter, uvHoles: validation.uvHoles };
+          }
+          return patch;
+        };
+
         const isConeSeamSplitFaceEnabled =
           coneSeamSplitFaceIdsRaw == null || coneSeamSplitFaceIds.has(face.faceIndex);
+        const isCylinderSeamSplitFaceEnabled =
+          cylinderSeamSplitFaceIdsRaw == null || cylinderSeamSplitFaceIds.has(face.faceIndex);
+        const cylinderOuterBounds = getLoopUBounds(loops.uvOuter);
+        const cylinderOuterUSpan = cylinderOuterBounds.uMax - cylinderOuterBounds.uMin;
+        const cylinderLikelyPeriodic = face.surfaceType === 'Cylinder' && cylinderOuterUSpan > 5.5;
         const shouldTryConeSeamSplit =
           face.surfaceType === 'Cone' &&
           enableConeSeamSplit &&
           isConeSeamSplitFaceEnabled &&
+          coneCrossesSeam &&
+          loops.uvOuter.length >= 3;
+        const shouldTryCylinderSeamSplit =
+          face.surfaceType === 'Cylinder' &&
+          enableCylinderSeamSplit &&
+          isCylinderSeamSplitFaceEnabled &&
+          cylinderCrossesSeam &&
           loops.uvOuter.length >= 3 &&
           loops.uvHoles.length > 0;
         const coneSplitSourceOuter =
           (coneWrappedOuterForSplit && coneWrappedOuterForSplit.length >= 3)
             ? coneWrappedOuterForSplit
+            : ((loops.uvOuterRawWrapped && loops.uvOuterRawWrapped.length >= 3)
+              ? loops.uvOuterRawWrapped
+              : loops.uvOuter);
+        const cylinderSplitSourceOuter =
+          (cylinderWrappedOuterForSplit && cylinderWrappedOuterForSplit.length >= 3)
+            ? cylinderWrappedOuterForSplit
             : ((loops.uvOuterRawWrapped && loops.uvOuterRawWrapped.length >= 3)
               ? loops.uvOuterRawWrapped
               : loops.uvOuter);
@@ -7110,42 +8652,47 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             `outerPts=${loops.uvOuter.length}, holes=${loops.uvHoles.length})`
           );
         }
+        if (
+          face.surfaceType === 'Cylinder' &&
+          enableCylinderSeamSplit &&
+          isCylinderSeamSplitFaceEnabled &&
+          !shouldTryCylinderSeamSplit
+        ) {
+          console.log(
+            `[cylinder-seam-split] face ${face.faceIndex} ${face.surfaceType}: skipped ` +
+            `(crossesSeam=${cylinderCrossesSeam}, likelyPeriodic=${cylinderLikelyPeriodic}, wrappedOuter=${!!cylinderWrappedOuterForSplit}, ` +
+            `rawOuter=${!!loops.uvOuterRawWrapped}, ` +
+            `outerPts=${loops.uvOuter.length}, holes=${loops.uvHoles.length})`
+          );
+        }
+        if (curveVerboseLogs) {
+          const anisotropicU = trimmedBuildOptions?.gridDensityU;
+          const anisotropicV = trimmedBuildOptions?.gridDensityV;
+          curveDebugLog(
+            `[trim-grid] face ${face.faceIndex} ${face.surfaceType}: ` +
+            `baseGrid=${gridDensity}, anisotropic=` +
+            `${Number.isFinite(anisotropicU as number) ? anisotropicU : 'n/a'}x` +
+            `${Number.isFinite(anisotropicV as number) ? anisotropicV : 'n/a'}`
+          );
+        }
 
+        recordTessProfileSample('curved_trim_setup', performance.now() - trimSetupStart);
+
+        const trimTessStart = performance.now();
         let mesh;
         try {
-          if (shouldTryConeSeamSplit) {
+          if (shouldTryConeSeamSplit || shouldTryCylinderSeamSplit) {
+            const splitLabel = shouldTryConeSeamSplit ? 'cone-seam-split' : 'cylinder-seam-split';
+            const splitModeName: 'cone' | 'cylinder' = shouldTryConeSeamSplit ? 'cone' : 'cylinder';
+            const splitSourceOuter = shouldTryConeSeamSplit ? coneSplitSourceOuter : cylinderSplitSourceOuter;
             const splitResult = splitConeTrimLoopsIntoTwoPatches(
-              coneSplitSourceOuter,
+              splitSourceOuter,
               loops.uvOuter,
               loops.uvHoles
             );
             if (splitResult.ok && splitResult.leftPatch && splitResult.rightPatch && splitResult.uSplit != null) {
-              const simplifyConePatch = (patch: { uvOuter: Vec2[]; uvHoles: Vec2[][] }) => {
-                const maxOuterPts = Math.max(64, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_OUTER_PTS__') ?? 192));
-                const maxHolePts = Math.max(12, Math.floor(readGlobalNumber('__CONE_TRIM_MAX_HOLE_PTS__') ?? 32));
-                const maxAreaErrorRatio = Math.max(1e-4, readGlobalNumber('__CONE_TRIM_MAX_AREA_ERR_RATIO__') ?? 0.03);
-                const maxOuterAreaErrorNoHoles = Math.max(
-                  maxAreaErrorRatio,
-                  readGlobalNumber('__CONE_TRIM_MAX_AREA_ERR_RATIO_NO_HOLES__') ?? 0.08
-                );
-                const outerAreaErrRatio = patch.uvHoles.length === 0 ? maxOuterAreaErrorNoHoles : maxAreaErrorRatio;
-                const simplifiedOuter = simplifyLoopForMeshing(patch.uvOuter, maxOuterPts, outerAreaErrRatio);
-                const simplifiedHoles = patch.uvHoles
-                  .map((hole) => simplifyLoopForMeshing(hole, maxHolePts, maxAreaErrorRatio))
-                  .filter((hole) => hole.length >= 3);
-                const validation = validateAndSanitizeTrimLoops(simplifiedOuter, simplifiedHoles, {
-                  minAreaAbs: 1e-7,
-                  maxHoleToOuterRatio: 0.98,
-                  failOnHoleOutside: true,
-                  failOnHugeHole: true,
-                });
-                if (validation.ok) {
-                  return { uvOuter: validation.uvOuter, uvHoles: validation.uvHoles };
-                }
-                return patch;
-              };
-              const leftPatch = simplifyConePatch(splitResult.leftPatch);
-              const rightPatch = simplifyConePatch(splitResult.rightPatch);
+              const leftPatch = simplifySeamPatch(splitResult.leftPatch, splitModeName);
+              const rightPatch = simplifySeamPatch(splitResult.rightPatch, splitModeName);
               const patchMeshes: TessellatedMeshLike[] = [];
               patchMeshes.push(
                 await tessellateTrimmedSurface(
@@ -7154,7 +8701,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
                   gridDensity,
                   leftPatch.uvHoles,
                   bbox3d,
-                  trimmedBuildOptions
+                  withTrimPhaseProfiling(trimmedBuildOptions)
                 ) as TessellatedMeshLike
               );
               patchMeshes.push(
@@ -7164,12 +8711,12 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
                   gridDensity,
                   rightPatch.uvHoles,
                   bbox3d,
-                  trimmedBuildOptions
+                  withTrimPhaseProfiling(trimmedBuildOptions)
                 ) as TessellatedMeshLike
               );
               mesh = mergeTessellatedMeshes(patchMeshes);
               console.log(
-                `[cone-seam-split] face ${face.faceIndex} ${face.surfaceType}: split at U=${splitResult.uSplit.toFixed(3)} ` +
+                `[${splitLabel}] face ${face.faceIndex} ${face.surfaceType}: split at U=${splitResult.uSplit.toFixed(3)} ` +
                 `mode=${splitResult.splitMode ?? 'unknown'} ` +
                 `left(outer=${leftPatch.uvOuter.length}, holes=${leftPatch.uvHoles.length}) ` +
                 `right(outer=${rightPatch.uvOuter.length}, holes=${rightPatch.uvHoles.length}) ` +
@@ -7178,14 +8725,29 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
               );
             } else {
               console.warn(
-                `[cone-seam-split] face ${face.faceIndex} ${face.surfaceType}: split unavailable/failed (${splitResult.reason ?? 'unknown'}), using single trimmed tessellation`
+                `[${splitLabel}] face ${face.faceIndex} ${face.surfaceType}: split unavailable/failed (${splitResult.reason ?? 'unknown'}), using single trimmed tessellation`
               );
-              mesh = await tessellateTrimmedSurface(surface, loops.uvOuter, gridDensity, loops.uvHoles, bbox3d, trimmedBuildOptions);
+              mesh = await tessellateTrimmedSurface(
+                surface,
+                loops.uvOuter,
+                gridDensity,
+                loops.uvHoles,
+                bbox3d,
+                withTrimPhaseProfiling(trimmedBuildOptions)
+              );
             }
           } else {
-            mesh = await tessellateTrimmedSurface(surface, loops.uvOuter, gridDensity, loops.uvHoles, bbox3d, trimmedBuildOptions);
+            mesh = await tessellateTrimmedSurface(
+              surface,
+              loops.uvOuter,
+              gridDensity,
+              loops.uvHoles,
+              bbox3d,
+              withTrimPhaseProfiling(trimmedBuildOptions)
+            );
           }
         } finally {
+          recordTessProfileSample('curved_trim_tessellate', performance.now() - trimTessStart);
           occBuildClassifier?.delete?.();
         }
 
@@ -7203,6 +8765,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
         const shouldClassifyByOcc =
           (shouldClassifyPeriodicTrim || shouldClassifyComplexConeOrTorus || shouldClassifyKnownLidFace) && !!face.occFace;
         if (shouldClassifyByOcc && face.occFace) {
+          const occFilterStart = performance.now();
           const reason: string[] = [];
           if (coneCrossesSeam) reason.push('cone-seam');
           if (cylinderCrossesSeam) reason.push('cylinder-seam');
@@ -7229,11 +8792,18 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
             surfaceType: face.surfaceType,
             periodicProof: shouldRunPeriodicProof,
           });
+          recordTessProfileSample('curved_occ_filter', performance.now() - occFilterStart);
         }
 
         tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
         tessellationProfile.tessellateCurvedFace.calls++;
-        return tessellatedMeshToVerticesAndTriangles(mesh);
+        const meshConvertStart = performance.now();
+        const converted = tessellatedMeshToVerticesAndTriangles(mesh);
+        if (enableDetailedTrimPhaseProfiling && Object.keys(trimPhaseTimes).length > 0) {
+          converted.trimPhaseTimes = { ...trimPhaseTimes };
+        }
+        recordTessProfileSample('curved_mesh_convert', performance.now() - meshConvertStart);
+        return converted;
       }
     }
   } catch (e) {
@@ -7251,66 +8821,103 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   const { uMin, uMax, vMin, vMax } = face.uvBounds;
 
   if (face.surfaceType === 'Cylinder' && params.radius !== undefined && params.placement) {
+    const uSegments = scaleSegments(64, 24);
+    const vSegments = scaleSegments(4, 2);
+    const fallbackTessStart = performance.now();
     const mesh = await tessellateCylinder(
       { type: 'CYLINDRICAL_SURFACE', placement: params.placement, radius: params.radius },
       uMin, uMax,
       vMin, vMax,
-      64, 4
+      uSegments, vSegments
     );
+    recordTessProfileSample('curved_fallback_tessellate', performance.now() - fallbackTessStart);
     tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
     tessellationProfile.tessellateCurvedFace.calls++;
-    return tessellatedMeshToVerticesAndTriangles(mesh);
+    const meshConvertStart = performance.now();
+    const converted = tessellatedMeshToVerticesAndTriangles(mesh);
+    recordTessProfileSample('curved_mesh_convert', performance.now() - meshConvertStart);
+    return converted;
   }
 
   if (face.surfaceType === 'Sphere' && params.radius !== undefined && params.placement) {
+    const uSegments = scaleSegments(64, 24);
+    const vSegments = scaleSegments(32, 12);
+    const fallbackTessStart = performance.now();
     const mesh = await tessellateSphere(
       { type: 'SPHERICAL_SURFACE', placement: params.placement, radius: params.radius },
       uMin, uMax,
       vMin, vMax,
-      64, 32
+      uSegments, vSegments
     );
+    recordTessProfileSample('curved_fallback_tessellate', performance.now() - fallbackTessStart);
     tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
     tessellationProfile.tessellateCurvedFace.calls++;
-    return tessellatedMeshToVerticesAndTriangles(mesh);
+    const meshConvertStart = performance.now();
+    const converted = tessellatedMeshToVerticesAndTriangles(mesh);
+    recordTessProfileSample('curved_mesh_convert', performance.now() - meshConvertStart);
+    return converted;
   }
 
   if (face.surfaceType === 'Cone' && params.radius !== undefined && params.semiAngle !== undefined && params.placement) {
     // Compute height samples proportional to the height range for smooth tessellation
     const heightRange = Math.abs(vMax - vMin);
-    const numHeightSamples = Math.max(16, Math.ceil(heightRange * 8));
+    const baseHeightSamples = Math.max(16, Math.ceil(heightRange * 8));
+    const numHeightSamples = preferGeometryOnlyLoad
+      ? Math.max(8, Math.round(baseHeightSamples * perfCurvedSegmentScale))
+      : baseHeightSamples;
+    const angularSegments = scaleSegments(64, 24);
+    const fallbackTessStart = performance.now();
     const mesh = await tessellateCone(
       { type: 'CONICAL_SURFACE', placement: params.placement, radius: params.radius, semiAngle: params.semiAngle },
       uMin, uMax,
       vMin, vMax,
-      64,
+      angularSegments,
       numHeightSamples
     );
+    recordTessProfileSample('curved_fallback_tessellate', performance.now() - fallbackTessStart);
     tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
     tessellationProfile.tessellateCurvedFace.calls++;
-    return tessellatedMeshToVerticesAndTriangles(mesh);
+    const meshConvertStart = performance.now();
+    const converted = tessellatedMeshToVerticesAndTriangles(mesh);
+    recordTessProfileSample('curved_mesh_convert', performance.now() - meshConvertStart);
+    return converted;
   }
 
   if (face.surfaceType === 'Torus' && params.majorRadius !== undefined && params.minorRadius !== undefined && params.placement) {
+    const uSegments = scaleSegments(64, 24);
+    const vSegments = scaleSegments(32, 12);
+    const fallbackTessStart = performance.now();
     const mesh = await tessellateTorus(
       { type: 'TOROIDAL_SURFACE', placement: params.placement, majorRadius: params.majorRadius, minorRadius: params.minorRadius },
       uMin, uMax,
       vMin, vMax,
-      64, 32
+      uSegments, vSegments
     );
+    recordTessProfileSample('curved_fallback_tessellate', performance.now() - fallbackTessStart);
     tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
     tessellationProfile.tessellateCurvedFace.calls++;
-    return tessellatedMeshToVerticesAndTriangles(mesh);
+    const meshConvertStart = performance.now();
+    const converted = tessellatedMeshToVerticesAndTriangles(mesh);
+    recordTessProfileSample('curved_mesh_convert', performance.now() - meshConvertStart);
+    return converted;
   }
 
   if (face.surfaceType === 'BSplineSurface' && params.bspline) {
     const { controlPoints, uDegree, vDegree, uKnots, vKnots, weights } = params.bspline;
+    const uSegments = scaleSegments(32, 12);
+    const vSegments = scaleSegments(32, 12);
+    const fallbackTessStart = performance.now();
     const mesh = await tessellateBSplineSurface(
       { type: 'B_SPLINE_SURFACE', controlPoints, uDegree, vDegree, uKnots, vKnots, weights },
-      32, 32
+      uSegments, vSegments
     );
+    recordTessProfileSample('curved_fallback_tessellate', performance.now() - fallbackTessStart);
     tessellationProfile.tessellateCurvedFace.total += performance.now() - faceStart;
     tessellationProfile.tessellateCurvedFace.calls++;
-    return tessellatedMeshToVerticesAndTriangles(mesh);
+    const meshConvertStart = performance.now();
+    const converted = tessellatedMeshToVerticesAndTriangles(mesh);
+    recordTessProfileSample('curved_mesh_convert', performance.now() - meshConvertStart);
+    return converted;
   }
 
   console.warn(`[Tessellate] Unsupported curved surface type: ${face.surfaceType}`);
@@ -7319,30 +8926,67 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<{
   return { vertices: [], triangles: [] };
 }
 
-/**
- * Compute the normal of a triangle given three vertices
- */
-function computeTriangleNormal(v0: Vec3, v1: Vec3, v2: Vec3): Vec3 {
-  // Edge vectors
-  const e1: Vec3 = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2]];
-  const e2: Vec3 = [v2[0] - v0[0], v2[1] - v0[1], v2[2] - v0[2]];
+function computeSmoothNormalsCPUFromFlat(positions: Float32Array, indices: Uint32Array): Float32Array {
+  const vertexCount = Math.floor(positions.length / 3);
+  const normals = new Float32Array(vertexCount * 3);
+  const triCount = Math.floor(indices.length / 3);
 
-  // Cross product
-  const n: Vec3 = [
-    e1[1] * e2[2] - e1[2] * e2[1],
-    e1[2] * e2[0] - e1[0] * e2[2],
-    e1[0] * e2[1] - e1[1] * e2[0]
-  ];
+  for (let tri = 0; tri < triCount; tri++) {
+    const i0 = indices[tri * 3 + 0];
+    const i1 = indices[tri * 3 + 1];
+    const i2 = indices[tri * 3 + 2];
+    const v0Base = i0 * 3;
+    const v1Base = i1 * 3;
+    const v2Base = i2 * 3;
 
-  // Normalize
-  const len = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-  if (len > 1e-10) {
-    n[0] /= len;
-    n[1] /= len;
-    n[2] /= len;
+    const e1x = positions[v1Base + 0] - positions[v0Base + 0];
+    const e1y = positions[v1Base + 1] - positions[v0Base + 1];
+    const e1z = positions[v1Base + 2] - positions[v0Base + 2];
+    const e2x = positions[v2Base + 0] - positions[v0Base + 0];
+    const e2y = positions[v2Base + 1] - positions[v0Base + 1];
+    const e2z = positions[v2Base + 2] - positions[v0Base + 2];
+
+    let nx = e1y * e2z - e1z * e2y;
+    let ny = e1z * e2x - e1x * e2z;
+    let nz = e1x * e2y - e1y * e2x;
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (len > 1e-10) {
+      nx /= len;
+      ny /= len;
+      nz /= len;
+    } else {
+      continue;
+    }
+
+    normals[i0 * 3 + 0] += nx;
+    normals[i0 * 3 + 1] += ny;
+    normals[i0 * 3 + 2] += nz;
+    normals[i1 * 3 + 0] += nx;
+    normals[i1 * 3 + 1] += ny;
+    normals[i1 * 3 + 2] += nz;
+    normals[i2 * 3 + 0] += nx;
+    normals[i2 * 3 + 1] += ny;
+    normals[i2 * 3 + 2] += nz;
   }
 
-  return n;
+  for (let i = 0; i < vertexCount; i++) {
+    const ix = i * 3;
+    const nx = normals[ix + 0];
+    const ny = normals[ix + 1];
+    const nz = normals[ix + 2];
+    const len = Math.sqrt(nx * nx + ny * ny + nz * nz);
+    if (len > 1e-10) {
+      normals[ix + 0] = nx / len;
+      normals[ix + 1] = ny / len;
+      normals[ix + 2] = nz / len;
+    } else {
+      normals[ix + 0] = 0;
+      normals[ix + 1] = 0;
+      normals[ix + 2] = 1;
+    }
+  }
+
+  return normals;
 }
 
 /**
@@ -7358,13 +9002,36 @@ async function tessellateOCCShape(
 ): Promise<Mesh> {
   const shapeStart = performance.now();
   console.log(`[Tessellate] Starting tessellation of ${faces.length} faces...`);
+  const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+  const enableCurvedFaceBatching = readGlobalBoolean('__ENABLE_CURVED_FACE_BATCHING__', preferGeometryOnlyLoad);
+  const curvedFaceBatchSize = Math.max(
+    1,
+    Math.min(16, Math.floor(readGlobalNumber('__CURVED_FACE_BATCH_SIZE__') ?? 6))
+  );
+  const enableModelLevelCurvedBatching = readGlobalBoolean(
+    '__ENABLE_MODEL_LEVEL_CURVED_BATCHING__',
+    preferGeometryOnlyLoad
+  );
+  const enableGpuCurvedBatchAssembly = readGlobalBoolean(
+    '__ENABLE_GPU_CURVED_BATCH_ASSEMBLY__',
+    preferGeometryOnlyLoad
+  );
+  const defaultModelLevelCurvedBatchSize = preferGeometryOnlyLoad ? 1024 : 24;
+  const modelLevelCurvedBatchSize = Math.max(
+    curvedFaceBatchSize,
+    Math.min(
+      1024,
+      Math.floor(readGlobalNumber('__MODEL_LEVEL_CURVED_BATCH_SIZE__') ?? defaultModelLevelCurvedBatchSize)
+    )
+  );
   const FACE_DEBUG_IDS = readFaceIdsFromGlobal('__FACE_DEBUG_IDS__', [14, 63, 64, 65, 66, 994]);
   const FACE_DEBUG_MODE = readDebugModeFromGlobal('__FACE_DEBUG_MODE__', 'off');
 
-  const allVertices: Vec3[] = [];
-  const allNormals: Vec3[] = [];
-  const allColors: RGBColor[] = []; // Per-vertex colors
-  const allIndices: number[] = [];
+  const positionChunks: Float32Array[] = [];
+  const indexChunks: Uint32Array[] = [];
+  const colorRuns: Array<{ vertexCount: number; color: RGBColor }> = [];
+  let totalVertices = 0;
+  let totalIndices = 0;
   let vertexOffset = 0;
   let hasAnyColor = false;
   let processedCount = 0;
@@ -7372,6 +9039,14 @@ async function tessellateOCCShape(
   let errorCount = 0;
   const progressInterval = Math.max(1, Math.floor(faces.length / 20)); // Log every 5%
   const shouldCollectDiagnostics = Array.isArray(faceDiagnosticsOut);
+  const curvedSurfaceTypes = new Set(['Cylinder', 'Sphere', 'Cone', 'Torus', 'BSplineSurface']);
+  const batchingAllowed = enableCurvedFaceBatching && FACE_DEBUG_MODE === 'off' && !targetFaceSet;
+  const claimedByModelBatch = new Set<number>();
+  // Debug skip controls kept near tessellation loop for quick manual toggles.
+  const SKIP_TORUS_FACES = false;
+  const SKIP_FACE_10 = false;
+  const SKIP_FACE_16 = false;
+  const SKIP_FACE_17 = false;
 
   const pushFaceDiagnostic = (
     face: FaceWithEdgesInfo,
@@ -7397,230 +9072,370 @@ async function tessellateOCCShape(
     });
   };
 
-  for (const face of faces) {
-    let faceStart = performance.now();
-    try {
-      if (targetFaceSet && !targetFaceSet.has(face.faceIndex)) {
-        // In targeted diagnostic mode, skip non-target faces quietly so outputs stay focused.
-        skippedCount++;
-        processedCount++;
-        continue;
+  const appendFaceResult = (
+    face: FaceWithEdgesInfo,
+    result: FaceTessellationResult,
+    faceStart: number
+  ) => {
+    const flat = getFaceResultFlatArrays(result);
+    const vertexCount = Math.floor(flat.positions.length / 3);
+    const triangleCount = Math.floor(flat.indices.length / 3);
+
+    const faceColor = face.color || { r: 0.4, g: 0.6, b: 1.0 };
+    if (face.color) hasAnyColor = true;
+
+    positionChunks.push(flat.positions);
+    colorRuns.push({ vertexCount, color: faceColor });
+
+    const rebasedIndices = new Uint32Array(flat.indices.length);
+    for (let i = 0; i < flat.indices.length; i += 3) {
+      const i0 = flat.indices[i + 0] + vertexOffset;
+      const i1 = flat.indices[i + 1] + vertexOffset;
+      const i2 = flat.indices[i + 2] + vertexOffset;
+      if (face.isReversed) {
+        rebasedIndices[i + 0] = i0;
+        rebasedIndices[i + 1] = i2;
+        rebasedIndices[i + 2] = i1;
+      } else {
+        rebasedIndices[i + 0] = i0;
+        rebasedIndices[i + 1] = i1;
+        rebasedIndices[i + 2] = i2;
       }
-      const isFaceDebugTarget = FACE_DEBUG_IDS.has(face.faceIndex);
-      if (FACE_DEBUG_MODE === 'skip' && isFaceDebugTarget) {
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'face-debug-skip');
-        skippedCount++;
-        processedCount++;
-        continue;
+    }
+    indexChunks.push(rebasedIndices);
+    totalVertices += vertexCount;
+    totalIndices += rebasedIndices.length;
+    if (face.isReversed) {
+      tessellationVerboseLog(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
+    }
+
+    vertexOffset += vertexCount;
+    processedCount++;
+
+    const faceTime = performance.now() - faceStart;
+    if (faceTime > 500) {
+      console.warn(`[Tessellate] SLOW face ${face.faceIndex} (${face.surfaceType}): ${(faceTime / 1000).toFixed(2)}s, ${vertexCount} verts, ${triangleCount} tris`);
+    }
+    pushFaceDiagnostic(face, 'ok', faceTime, vertexCount, triangleCount);
+  };
+
+  const recordFaceError = (face: FaceWithEdgesInfo, faceStart: number, e: unknown) => {
+    console.error(`[Tessellate] Error tessellating face ${face.faceIndex}:`, e);
+    const errorMsg = e instanceof Error ? e.message : String(e);
+    pushFaceDiagnostic(face, 'error', performance.now() - faceStart, 0, 0, errorMsg);
+    errorCount++;
+    processedCount++;
+  };
+
+  if (batchingAllowed && curvedFaceBatchSize > 1) {
+    console.log(`[Tessellate] Curved-face batching enabled (batchSize=${curvedFaceBatchSize})`);
+    if (enableGpuCurvedBatchAssembly) {
+      console.log('[Tessellate] GPU curved-batch mesh assembly enabled (GPU offsets + single readback)');
+    }
+    if (enableModelLevelCurvedBatching && modelLevelCurvedBatchSize > curvedFaceBatchSize) {
+      console.log(
+        `[Tessellate] Model-level curved batching enabled (batchSize=${modelLevelCurvedBatchSize})`
+      );
+    }
+  }
+
+  for (let faceCursor = 0; faceCursor < faces.length; faceCursor++) {
+    if (claimedByModelBatch.has(faceCursor)) {
+      continue;
+    }
+    const face = faces[faceCursor];
+    const faceStart = performance.now();
+
+    if (targetFaceSet && !targetFaceSet.has(face.faceIndex)) {
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+
+    const isFaceDebugTarget = FACE_DEBUG_IDS.has(face.faceIndex);
+    if (FACE_DEBUG_MODE === 'skip' && isFaceDebugTarget) {
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'face-debug-skip');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+    if (FACE_DEBUG_MODE === 'only' && !isFaceDebugTarget) {
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'face-debug-only');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+    if (FACE_DEBUG_MODE === 'only' && isFaceDebugTarget) {
+      console.warn(`[FACE DEBUG] keep-only face=${face.faceIndex} type=${face.surfaceType}`);
+    }
+
+    if (processedCount % progressInterval === 0 || processedCount < 10) {
+      const elapsed = ((performance.now() - shapeStart) / 1000).toFixed(1);
+      const pct = ((processedCount / faces.length) * 100).toFixed(1);
+      console.log(`[Tessellate] Face ${processedCount}/${faces.length} (${pct}%) - ${elapsed}s elapsed - type: ${face.surfaceType}`);
+      if (onProgress) {
+        const overallPct = Math.round(20 + (processedCount / faces.length) * 80);
+        onProgress(overallPct);
+        await new Promise(r => setTimeout(r, 0));
       }
-      if (FACE_DEBUG_MODE === 'only' && !isFaceDebugTarget) {
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'face-debug-only');
-        skippedCount++;
-        processedCount++;
-        continue;
-      }
-      if (FACE_DEBUG_MODE === 'only' && isFaceDebugTarget) {
-        console.warn(`[FACE DEBUG] keep-only face=${face.faceIndex} type=${face.surfaceType}`);
+    }
+
+    if (SKIP_TORUS_FACES && face.surfaceType === 'Torus') {
+      console.log(`[Tessellate] SKIPPING Torus face ${face.faceIndex} (debug flag)`);
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-torus');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+    if (SKIP_FACE_10 && face.faceIndex === 10) {
+      console.log(`[Tessellate] SKIPPING Face 10 (debug flag) - Cylinder with V starting at 0`);
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-10');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+    if (SKIP_FACE_16 && face.faceIndex === 16) {
+      console.log(`[Tessellate] SKIPPING Face 16 (debug flag) - Cylinder`);
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-16');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+    if (SKIP_FACE_17 && face.faceIndex === 17) {
+      console.log(`[Tessellate] SKIPPING Face 17 (debug flag) - Cylinder`);
+      pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-17');
+      skippedCount++;
+      processedCount++;
+      continue;
+    }
+
+    if (batchingAllowed && curvedFaceBatchSize > 1 && curvedSurfaceTypes.has(face.surfaceType)) {
+      const batch: Array<{ face: FaceWithEdgesInfo; faceStart: number }> = [{ face, faceStart }];
+      const targetBatchSize = enableModelLevelCurvedBatching
+        ? modelLevelCurvedBatchSize
+        : curvedFaceBatchSize;
+      let scanCursor = faceCursor + 1;
+      while (batch.length < targetBatchSize && scanCursor < faces.length) {
+        if (enableModelLevelCurvedBatching && claimedByModelBatch.has(scanCursor)) {
+          scanCursor++;
+          continue;
+        }
+        const candidate = faces[scanCursor];
+        if (!curvedSurfaceTypes.has(candidate.surfaceType)) {
+          if (!enableModelLevelCurvedBatching) {
+            break;
+          }
+          scanCursor++;
+          continue;
+        }
+        if ((SKIP_TORUS_FACES && candidate.surfaceType === 'Torus') ||
+            (SKIP_FACE_10 && candidate.faceIndex === 10) ||
+            (SKIP_FACE_16 && candidate.faceIndex === 16) ||
+            (SKIP_FACE_17 && candidate.faceIndex === 17)) {
+          if (!enableModelLevelCurvedBatching) {
+            break;
+          }
+          scanCursor++;
+          continue;
+        }
+        batch.push({ face: candidate, faceStart: performance.now() });
+        if (enableModelLevelCurvedBatching) {
+          claimedByModelBatch.add(scanCursor);
+        } else {
+          faceCursor = scanCursor;
+        }
+        scanCursor++;
       }
 
-      // Progress logging
-      if (processedCount % progressInterval === 0 || processedCount < 10) {
-        const elapsed = ((performance.now() - shapeStart) / 1000).toFixed(1);
-        const pct = ((processedCount / faces.length) * 100).toFixed(1);
-        console.log(`[Tessellate] Face ${processedCount}/${faces.length} (${pct}%) - ${elapsed}s elapsed - type: ${face.surfaceType}`);
-        if (onProgress) {
-          // Map tessellation progress to 20-100% of overall progress
-          const overallPct = Math.round(20 + (processedCount / faces.length) * 80);
-          onProgress(overallPct);
-          // Yield to let the UI update
-          await new Promise(r => setTimeout(r, 0));
+      const batchComputeStart = performance.now();
+      const batchResults = await Promise.all(
+        batch.map(async ({ face: batchFace, faceStart: batchFaceStart }) => {
+          try {
+            const result = await tessellateCurvedFaceFromOCC(batchFace);
+            return { ok: true as const, face: batchFace, faceStart: batchFaceStart, result };
+          } catch (error) {
+            return { ok: false as const, face: batchFace, faceStart: batchFaceStart, error };
+          }
+        })
+      );
+      recordTessProfileSample('curved_batch_compute_wall', performance.now() - batchComputeStart);
+
+      const failedBatchResults = batchResults.filter(
+        (batchResult): batchResult is {
+          ok: false;
+          face: FaceWithEdgesInfo;
+          faceStart: number;
+          error: unknown;
+        } => !batchResult.ok
+      );
+      const successfulBatchResults = batchResults.filter(
+        (batchResult): batchResult is {
+          ok: true;
+          face: FaceWithEdgesInfo;
+          faceStart: number;
+          result: FaceTessellationResult;
+        } => batchResult.ok
+      );
+
+      if ((globalThis as any)?.__ENABLE_DETAILED_TESSELLATION_PROFILING__ === true && successfulBatchResults.length > 0) {
+        const batchPhaseMax: Partial<Record<TrimmedSurfaceProfilePhase, number>> = {};
+        for (const successfulBatchResult of successfulBatchResults) {
+          const faceTrimPhases = successfulBatchResult.result.trimPhaseTimes;
+          if (!faceTrimPhases) continue;
+          for (const [phase, elapsedMs] of Object.entries(faceTrimPhases) as Array<[TrimmedSurfaceProfilePhase, number]>) {
+            if (!Number.isFinite(elapsedMs) || elapsedMs < 0) continue;
+            batchPhaseMax[phase] = Math.max(batchPhaseMax[phase] ?? 0, elapsedMs);
+          }
+        }
+        for (const [phase, elapsedMs] of Object.entries(batchPhaseMax) as Array<[TrimmedSurfaceProfilePhase, number]>) {
+          const batchPhaseKey = trimPhaseBatchMaxKeyMap[phase];
+          if (!batchPhaseKey) continue;
+          recordTessProfileSample(batchPhaseKey, elapsedMs);
         }
       }
-      let result: { vertices: Vec3[]; triangles: number[][] };
 
-      // DEBUG FLAG: Set to true to skip torus faces for isolation testing
-      const SKIP_TORUS_FACES = false;
-
-      // DEBUG FLAGS: Set to true to skip specific faces for isolation testing
-      // Cylinder faces summary:
-      // Face 1:  V=[4.75, 85.00], reversed=false (half cylinder)
-      // Face 2:  V=[4.75, 57.50], reversed=false (full cylinder, crosses seam)
-      // Face 4:  V=[2.24, 4.99],  reversed=false (half cylinder, short)
-      // Face 7:  V=[2.24, 4.99],  reversed=false (full cylinder, short)
-      // Face 10: V=[0.00, 27.25], reversed=true  ⚠️ V STARTS AT 0!
-      // Face 13: V=[4.15, 54.40], reversed=true  (half cylinder)
-      // Face 15: V=[4.15, 62.37], reversed=true  (full cylinder)
-      // Face 16: V=?,            reversed=true  (hole wall)
-      // Face 17: V=?,            reversed=true  (hole wall)
-      const SKIP_FACE_10 = false;  // Fixed: 3D bbox filtering now in tessellateTrimmedSurface
-      const SKIP_FACE_16 = false;  // Hole wall cylinder
-      const SKIP_FACE_17 = false;  // Hole wall cylinder
-
-      if (SKIP_TORUS_FACES && face.surfaceType === 'Torus') {
-        console.log(`[Tessellate] SKIPPING Torus face ${face.faceIndex} (debug flag)`);
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-torus');
-        skippedCount++;
-        processedCount++;
-        continue;
+      for (const failedBatchResult of failedBatchResults) {
+        recordFaceError(failedBatchResult.face, failedBatchResult.faceStart, failedBatchResult.error);
       }
 
-      if (SKIP_FACE_10 && face.faceIndex === 10) {
-        console.log(`[Tessellate] SKIPPING Face 10 (debug flag) - Cylinder with V starting at 0`);
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-10');
-        skippedCount++;
-        processedCount++;
-        continue;
+      if (
+        enableGpuCurvedBatchAssembly &&
+        successfulBatchResults.length > 1
+      ) {
+        const batchFaces = successfulBatchResults.map((batchResult) => {
+          const flat = getFaceResultFlatArrays(batchResult.result);
+          return {
+            ...batchResult,
+            flat,
+          };
+        });
+
+        const batchAssemblyStart = performance.now();
+        const assembledBatch = await assembleMeshBatchGPU(
+          batchFaces.map((batchFace) => ({
+            positions: batchFace.flat.positions,
+            indices: batchFace.flat.indices,
+            reverseWinding: !!batchFace.face.isReversed,
+          }))
+        );
+        recordTessProfileSample('curved_batch_assembly_wall', performance.now() - batchAssemblyStart);
+
+        if (assembledBatch) {
+          positionChunks.push(assembledBatch.positions);
+          totalVertices += Math.floor(assembledBatch.positions.length / 3);
+
+          const rebasedBatchIndices = new Uint32Array(assembledBatch.indices.length);
+          for (let i = 0; i < assembledBatch.indices.length; i++) {
+            rebasedBatchIndices[i] = assembledBatch.indices[i] + vertexOffset;
+          }
+          indexChunks.push(rebasedBatchIndices);
+          totalIndices += rebasedBatchIndices.length;
+
+          for (let batchIndex = 0; batchIndex < batchFaces.length; batchIndex++) {
+            const batchFace = batchFaces[batchIndex];
+            const vertexCount = assembledBatch.vertexCounts[batchIndex];
+            const triangleCount = Math.floor(assembledBatch.indexCounts[batchIndex] / 3);
+            const faceColor = batchFace.face.color || { r: 0.4, g: 0.6, b: 1.0 };
+            if (batchFace.face.color) hasAnyColor = true;
+            colorRuns.push({ vertexCount, color: faceColor });
+
+            const faceTime = performance.now() - batchFace.faceStart;
+            if (faceTime > 500) {
+              console.warn(
+                `[Tessellate] SLOW face ${batchFace.face.faceIndex} (${batchFace.face.surfaceType}): ` +
+                `${(faceTime / 1000).toFixed(2)}s, ${vertexCount} verts, ${triangleCount} tris`
+              );
+            }
+            pushFaceDiagnostic(
+              batchFace.face,
+              'ok',
+              faceTime,
+              vertexCount,
+              triangleCount
+            );
+            processedCount++;
+          }
+
+          vertexOffset += Math.floor(assembledBatch.positions.length / 3);
+          continue;
+        }
       }
 
-      if (SKIP_FACE_16 && face.faceIndex === 16) {
-        console.log(`[Tessellate] SKIPPING Face 16 (debug flag) - Cylinder`);
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-16');
-        skippedCount++;
-        processedCount++;
-        continue;
+      for (const successfulBatchResult of successfulBatchResults) {
+        appendFaceResult(successfulBatchResult.face, successfulBatchResult.result, successfulBatchResult.faceStart);
       }
+      continue;
+    }
 
-      if (SKIP_FACE_17 && face.faceIndex === 17) {
-        console.log(`[Tessellate] SKIPPING Face 17 (debug flag) - Cylinder`);
-        pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, 'debug-skip-face-17');
-        skippedCount++;
-        processedCount++;
-        continue;
-      }
-
+    try {
+      let result: FaceTessellationResult;
       if (face.surfaceType === 'Plane') {
         result = await tessellatePlanarFaceFromOCC(face, triangulationMethod);
-      } else if (['Cylinder', 'Sphere', 'Cone', 'Torus', 'BSplineSurface'].includes(face.surfaceType)) {
-        // 3D bbox filtering for cylinders is now done inside tessellateTrimmedSurface
-        // during grid generation, which produces better results than post-filtering
+      } else if (curvedSurfaceTypes.has(face.surfaceType)) {
+        const singleCurvedStart = performance.now();
         result = await tessellateCurvedFaceFromOCC(face);
+        recordTessProfileSample('curved_single_compute_wall', performance.now() - singleCurvedStart);
       } else {
-        // Skip unsupported surface types
         pushFaceDiagnostic(face, 'skipped', performance.now() - faceStart, 0, 0, `unsupported-surface:${face.surfaceType}`);
         skippedCount++;
         processedCount++;
         continue;
       }
-
-      // Compute per-vertex normals by averaging face normals
-      const normalStart = performance.now();
-
-      // First, initialize normals to zero
-      const vertexNormals: Vec3[] = result.vertices.map(() => [0, 0, 0] as Vec3);
-
-      // Accumulate face normals at each vertex
-      for (const tri of result.triangles) {
-        const v0 = result.vertices[tri[0]];
-        const v1 = result.vertices[tri[1]];
-        const v2 = result.vertices[tri[2]];
-        const faceNormal = computeTriangleNormal(v0, v1, v2);
-
-        // Add face normal to each vertex of the triangle
-        for (const idx of tri) {
-          vertexNormals[idx][0] += faceNormal[0];
-          vertexNormals[idx][1] += faceNormal[1];
-          vertexNormals[idx][2] += faceNormal[2];
-        }
-      }
-
-      // Normalize the accumulated normals
-      for (const n of vertexNormals) {
-        const len = Math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-        if (len > 1e-10) {
-          n[0] /= len;
-          n[1] /= len;
-          n[2] /= len;
-        } else {
-          // Default to up vector if degenerate
-          n[0] = 0;
-          n[1] = 0;
-          n[2] = 1;
-        }
-      }
-
-      // Handle REVERSED face orientation
-      // When a face is REVERSED, the surface normal should point in the opposite direction.
-      // This is common for hole inner walls - the cylinder surface naturally faces outward,
-      // but for a hole it should face inward.
-      if (face.isReversed) {
-        // Flip all normals
-        for (const n of vertexNormals) {
-          n[0] = -n[0];
-          n[1] = -n[1];
-          n[2] = -n[2];
-        }
-        // Reverse triangle winding (swap indices 1 and 2) so front face is correct
-        for (const tri of result.triangles) {
-          const temp = tri[1];
-          tri[1] = tri[2];
-          tri[2] = temp;
-        }
-        console.log(`[Tessellate] Face ${face.faceIndex}: Applied REVERSED orientation (flipped normals + winding)`);
-      }
-
-      tessellationProfile.computeNormals.total += performance.now() - normalStart;
-      tessellationProfile.computeNormals.calls++;
-
-      // Add vertices, normals and assign face color to each vertex
-      const faceColor = face.color || { r: 0.4, g: 0.6, b: 1.0 }; // Default blue-ish
-      if (face.color) {
-        hasAnyColor = true;
-      }
-
-      for (let i = 0; i < result.vertices.length; i++) {
-        allVertices.push(result.vertices[i]);
-        allNormals.push(vertexNormals[i]);
-        allColors.push(faceColor);
-      }
-
-      for (const tri of result.triangles) {
-        allIndices.push(
-          tri[0] + vertexOffset,
-          tri[1] + vertexOffset,
-          tri[2] + vertexOffset
-        );
-      }
-
-      vertexOffset += result.vertices.length;
-      processedCount++;
-
-      // Log slow faces
-      const faceTime = performance.now() - faceStart;
-      if (faceTime > 500) {
-        console.warn(`[Tessellate] SLOW face ${face.faceIndex} (${face.surfaceType}): ${(faceTime/1000).toFixed(2)}s, ${result.vertices.length} verts, ${result.triangles.length} tris`);
-      }
-      pushFaceDiagnostic(face, 'ok', faceTime, result.vertices.length, result.triangles.length);
+      appendFaceResult(face, result, faceStart);
     } catch (e) {
-      console.error(`[Tessellate] Error tessellating face ${face.faceIndex}:`, e);
-      const errorMsg = e instanceof Error ? e.message : String(e);
-      pushFaceDiagnostic(face, 'error', performance.now() - faceStart, 0, 0, errorMsg);
-      errorCount++;
-      processedCount++;
+      recordFaceError(face, faceStart, e);
     }
   }
 
   const tessTime = ((performance.now() - shapeStart) / 1000).toFixed(2);
   console.log(`[Tessellate] Completed: ${processedCount} faces in ${tessTime}s (${skippedCount} skipped, ${errorCount} errors)`);
-  console.log(`[Tessellate] Generated: ${allVertices.length} vertices, ${allIndices.length / 3} triangles`);
+  console.log(`[Tessellate] Generated: ${totalVertices} vertices, ${totalIndices / 3} triangles`);
 
   // Build final mesh
   const assemblyStart = performance.now();
 
-  const positions = new Float32Array(allVertices.length * 3);
-  allVertices.forEach((p, i) => {
-    positions[i * 3 + 0] = p[0];
-    positions[i * 3 + 1] = p[1];
-    positions[i * 3 + 2] = p[2];
-  });
+  const positions = new Float32Array(totalVertices * 3);
+  let positionWriteOffset = 0;
+  for (const chunk of positionChunks) {
+    positions.set(chunk, positionWriteOffset);
+    positionWriteOffset += chunk.length;
+  }
 
-  const normals = new Float32Array(allNormals.length * 3);
-  allNormals.forEach((n, i) => {
-    normals[i * 3 + 0] = n[0];
-    normals[i * 3 + 1] = n[1];
-    normals[i * 3 + 2] = n[2];
-  });
+  const indices = new Uint32Array(totalIndices);
+  let indexWriteOffset = 0;
+  for (const chunk of indexChunks) {
+    indices.set(chunk, indexWriteOffset);
+    indexWriteOffset += chunk.length;
+  }
+  const triangleCount = Math.floor(indices.length / 3);
 
-  const indices = new Uint32Array(allIndices);
+  const normalStart = performance.now();
+  const enableGpuSmoothNormals = readGlobalBoolean('__ENABLE_GPU_SMOOTH_NORMALS__', true);
+  const gpuNormalsMinTris = Math.max(1000, Math.floor(readGlobalNumber('__GPU_SMOOTH_NORMALS_MIN_TRIS__') ?? 20000));
+  const gpuNormalsMinVerts = Math.max(1000, Math.floor(readGlobalNumber('__GPU_SMOOTH_NORMALS_MIN_VERTS__') ?? 20000));
+  const shouldTryGpuNormals = enableGpuSmoothNormals && triangleCount >= gpuNormalsMinTris && totalVertices >= gpuNormalsMinVerts;
+
+  let normals: Float32Array;
+  if (triangleCount === 0 || totalVertices === 0) {
+    normals = new Float32Array(totalVertices * 3);
+  } else {
+    let gpuNormals: Float32Array | null = null;
+    if (shouldTryGpuNormals) {
+      try {
+        gpuNormals = await computeSmoothNormalsGPUFlat(positions, indices);
+        console.log(`[Tessellate] Smooth normals: GPU pass (${triangleCount} tris, ${totalVertices} verts)`);
+      } catch (gpuErr) {
+        console.warn('[Tessellate] Smooth normals GPU pass failed, falling back to CPU:', gpuErr);
+      }
+    }
+
+    normals = gpuNormals ?? computeSmoothNormalsCPUFromFlat(positions, indices);
+    if (!gpuNormals) {
+      tessellationVerboseLog(`[Tessellate] Smooth normals: CPU pass (${triangleCount} tris)`);
+    }
+  }
+  tessellationProfile.computeNormals.total += performance.now() - normalStart;
+  tessellationProfile.computeNormals.calls++;
 
   // Build vertex colors array if we have any colors
   // NOTE: STEP file colors are typically already in linear color space (CAD convention)
@@ -7628,13 +9443,17 @@ async function tessellateOCCShape(
   // So we pass them through directly without conversion
   let vertexColors: Float32Array | undefined;
   if (hasAnyColor) {
-    vertexColors = new Float32Array(allColors.length * 3);
-    allColors.forEach((c, i) => {
-      // Pass through colors directly - STEP colors are already linear
-      vertexColors![i * 3 + 0] = c.r;
-      vertexColors![i * 3 + 1] = c.g;
-      vertexColors![i * 3 + 2] = c.b;
-    });
+    vertexColors = new Float32Array(totalVertices * 3);
+    let colorOffset = 0;
+    for (const run of colorRuns) {
+      for (let i = 0; i < run.vertexCount; i++) {
+        const base = colorOffset * 3;
+        vertexColors[base + 0] = run.color.r;
+        vertexColors[base + 1] = run.color.g;
+        vertexColors[base + 2] = run.color.b;
+        colorOffset++;
+      }
+    }
   }
 
   tessellationProfile.meshAssembly.total += performance.now() - assemblyStart;
@@ -7647,9 +9466,8 @@ async function tessellateOCCShape(
   if (vertexColors) {
     // Count unique colors
     const uniqueColors = new Set<string>();
-    for (let i = 0; i < allColors.length; i++) {
-      const c = allColors[i];
-      uniqueColors.add(`${c.r.toFixed(2)},${c.g.toFixed(2)},${c.b.toFixed(2)}`);
+    for (const run of colorRuns) {
+      uniqueColors.add(`${run.color.r.toFixed(2)},${run.color.g.toFixed(2)},${run.color.b.toFixed(2)}`);
     }
     console.log(`[Tessellate] Vertex colors created: ${vertexColors.length / 3} vertices, ${uniqueColors.size} unique colors`);
   } else {
@@ -7889,6 +9707,7 @@ export async function parseStepWithOCC(
   triangulationMethod: TriangulationMethod = 'ear-clipping',
   onProgress?: (percent: number) => void
 ): Promise<Mesh> {
+  resetTessellationProfile();
   console.log(`[parseStepWithOCC] Starting tessellation...`);
   const startTime = performance.now();
 

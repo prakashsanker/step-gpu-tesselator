@@ -13,6 +13,24 @@
 import { getGPUDevice } from "./lib";
 import { earClipping } from "./ear-clipping";
 
+const DEBUG_CDT_LOGS = false;
+
+function cdtDebugEnabled(): boolean {
+    return DEBUG_CDT_LOGS || (globalThis as any)?.__CDT_DEBUG_LOGS__ === true;
+}
+
+function cdtDebugLog(...args: unknown[]): void {
+    if (cdtDebugEnabled()) {
+        console.log(...args);
+    }
+}
+
+function cdtDebugWarn(...args: unknown[]): void {
+    if (cdtDebugEnabled()) {
+        console.warn(...args);
+    }
+}
+
 // Edge representation for the half-edge data structure
 interface HalfEdge {
     origin: number;      // Vertex index
@@ -220,7 +238,7 @@ function cpuEdgeFlip(
         }
 
         if (!flipped) {
-            console.log(`[CDT] Edge flipping converged after ${iter + 1} iterations`);
+            cdtDebugLog(`[CDT] Edge flipping converged after ${iter + 1} iterations`);
             break;
         }
     }
@@ -850,9 +868,35 @@ function triangleIntersectsEdge(
     tri: [number, number, number],
     vertices: [number, number][],
     v1: number,
-    v2: number
+    v2: number,
+    p1?: [number, number],
+    p2?: [number, number],
+    edgeMinX?: number,
+    edgeMinY?: number,
+    edgeMaxX?: number,
+    edgeMaxY?: number
 ): boolean {
     const [a, b, c] = tri;
+    const segP1 = p1 ?? vertices[v1];
+    const segP2 = p2 ?? vertices[v2];
+    const pa = vertices[a];
+    const pb = vertices[b];
+    const pc = vertices[c];
+
+    const minX = edgeMinX ?? Math.min(segP1[0], segP2[0]);
+    const minY = edgeMinY ?? Math.min(segP1[1], segP2[1]);
+    const maxX = edgeMaxX ?? Math.max(segP1[0], segP2[0]);
+    const maxY = edgeMaxY ?? Math.max(segP1[1], segP2[1]);
+
+    const triMinX = Math.min(pa[0], pb[0], pc[0]);
+    const triMinY = Math.min(pa[1], pb[1], pc[1]);
+    const triMaxX = Math.max(pa[0], pb[0], pc[0]);
+    const triMaxY = Math.max(pa[1], pb[1], pc[1]);
+
+    // Fast reject most triangles before running segment-intersection checks.
+    if (triMaxX < minX || triMinX > maxX || triMaxY < minY || triMinY > maxY) {
+        return false;
+    }
 
     // Skip if triangle contains either endpoint
     if (a === v1 || a === v2 || b === v1 || b === v2 || c === v1 || c === v2) {
@@ -862,28 +906,16 @@ function triangleIntersectsEdge(
             return false; // Edge is part of triangle, not intersecting
         }
         // Triangle contains one endpoint - check if constraint passes through interior
-        const p1 = vertices[v1];
-        const p2 = vertices[v2];
-        const pa = vertices[a];
-        const pb = vertices[b];
-        const pc = vertices[c];
-
         // Check each edge of the triangle for intersection with constraint
         const edges: [number, number][] = [[a, b], [b, c], [c, a]];
         for (const [e1, e2] of edges) {
             if (e1 === v1 || e1 === v2 || e2 === v1 || e2 === v2) continue;
-            if (edgesCross(p1, p2, vertices[e1], vertices[e2])) {
+            if (edgesCross(segP1, segP2, vertices[e1], vertices[e2])) {
                 return true;
             }
         }
         return false;
     }
-
-    const p1 = vertices[v1];
-    const p2 = vertices[v2];
-    const pa = vertices[a];
-    const pb = vertices[b];
-    const pc = vertices[c];
 
     // Check if the constraint edge crosses any triangle edge
     const edges: [[number, number], [number, number]][] = [
@@ -891,7 +923,7 @@ function triangleIntersectsEdge(
     ];
 
     for (const [ea, eb] of edges) {
-        if (edgesCross(p1, p2, ea, eb)) {
+        if (edgesCross(segP1, segP2, ea, eb)) {
             return true;
         }
     }
@@ -1046,9 +1078,26 @@ function recoverConstraintEdge(
     }
 
     // Step 1: Find all triangles that intersect the constraint edge
+    const p1 = vertices[v1];
+    const p2 = vertices[v2];
+    const edgeMinX = Math.min(p1[0], p2[0]);
+    const edgeMinY = Math.min(p1[1], p2[1]);
+    const edgeMaxX = Math.max(p1[0], p2[0]);
+    const edgeMaxY = Math.max(p1[1], p2[1]);
     const intersectingIndices: number[] = [];
     for (let i = 0; i < triangles.length; i++) {
-        if (triangleIntersectsEdge(triangles[i], vertices, v1, v2)) {
+        if (triangleIntersectsEdge(
+            triangles[i],
+            vertices,
+            v1,
+            v2,
+            p1,
+            p2,
+            edgeMinX,
+            edgeMinY,
+            edgeMaxX,
+            edgeMaxY
+        )) {
             intersectingIndices.push(i);
         }
     }
@@ -1086,10 +1135,10 @@ function recoverConstraintEdge(
 
     // Step 3: Order the boundary edges into a polygon
     // The boundary forms a closed polygon around the cavity
-    const orderedBoundary = orderBoundaryEdges(boundaryEdges);
+    let orderedBoundary = orderBoundaryEdges(boundaryEdges, v1);
 
     if (orderedBoundary.length < 3) {
-        console.warn(`[CDT] Cavity boundary too small: ${orderedBoundary.length} vertices`);
+        cdtDebugWarn(`[CDT] Cavity boundary too small: ${orderedBoundary.length} vertices`);
         return false;
     }
 
@@ -1099,7 +1148,19 @@ function recoverConstraintEdge(
     const v2Pos = orderedBoundary.indexOf(v2);
 
     if (v1Pos === -1 || v2Pos === -1) {
-        console.warn(`[CDT] Constraint endpoints not on cavity boundary`);
+        // Retry ordering from the second endpoint before failing.
+        const reordered = orderBoundaryEdges(boundaryEdges, v2);
+        const reorderedV1Pos = reordered.indexOf(v1);
+        const reorderedV2Pos = reordered.indexOf(v2);
+        if (reordered.length >= 3 && reorderedV1Pos !== -1 && reorderedV2Pos !== -1) {
+            orderedBoundary = reordered;
+        }
+    }
+
+    const orderedV1Pos = orderedBoundary.indexOf(v1);
+    const orderedV2Pos = orderedBoundary.indexOf(v2);
+    if (orderedV1Pos === -1 || orderedV2Pos === -1) {
+        cdtDebugWarn(`[CDT] Constraint endpoints not on cavity boundary`);
         return false;
     }
 
@@ -1109,15 +1170,15 @@ function recoverConstraintEdge(
     let polyA: number[];
     let polyB: number[];
 
-    if (v1Pos < v2Pos) {
+    if (orderedV1Pos < orderedV2Pos) {
         // v1 comes before v2
-        polyA = orderedBoundary.slice(v1Pos, v2Pos + 1);
-        polyB = [...orderedBoundary.slice(v2Pos), ...orderedBoundary.slice(0, v1Pos + 1)];
+        polyA = orderedBoundary.slice(orderedV1Pos, orderedV2Pos + 1);
+        polyB = [...orderedBoundary.slice(orderedV2Pos), ...orderedBoundary.slice(0, orderedV1Pos + 1)];
     } else {
         // v2 comes before v1
-        polyA = orderedBoundary.slice(v1Pos);
-        polyA.push(...orderedBoundary.slice(0, v2Pos + 1));
-        polyB = orderedBoundary.slice(v2Pos, v1Pos + 1);
+        polyA = orderedBoundary.slice(orderedV1Pos);
+        polyA.push(...orderedBoundary.slice(0, orderedV2Pos + 1));
+        polyB = orderedBoundary.slice(orderedV2Pos, orderedV1Pos + 1);
     }
 
     // Step 5: Remove the intersecting triangles
@@ -1144,7 +1205,7 @@ function recoverConstraintEdge(
 /**
  * Order boundary edges into a continuous polygon.
  */
-function orderBoundaryEdges(edges: [number, number][]): number[] {
+function orderBoundaryEdgesGreedy(edges: [number, number][], startHint?: number): number[] {
     if (edges.length === 0) return [];
 
     // Build adjacency map
@@ -1156,12 +1217,12 @@ function orderBoundaryEdges(edges: [number, number][]): number[] {
         adj.get(e2)!.push(e1);
     }
 
-    // Start from first edge
-    const result: number[] = [edges[0][0]];
+    const start = startHint !== undefined && adj.has(startHint) ? startHint : edges[0][0];
+    const result: number[] = [start];
     const visited = new Set<number>();
-    visited.add(edges[0][0]);
+    visited.add(start);
 
-    let current = edges[0][0];
+    let current = start;
     let maxIterations = edges.length * 2;
 
     while (maxIterations-- > 0) {
@@ -1186,6 +1247,64 @@ function orderBoundaryEdges(edges: [number, number][]): number[] {
     }
 
     return result;
+}
+
+/**
+ * Order boundary edges into a continuous polygon cycle (prefers startHint).
+ */
+function orderBoundaryEdges(edges: [number, number][], startHint?: number): number[] {
+    if (edges.length === 0) return [];
+
+    const adj = new Map<number, number[]>();
+    for (const [e1, e2] of edges) {
+        if (!adj.has(e1)) adj.set(e1, []);
+        if (!adj.has(e2)) adj.set(e2, []);
+        adj.get(e1)!.push(e2);
+        adj.get(e2)!.push(e1);
+    }
+
+    // Best case for cavity boundaries is degree-2 cycle.
+    const hasOnlyCycleDegrees = Array.from(adj.values()).every(neighbors => neighbors.length === 2);
+    const start = startHint !== undefined && adj.has(startHint) ? startHint : edges[0][0];
+    if (!hasOnlyCycleDegrees) {
+        return orderBoundaryEdgesGreedy(edges, start);
+    }
+
+    const ordered: number[] = [start];
+    const visitedEdgeKeys = new Set<string>();
+    let prev = -1;
+    let current = start;
+    let steps = 0;
+    const maxSteps = edges.length + 1;
+
+    while (steps++ < maxSteps) {
+        const neighbors = adj.get(current) ?? [];
+        if (neighbors.length === 0) break;
+
+        let next = neighbors[0];
+        if (neighbors.length > 1 && next === prev) {
+            next = neighbors[1];
+        }
+
+        const edgeKey = next < current ? `${next},${current}` : `${current},${next}`;
+        if (visitedEdgeKeys.has(edgeKey)) {
+            break;
+        }
+        visitedEdgeKeys.add(edgeKey);
+
+        if (next === start) {
+            break;
+        }
+
+        ordered.push(next);
+        prev = current;
+        current = next;
+    }
+
+    if (ordered.length >= 3) {
+        return ordered;
+    }
+    return orderBoundaryEdgesGreedy(edges, start);
 }
 
 /**
@@ -1255,11 +1374,11 @@ export async function cdtWithHoles(
         allVertices.push(...hole);
     }
 
-    console.log(`[CDT-Holes] ${allVertices.length} total vertices (${boundary.length} boundary + ${allVertices.length - boundary.length} hole)`);
+    cdtDebugLog(`[CDT-Holes] ${allVertices.length} total vertices (${boundary.length} boundary + ${allVertices.length - boundary.length} hole)`);
 
     // Step 1: Delaunay triangulation of all vertices
     let triangles = bowyerWatson(allVertices);
-    console.log(`[CDT-Holes] Bowyer-Watson produced ${triangles.length} triangles`);
+    cdtDebugLog(`[CDT-Holes] Bowyer-Watson produced ${triangles.length} triangles`);
 
     // Step 2: Recover constraint edges (boundary + holes)
     const constraintEdges = buildConstraintEdgesWithHoles(boundary.length, holeOffsets);
@@ -1273,7 +1392,7 @@ export async function cdtWithHoles(
             failedCount++;
         }
     }
-    console.log(`[CDT-Holes] Constraint recovery: ${recoveredCount} recovered, ${failedCount} failed`);
+    cdtDebugLog(`[CDT-Holes] Constraint recovery: ${recoveredCount} recovered, ${failedCount} failed`);
 
     // Step 3: Remove triangles outside boundary
     triangles = triangles.filter(tri => {
@@ -1283,7 +1402,7 @@ export async function cdtWithHoles(
         ];
         return isPointInsidePolygon(centroid, boundary);
     });
-    console.log(`[CDT-Holes] After boundary filter: ${triangles.length} triangles`);
+    cdtDebugLog(`[CDT-Holes] After boundary filter: ${triangles.length} triangles`);
 
     // Step 4: Remove triangles inside holes or crossing hole boundaries
     if (holes.length > 0) {
@@ -1332,7 +1451,7 @@ export async function cdtWithHoles(
 
             return true;
         });
-        console.log(`[CDT-Holes] After hole filter: ${triangles.length} triangles (removed ${beforeCount - triangles.length})`);
+        cdtDebugLog(`[CDT-Holes] After hole filter: ${triangles.length} triangles (removed ${beforeCount - triangles.length})`);
     }
 
     return triangles;
@@ -1461,7 +1580,7 @@ export async function constrainedDelaunayTriangulation(
     const initialTriangles = await earClipping(boundary3d);
 
     if (initialTriangles.length === 0) {
-        console.warn("[CDT] Ear clipping returned no triangles");
+        cdtDebugWarn("[CDT] Ear clipping returned no triangles");
         return [];
     }
 
@@ -1470,8 +1589,8 @@ export async function constrainedDelaunayTriangulation(
         t[0] === t[1] || t[1] === t[2] || t[0] === t[2]
     );
     if (degenerateTris.length > 0) {
-        console.warn(`[CDT] Ear clipping produced ${degenerateTris.length} degenerate triangles:`);
-        degenerateTris.slice(0, 5).forEach(t => console.warn(`  [${t.join(',')}]`));
+        cdtDebugWarn(`[CDT] Ear clipping produced ${degenerateTris.length} degenerate triangles:`);
+        degenerateTris.slice(0, 5).forEach(t => cdtDebugWarn(`  [${t.join(',')}]`));
     }
 
     let triangles = initialTriangles as [number, number, number][];
@@ -1496,8 +1615,8 @@ export async function constrainedDelaunayTriangulation(
             t[0] === t[1] || t[1] === t[2] || t[0] === t[2]
         );
         if (degenerateAfterFlip.length > 0) {
-            console.warn(`[CDT] Edge flipping produced ${degenerateAfterFlip.length} degenerate triangles:`);
-            degenerateAfterFlip.slice(0, 5).forEach(t => console.warn(`  [${t.join(',')}]`));
+            cdtDebugWarn(`[CDT] Edge flipping produced ${degenerateAfterFlip.length} degenerate triangles:`);
+            degenerateAfterFlip.slice(0, 5).forEach(t => cdtDebugWarn(`  [${t.join(',')}]`));
         }
     }
 
@@ -1507,7 +1626,7 @@ export async function constrainedDelaunayTriangulation(
         triangles = removeTrianglesInsideHoles(triangles, boundary, holes);
         const removedCount = beforeCount - triangles.length;
         if (removedCount > 0) {
-            console.log(`[CDT] Removed ${removedCount} triangles inside holes`);
+            cdtDebugLog(`[CDT] Removed ${removedCount} triangles inside holes`);
         }
     }
 

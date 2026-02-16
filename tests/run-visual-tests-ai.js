@@ -16,6 +16,7 @@ const PROJECT_ROOT = join(__dirname, '..');
 
 // Configuration
 const CONFIG = {
+    viteHost: '127.0.0.1',
     vitePort: 5176,
     timeout: 180000,
     headless: true,
@@ -69,7 +70,7 @@ async function startViteServer() {
     return new Promise((resolve, reject) => {
         log('Starting Vite dev server...', 'blue');
 
-        const vite = spawn('npx', ['vite', '--port', CONFIG.vitePort.toString()], {
+        const vite = spawn('npx', ['vite', '--host', CONFIG.viteHost, '--port', CONFIG.vitePort.toString()], {
             cwd: PROJECT_ROOT,
             stdio: ['ignore', 'pipe', 'pipe'],
         });
@@ -333,7 +334,7 @@ async function main() {
 
         // Navigate to visual-validation.html
         log('Loading visual validation page...', 'blue');
-        await page.goto(`http://localhost:${CONFIG.vitePort}/tests/visual-validation.html`, {
+        await page.goto(`http://${CONFIG.viteHost}:${CONFIG.vitePort}/tests/visual-validation.html`, {
             waitUntil: 'networkidle0',
             timeout: CONFIG.timeout,
         });
@@ -411,7 +412,7 @@ async function main() {
         fs.mkdirSync(CONFIG.screenshotDir, { recursive: true });
         fs.writeFileSync(reportPath, JSON.stringify({
             timestamp: new Date().toISOString(),
-            config: { model: CONFIG.anthropicModel },
+            config: { model: CONFIG.openRouterModel },
             summary: { passed, failed, errors, total: stepFiles.length },
             results
         }, null, 2));
@@ -424,4 +425,7 @@ async function main() {
     }
 }
 
-main().catch(console.error);
+main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+});

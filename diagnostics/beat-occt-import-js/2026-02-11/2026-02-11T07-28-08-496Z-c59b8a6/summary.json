@@ -1,0 +1,57 @@
+{
+  "createdAt": "2026-02-11T07:29:39.074Z",
+  "runDir": "diagnostics/beat-occt-import-js/2026-02-11/2026-02-11T07-28-08-496Z-c59b8a6",
+  "git": {
+    "branch": "beat-occt-import-js",
+    "commit": "c59b8a6"
+  },
+  "steps": [
+    {
+      "id": "01-unit-tests",
+      "name": "Unit/Correctness: tests/run-tests.js",
+      "cmd": [
+        "node",
+        "--experimental-vm-modules",
+        "tests/run-tests.js"
+      ],
+      "startedAt": "2026-02-11T07:28:08.525Z",
+      "finishedAt": "2026-02-11T07:28:38.724Z",
+      "durationMs": 30199,
+      "exitCode": 1,
+      "signal": null,
+      "logPath": "diagnostics/beat-occt-import-js/2026-02-11/2026-02-11T07-28-08-496Z-c59b8a6/01-unit-tests.log",
+      "ok": false
+    },
+    {
+      "id": "02-benchmark-comprehensive",
+      "name": "Performance: tests/benchmark-comprehensive.js",
+      "cmd": [
+        "node",
+        "tests/benchmark-comprehensive.js"
+      ],
+      "startedAt": "2026-02-11T07:28:38.725Z",
+      "finishedAt": "2026-02-11T07:29:08.894Z",
+      "durationMs": 30169,
+      "exitCode": 1,
+      "signal": null,
+      "logPath": "diagnostics/beat-occt-import-js/2026-02-11/2026-02-11T07-28-08-496Z-c59b8a6/02-benchmark-comprehensive.log",
+      "ok": false
+    },
+    {
+      "id": "03-benchmark-core",
+      "name": "Performance: tests/benchmark.js",
+      "cmd": [
+        "node",
+        "tests/benchmark.js"
+      ],
+      "startedAt": "2026-02-11T07:29:08.895Z",
+      "finishedAt": "2026-02-11T07:29:39.073Z",
+      "durationMs": 30178,
+      "exitCode": 1,
+      "signal": null,
+      "logPath": "diagnostics/beat-occt-import-js/2026-02-11/2026-02-11T07-28-08-496Z-c59b8a6/03-benchmark-core.log",
+      "ok": false
+    }
+  ],
+  "ok": false
+}
