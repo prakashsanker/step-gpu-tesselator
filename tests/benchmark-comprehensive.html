@@ -34,6 +34,11 @@
             getLocalUvClassifierTelemetry,
             parseStepWithOcctImportSimple
         } from '/src/occ-test.ts';
+        import {
+            applyClassifierRuntimeGlobals,
+            restoreClassifierRuntimeGlobals,
+            snapshotClassifierRuntimeGlobals
+        } from '/src/classifier-runtime.ts';
         import { getGPUDevice } from '/src/lib.ts';
 
         // Expose benchmark functions to window for Puppeteer access
@@ -58,10 +63,7 @@
                     const prevTessVerbose = globalThis.__TESSELLATION_VERBOSE_LOGS__;
                     const prevTriFastGpuPriority = globalThis.__TRI_FAST_GPU_PRIORITY__;
                     const prevDetailedTessProfile = globalThis.__ENABLE_DETAILED_TESSELLATION_PROFILING__;
-                    const prevLocalUvClassifierShadow = globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__;
-                    const prevLocalUvClassifierCandidate = globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__;
-                    const prevLocalUvClassifierFallback = globalThis.__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__;
-                    const prevLocalUvClassifierCandidateStrict = globalThis.__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__;
+                    const prevClassifierRuntime = snapshotClassifierRuntimeGlobals();
                     const prevGridBatchTargetJobs = globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_JOBS__;
                     const prevGridBatchTargetVerts = globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_VERTS__;
                     const prevGridBatchDelayMs = globalThis.__GPU_SURFACE_GRID_BATCH_DELAY_MS__;
@@ -81,10 +83,14 @@
                     globalThis.__TESSELLATION_VERBOSE_LOGS__ = false;
                     globalThis.__TRI_FAST_GPU_PRIORITY__ = true;
                     globalThis.__ENABLE_DETAILED_TESSELLATION_PROFILING__ = enableDetailedTessProfile;
-                    globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__ = enableLocalUvClassifierShadow;
-                    globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__ = enableLocalUvClassifierCandidate;
-                    globalThis.__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__ = !disableLocalUvClassifierFallback;
-                    globalThis.__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__ = enableLocalUvClassifierCandidateStrict;
+                    // Keep script runs aligned with index.html runtime classifier wiring.
+                    applyClassifierRuntimeGlobals({
+                        enableCandidate: enableLocalUvClassifierCandidate,
+                        enableShadow: enableLocalUvClassifierShadow,
+                        fallbackToOcc: !disableLocalUvClassifierFallback,
+                        strictCandidate: enableLocalUvClassifierCandidateStrict,
+                        stageBUnresolvedPreferInside: true,
+                    });
                     // Keep dense/sparse surface eval in model-wide coalescing mode so
                     // curved-trimmed faces are packed into one/few GPU submissions.
                     globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_JOBS__ = 1024;
@@ -138,26 +144,7 @@
                         } else {
                             globalThis.__ENABLE_DETAILED_TESSELLATION_PROFILING__ = prevDetailedTessProfile;
                         }
-                        if (prevLocalUvClassifierShadow === undefined) {
-                            delete globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__;
-                        } else {
-                            globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__ = prevLocalUvClassifierShadow;
-                        }
-                        if (prevLocalUvClassifierCandidate === undefined) {
-                            delete globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__;
-                        } else {
-                            globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__ = prevLocalUvClassifierCandidate;
-                        }
-                        if (prevLocalUvClassifierFallback === undefined) {
-                            delete globalThis.__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__;
-                        } else {
-                            globalThis.__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__ = prevLocalUvClassifierFallback;
-                        }
-                        if (prevLocalUvClassifierCandidateStrict === undefined) {
-                            delete globalThis.__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__;
-                        } else {
-                            globalThis.__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__ = prevLocalUvClassifierCandidateStrict;
-                        }
+                        restoreClassifierRuntimeGlobals(prevClassifierRuntime);
                         if (prevGridBatchTargetJobs === undefined) {
                             delete globalThis.__GPU_SURFACE_GRID_BATCH_TARGET_JOBS__;
                         } else {

@@ -386,6 +386,7 @@
         import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
         import { parseStepFile } from '/src/tessellator.ts';
         import { initOC, parseStepWithOCC, parseStepWithOcctImportFull, buildFaceDiffReport } from '/src/occ-test.ts';
+        import { applyClassifierRuntimeGlobals } from '/src/classifier-runtime.ts';
         import { getGPUDevice } from '/src/lib.ts';
 
         // State
@@ -442,10 +443,14 @@
                 fallbackBox.checked = false;
             }
 
-            globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_CANDIDATE__ = enableCandidate;
-            globalThis.__ENABLE_LOCAL_UV_CLASSIFIER_SHADOW__ = false;
-            globalThis.__LOCAL_UV_CLASSIFIER_FALLBACK_TO_OCC__ = enableFallback;
-            globalThis.__LOCAL_UV_CLASSIFIER_CANDIDATE_STRICT__ = strictOnly;
+            // Keep UI and script runs aligned through the shared runtime helper.
+            applyClassifierRuntimeGlobals({
+                enableCandidate,
+                enableShadow: false,
+                fallbackToOcc: enableFallback,
+                strictCandidate: strictOnly,
+                stageBUnresolvedPreferInside: true,
+            });
 
             log(
                 `Classifier mode: candidate=${enableCandidate ? 'on' : 'off'}, fallback=${enableFallback ? 'on' : 'off'}, strict=${strictOnly ? 'on' : 'off'}`,
@@ -463,8 +468,6 @@
             fallbackBox.checked = false;
             strictBox.checked = true;
 
-            // Keep the current Stage-B unresolved fallback behavior active for visual checks.
-            globalThis.__LOCAL_UV_STAGEB_UNRESOLVED_PREFER_INSIDE__ = true;
             applyLocalClassifierFlagsFromUi();
         }
 

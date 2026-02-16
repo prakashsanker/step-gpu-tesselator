@@ -1046,8 +1046,8 @@ export async function tessellateTrimmedSurface(
         tolVNormalized: number;
     }
     const classifierPointEpsilon = Math.max(
-        1e-6,
-        Math.min(5e-3, Math.max(du, dv) * 0.02)
+        1e-7,
+        Math.min(5e-4, Math.max(du, dv) * 0.005)
     );
 
     const normalizeLoopForClassifier = (loop: Vec2[]): Vec2[] => {
@@ -1521,7 +1521,7 @@ export async function tessellateTrimmedSurface(
     const useLocalUvTopologicalFallback =
         enableLocalUvFaceClassifierFallback &&
         surfaceTypeForClassifier === "Cone" &&
-        useLocalUvClassifierShadow;
+        (useLocalUvClassifierShadow || useLocalUvClassifierCandidate);
     const classifierLoopsForSafety = classifierWireSpecs.length > 0
         ? classifierWireSpecs.map((wire) => wire.loop)
         : [outerClassifierLoop, ...holeClassifierLoops];

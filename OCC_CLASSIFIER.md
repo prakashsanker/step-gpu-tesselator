@@ -54,6 +54,9 @@ These rules are now mandatory for routine iteration:
    - full canary (`npm run -s bench:canary`)
    - Electronic Enclosure focused representative (`npm run -s bench:electronic`)
 3. OCC-backed shadow runs are diagnostic-only and require explicit opt-in.
+4. `index.html` and scripted benchmark runs must use the same classifier runtime wiring.
+   - Source of truth: `src/classifier-runtime.ts`
+   - Any classifier mode change must be applied through this helper (no ad-hoc global flag writes).
 
 ## Execution Strategy
 
