@@ -11,8 +11,10 @@
     "test:watch": "node --experimental-vm-modules tests/run-tests.js --watch",
     "baseline:beat": "node scripts/run-beat-occt-baseline.mjs",
     "bench:micro": "node tests/benchmark.js",
-    "bench:canary": "node tests/benchmark-comprehensive.js --suite canary",
-    "bench:representative": "node tests/benchmark-comprehensive.js --suite representative",
+    "bench:canary": "node tests/benchmark-comprehensive.js --suite canary --classifier-candidate-strict",
+    "bench:representative": "node tests/benchmark-comprehensive.js --suite representative --filter Electronic --classifier-candidate-strict",
+    "bench:representative-all": "node tests/benchmark-comprehensive.js --suite representative --classifier-candidate-strict",
+    "bench:electronic": "node tests/benchmark-comprehensive.js --suite representative --filter Electronic --classifier-candidate-strict",
     "bench:full": "node tests/benchmark-comprehensive.js --suite full",
     "bench:load": "node tests/benchmark-load-path.js --suite representative"
   },

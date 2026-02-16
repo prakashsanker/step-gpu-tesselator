@@ -51,9 +51,10 @@ function parseArgs(argv) {
         prewarm: true,
         detailedProfile: false,
         classifierShadow: false,
-        classifierCandidate: false,
-        classifierCandidateStrict: false,
-        classifierNoFallback: false,
+        classifierCandidate: true,
+        classifierCandidateStrict: true,
+        classifierNoFallback: true,
+        allowOccClassifier: false,
     };
 
     for (let i = 0; i < argv.length; i++) {
@@ -87,14 +88,21 @@ function parseArgs(argv) {
             parsed.detailedProfile = true;
         } else if (arg === '--classifier-shadow') {
             parsed.classifierShadow = true;
+            parsed.classifierCandidate = false;
+            parsed.classifierCandidateStrict = false;
+            parsed.classifierNoFallback = false;
         } else if (arg === '--classifier-candidate') {
+            parsed.classifierShadow = false;
             parsed.classifierCandidate = true;
         } else if (arg === '--classifier-candidate-strict') {
+            parsed.classifierShadow = false;
             parsed.classifierCandidate = true;
             parsed.classifierCandidateStrict = true;
             parsed.classifierNoFallback = true;
         } else if (arg === '--classifier-no-fallback') {
             parsed.classifierNoFallback = true;
+        } else if (arg === '--allow-occ-classifier') {
+            parsed.allowOccClassifier = true;
         } else if (arg === '--help' || arg === '-h') {
             printUsage();
             process.exit(0);
@@ -118,10 +126,11 @@ Options:
   --max-files N             Limit selected model count after filtering
   --no-prewarm              Disable one-time harness prewarm run
   --detailed-profile        Enable detailed curved-phase profiling
-  --classifier-shadow       Enable local-vs-OCC classifier shadow mode
+  --classifier-shadow       Enable local-vs-OCC classifier shadow mode (requires --allow-occ-classifier)
   --classifier-candidate    Enable local classifier candidate mode (real output path)
   --classifier-candidate-strict Enable strict candidate mode (local classifier only; no OCC fallback)
   --classifier-no-fallback  Disable OCC fallback for classifier candidate runs
+  --allow-occ-classifier    Policy override: permit OCC-backed shadow runs
   --help                    Show this help
 `);
 }
@@ -349,6 +358,23 @@ function buildCanaryModels(parsed) {
 }
 
 function selectConfig(parsed) {
+    if (parsed.classifierShadow && parsed.allowOccClassifier !== true) {
+        throw new Error('Policy violation: OCC-backed classifier runs are disabled. Use --allow-occ-classifier only for explicit diagnostics.');
+    }
+
+    // Default policy: representative suite focuses on Electronic Enclosure only.
+    if (parsed.suite === 'representative' && !parsed.filter) {
+        parsed.filter = 'Electronic';
+    }
+
+    // Default policy: always run local classifier in strict no-fallback mode unless
+    // an explicit OCC shadow diagnostic run was requested.
+    if (!parsed.classifierShadow) {
+        parsed.classifierCandidate = true;
+        parsed.classifierCandidateStrict = true;
+        parsed.classifierNoFallback = true;
+    }
+
     if (parsed.classifierShadow && parsed.classifierCandidate) {
         throw new Error('Use only one classifier mode per run: --classifier-shadow OR --classifier-candidate');
     }

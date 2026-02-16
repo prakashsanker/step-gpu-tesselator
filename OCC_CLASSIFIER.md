@@ -33,6 +33,28 @@ No performance optimization is accepted unless:
 2. Representative correctness is visually acceptable on critical files.
 3. No catastrophic geometry regressions (missing faces, severe seam tears, inverted regions).
 
+## Deferred Visual Regression Note
+
+User-confirmed visual regression to track (do not forget while mismatch work continues):
+- Files:
+  - `step-examples/c4-surfaces/cone.step`
+  - `step-examples/complex/conical-surface.step`
+- Observation: slight visual regression in cone/conical rendering under current local-classifier-focused configuration.
+- Policy:
+  - Keep mismatch-reduction as the active priority now.
+  - Do not treat this as closed until we run a dedicated visual re-check pass after the next parity milestone.
+  - Before any promotion/merge, this visual regression must be explicitly re-tested and documented in this file.
+
+## Active Benchmark Rules
+
+These rules are now mandatory for routine iteration:
+
+1. Always run with local classifier output path in strict mode (no OCC fallback).
+2. Routine suites are:
+   - full canary (`npm run -s bench:canary`)
+   - Electronic Enclosure focused representative (`npm run -s bench:electronic`)
+3. OCC-backed shadow runs are diagnostic-only and require explicit opt-in.
+
 ## Execution Strategy
 
 OCCT-spec alignment update:
@@ -160,6 +182,18 @@ Every iteration that touches classifier/tessellation logic must append:
 - fallback usage metrics
 - speed ratio vs `occt-import-js` on Electronic Enclosure
 
+Electronic shadow reporting rule (mandatory on every run):
+- Always report the latest-run value and the lowest-seen value for:
+  - `effectiveMismatchCount`
+  - `mismatchFromStageA`
+  - `mismatchFromStageB`
+  - `mismatchFromDomainUnsafeStageA`
+  - `mismatchFromDomainUnsafeStageB`
+- For each metric, also report:
+  - delta vs lowest
+  - delta vs previous run
+- Use explicit labels (`current`, `lowest`, `delta_vs_lowest`, `delta_vs_previous`) to avoid ambiguity.
+
 ## Post-Compaction Rule (Mandatory)
 
 After any context compaction/restart:
@@ -190,6 +224,81 @@ Use this format for each new entry:
   - reference: `<ms>`
   - speed ratio: `<ours/reference>x slower` or `<reference/ours>x faster`
 - Decision: `promote / hold / rollback`
+
+## 2026-02-15 Targeted Lever Execution (Mismatch Reduction)
+
+Objective:
+- Reduce Electronic Enclosure shadow mismatch from the current baseline by applying targeted classifier levers one at a time.
+- After each lever:
+  - run `npm run -s bench:representative -- --filter Electronic --classifier-shadow`
+  - capture `mismatchCount`, `localUncertain`, `effectiveMismatchCount`
+  - run `npm run -s bench:canary -- --classifier-shadow` as regression gate when behavior meaningfully changes
+
+Execution order:
+1. Face-level branch policy prepass (pathological cone-family routing)
+2. Deterministic disagreement routing map (remove ad-hoc tie behavior)
+3. Stage-B parity pass on residual bucket
+4. Stage-A semantics improvement with edge-level pcurve chains
+5. Remove any remaining order-dependent arbitration logic
+6. Re-run strict gate (Electronic + canary shadow) and record final delta
+
+Tracking table:
+
+| Step | Lever | Electronic mismatch | Electronic uncertain | Electronic effectiveMismatch | Delta vs previous | Notes |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| 0 | Baseline before lever execution | 10131 | 40 | 10171 | n/a | commit `2bddb4e` baseline |
+| 1 | Face-level branch policy prepass | 10131 | 40 | 10171 | `0 / 0 / 0` | No measurable mismatch change on Electronic shadow run |
+| 2 | Deterministic disagreement routing map | 27708 | 1953 | 29661 | `+17577 / +1913 / +19490` | Regression when disagreement map was enabled; default switched back OFF |
+| 3 | Stage-B parity pass on residual bucket | 10131 | 40 | 10171 | `-17577 / -1913 / -19490` | Crossing-accumulation default changed; no net gain beyond returning to baseline |
+| 4 | Stage-A edge-level semantics | 10131 | 40 | 10171 | `0 / 0 / 0` | Edge-loop Stage-A wiring landed; mismatch unchanged in shadow metric |
+| 5 | Remove order-dependent arbitration | 10131 | 40 | 10171 | `0 / 0 / 0` | Refactor to deterministic helper; mismatch unchanged |
+| 6 | Final gate rerun (Electronic + canary shadow) | 10131 | 40 | 10171 | `0 / 0 / 0` | Canary shadow gate PASS (`80/80`), Electronic shadow stable at baseline |
+
+### 2026-02-15 Experiment: Domain-Unsafe Stage-B-Only (Rejected)
+
+- Change: Force domain-unsafe path to return forced Stage-B directly (`__LOCAL_UV_DOMAIN_UNSAFE_STAGEB_ONLY__=true` default), bypassing Stage-A arbitration/provisional in that branch.
+- Electronic shadow result:
+  - mismatch: `15105` (was `10131`, +`4974`)
+  - uncertain: `4071` (was `40`, +`4031`)
+  - effectiveMismatch: `19176` (was `10171`, +`9005`)
+- Source/bucket shift:
+  - mismatchFromDomainUnsafeStageA: `0` (was `8856`)
+  - mismatchFromDomainUnsafeStageB: `15105` (was `1275`)
+  - falseInside: `7168`, falseOutside: `7937`
+  - mismatchBoundaryBand: `0`, mismatchInterior: `15105`
+- Perf note: Electronic runtime improved modestly (`~8916ms`, `2.71x` slower vs ref), but parity regression is too large.
+- Decision: `reject as default` (keep as experimental toggle only).
+
+## 2026-02-15 OCCT-Inspired Parity Execution (Next)
+
+Goal:
+- Reduce domain-unsafe cone mismatch by matching OCCT decision ordering and transition semantics more directly.
+
+Current baseline snapshot (Electronic shadow):
+- mismatch: `10131`
+- uncertain: `40`
+- effectiveMismatch: `10171`
+- mismatch split: `domain_stageA=8856` (mostly boundary), `domain_stageB=1275` (interior)
+
+Execution order:
+1. Tighten domain-unsafe Stage-A confidence gate to OCCT-like boundary tolerance behavior.
+2. Port closest-hit transition ownership semantics from `TopClass_Classifier2d` into Stage-B.
+3. Add `CheckOn` + `CheckSkip` equivalents in Stage-B intersector path.
+4. Replace Stage-B wire voting with OCCT-style global closest-hit compare across all wires for each probe segment.
+
+Tracking:
+
+| Step | Change | Electronic mismatch | Electronic uncertain | Electronic effectiveMismatch | Delta vs previous | Notes |
+| --- | --- | ---: | ---: | ---: | --- | --- |
+| 0 | Baseline before OCCT-inspired pass | 10131 | 40 | 10171 | n/a | split: stageA=8856, stageB=1275 |
+| 1 | Stage-A confidence gate tightened | 16086 | 40 | 16126 | `+5955 / +0 / +5955` | Strict gate regressed parity (stageB mismatch ballooned); kept behind flag `__LOCAL_UV_DOMAIN_UNSAFE_STRICT_STAGEA_CONFIDENCE__`, default OFF |
+| 2 | Stage-B closest-hit transition parity | 10131 | 40 | 10171 | `-5955 / +0 / -5955` | Closest-hit-only bundle ownership did not change mismatch buckets after reverting strict Stage-A gate |
+| 3 | Stage-B CheckOn/CheckSkip parity | 10131 | 40 | 10171 | `0 / 0 / 0` | Expanded unstable-bundle skip now triggers (`stageBBundleSkips=4`) but parity unchanged |
+| 4 | Targeted inside-vs-outside Stage-A guard near boundary | 19441 | 40 | 19481 | `+9310 / +0 / +9310` | Reduced stageA mismatches but exploded stageB false-outside; flag `__LOCAL_UV_DOMAIN_UNSAFE_GUARD_INSIDE_VS_OUTSIDE__` kept OFF by default |
+| 5 | Stage-B multi-probe consensus (Segment/OtherSegment-inspired) | 10131 | 40 | 10171 | `-9310 / +0 / -9310` | No parity gain; consensus path kept behind flag `__LOCAL_UV_STAGEB_MULTI_PROBE_CONSENSUS__` (default OFF) |
+| 6 | Stage-B face-wide probe traversal (single direction across wires) | 10131 | 40 | 10171 | `0 / 0 / 0` | No Electronic parity gain. Strict candidate canary still fails cone/conical triangle coverage gates; kept behind `__LOCAL_UV_STAGEB_FACE_WIDE_PROBE_TRAVERSAL__` (default OFF) |
+| 7 | Stage-B OCCT-style global closest-hit compare (single nearest intersection across wires) | 10131 | 40 | 10171 | `0 / 0 / 0` | Implemented face-level nearest-intersection ownership (`__LOCAL_UV_STAGEB_FACE_WIDE_PROBE_TRAVERSAL__` now default ON). No Electronic parity movement; transition-state exactness still missing |
+| 8 | Stage-B TopTrans tie accumulator at closest-hit band | 10131 | 40 | 10171 | `0 / 0 / 0` | Added event-sign accumulator for equal-distance ties (`__LOCAL_UV_STAGEB_TOPTRANS_TIE_ACCUMULATOR__`), but no parity movement; left default OFF due extra CPU overhead |
 
 ## Current Baseline Snapshot (for reference)
 
@@ -552,3 +661,25 @@ Working diagnosis we are preserving:
   - effective mismatch: `-271`
   - source shift: `domain -271` (stageA/stageB unchanged)
 - Decision: `keep` (first measurable drop in dominant domain mismatch bucket; next step is reducing Stage-B mismatch bucket)
+
+### 2026-02-16 (local) - Stage-B TopTrans tie-accumulator experiment (no parity gain)
+- Commit: `<working tree>`
+- Change summary:
+  - Added closest-hit tie accumulator in Stage-B face-wide traversal:
+    - new flag `__LOCAL_UV_STAGEB_TOPTRANS_TIE_ACCUMULATOR__`
+    - tie resolution now attempts event-sign accumulation (`cross`) before falling back to vote/uncertain
+  - Result: parity metrics did not move; flag left default `false` to avoid extra CPU overhead in hot path.
+- Canary: `FAIL` (`80/80` pass, quality-gate fail unchanged)
+  - quality-gate failures unchanged from baseline:
+    - `step-examples/c4-surfaces/cone.step` triangles/triRatio below thresholds
+    - `step-examples/complex/conical-surface.step` triangles/triRatio below thresholds
+- Representative: `PASS` (`1/1`) [Electronic Enclosure only, shadow mode]
+- Shadow mismatch (Electronic Enclosure):
+  - overall: `10131 / 126913` mismatches
+  - uncertain: `40 / 126913`
+  - effective mismatch: `10171 / 126913`
+  - mismatch source: `stageA=0`, `stageB=0`, `stageBForced=0`, `domain=10131`
+- Electronic Enclosure:
+  - run A: ours `10893.2ms`, ref `4238.4ms`, speed ratio `2.57x slower`
+  - run B: ours `9157.9ms`, ref `3241.7ms`, speed ratio `2.83x slower`
+- Decision: `hold` (no correctness gain; keep the experiment switch available but disabled by default)

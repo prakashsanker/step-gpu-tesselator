@@ -453,6 +453,21 @@
             );
         }
 
+        function applyDefaultLocalClassifierMode() {
+            const candidateBox = document.getElementById('localClassifierCandidate');
+            const fallbackBox = document.getElementById('localClassifierFallback');
+            const strictBox = document.getElementById('localClassifierStrict');
+
+            // Default visual-check mode: local classifier only (no OCC fallback).
+            candidateBox.checked = true;
+            fallbackBox.checked = false;
+            strictBox.checked = true;
+
+            // Keep the current Stage-B unresolved fallback behavior active for visual checks.
+            globalThis.__LOCAL_UV_STAGEB_UNRESOLVED_PREFER_INSIDE__ = true;
+            applyLocalClassifierFlagsFromUi();
+        }
+
         // Initialize Three.js renderers for each canvas
         function initRenderer(canvasId) {
             const canvas = document.getElementById(canvasId);
@@ -901,6 +916,8 @@
                 document.getElementById('testFile').addEventListener('change', () => {
                     document.getElementById('filePicker').value = '';
                 });
+
+                applyDefaultLocalClassifierMode();
 
                 setStatus('Ready - Select a test file and click Run Comparison', 'ready');
                 log('Initialization complete', 'pass');

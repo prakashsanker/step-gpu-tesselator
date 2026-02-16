@@ -887,6 +887,10 @@ export async function tessellateTrimmedSurface(
         "__LOCAL_UV_STAGEB_FACE_WIDE_PROBE_TRAVERSAL__",
         true
     );
+    const localUvStageBUnresolvedPreferInside = readTrimBoolean(
+        "__LOCAL_UV_STAGEB_UNRESOLVED_PREFER_INSIDE__",
+        true
+    );
     const localUvSeamTolerance = Math.max(
         localUvBoundaryTolerance,
         Math.max(du, dv) * 1.5,
@@ -1772,6 +1776,7 @@ export async function tessellateTrimmedSurface(
         closestHitX: number;
         eventKind: "cross" | "touch" | "ambiguous" | "none";
         eventSign: -1 | 0 | 1;
+        closestBundleHasNearVertex: boolean;
     }
 
     const createTransitionMetrics = (): LocalUvTransitionMetrics => ({
@@ -1795,11 +1800,16 @@ export async function tessellateTrimmedSurface(
         point: Vec2,
         wire: LocalClassifierWire,
         dir: Vec2,
-        options?: { edgeToleranceScale?: number }
+        options?: { edgeToleranceScale?: number; maxRayParam?: number }
     ): LocalUvDirectionClassification => {
         const metrics = createTransitionMetrics();
         const [px, py] = point;
         const edgeToleranceScale = Math.max(0.01, options?.edgeToleranceScale ?? 1);
+        const maxRayParamRaw = options?.maxRayParam;
+        const maxRayParam =
+            typeof maxRayParamRaw === "number" && Number.isFinite(maxRayParamRaw) && maxRayParamRaw > 1e-12
+                ? maxRayParamRaw
+                : Number.POSITIVE_INFINITY;
         const tolU = Math.max(
             1e-8,
             Math.max(classifierPointEpsilon, wire.prepared.tolUOriginal) * edgeToleranceScale
@@ -1821,6 +1831,7 @@ export async function tessellateTrimmedSurface(
                 closestHitX: Number.POSITIVE_INFINITY,
                 eventKind: "none",
                 eventSign: 0,
+                closestBundleHasNearVertex: false,
             };
         }
 
@@ -1833,6 +1844,7 @@ export async function tessellateTrimmedSurface(
                 closestHitX: Number.POSITIVE_INFINITY,
                 eventKind: "none",
                 eventSign: 0,
+                closestBundleHasNearVertex: false,
             };
         }
         const ux = dx / rayLen;
@@ -1922,9 +1934,15 @@ export async function tessellateTrimmedSurface(
                 });
                 return;
             }
-            if (xIntersect > edgeTolU) {
+            if (xIntersect > edgeTolU && xIntersect <= maxRayParam + edgeTolU) {
                 const t = (-ay) / (by - ay);
-                const nearVertexTol = Math.max(1e-6, edgeTolV / (Math.abs(by - ay) + 1e-9));
+                // OCCT uses exact transition position (Head/End) from intersector.
+                // Our sampled polyline classifier must avoid over-marking near-vertex
+                // hits as Head/End, otherwise Stage-B retries become dominant.
+                const nearVertexTol = Math.min(
+                    0.02,
+                    Math.max(1e-6, edgeTolV / (Math.abs(by - ay) + 1e-9))
+                );
                 const nearStart = t <= nearVertexTol;
                 const nearEnd = t >= 1 - nearVertexTol;
                 const nearVertex = nearStart || nearEnd;
@@ -1948,6 +1966,7 @@ export async function tessellateTrimmedSurface(
                 closestHitX: 0,
                 eventKind: "touch",
                 eventSign: 0,
+                closestBundleHasNearVertex: false,
             };
         }
 
@@ -1958,6 +1977,7 @@ export async function tessellateTrimmedSurface(
                 closestHitX: Number.POSITIVE_INFINITY,
                 eventKind: "none",
                 eventSign: 0,
+                closestBundleHasNearVertex: false,
             };
         }
         hits.sort((a, b) => a.x - b.x);
@@ -2157,10 +2177,12 @@ export async function tessellateTrimmedSurface(
                     closestHitX: Number.POSITIVE_INFINITY,
                     eventKind: "none",
                     eventSign: 0,
+                    closestBundleHasNearVertex: false,
                 };
             }
             const firstBundle = hitBundles[bundleIndex];
             const closestHitX = firstBundle[0]?.x ?? Number.POSITIVE_INFINITY;
+            const closestBundleHasNearVertex = firstBundle.some((hit) => hit.nearVertex);
             let event = evaluateBundleEvent(firstBundle, true);
             if (event.kind === "ambiguous") {
                 event = evaluateBundleEvent(firstBundle, false);
@@ -2172,6 +2194,7 @@ export async function tessellateTrimmedSurface(
                     closestHitX,
                     eventKind: "cross",
                     eventSign: event.sign,
+                    closestBundleHasNearVertex,
                 };
             }
             if (event.kind === "touch") {
@@ -2179,20 +2202,25 @@ export async function tessellateTrimmedSurface(
                     metrics.transitionTies++;
                 }
                 return {
-                    relation: "on",
+                    // OCCT classifier reserves ON for explicit near-curve hits.
+                    // Transition "touch" states are otherwise resolved via
+                    // in/out transition semantics, so prefer OUT over uncertain.
+                    relation: "outside",
                     metrics,
                     closestHitX,
                     eventKind: "touch",
                     eventSign: 0,
+                    closestBundleHasNearVertex,
                 };
             }
             metrics.transitionTies++;
             return {
-                relation: "on",
+                relation: "outside",
                 metrics,
                 closestHitX,
                 eventKind: "ambiguous",
                 eventSign: 0,
+                closestBundleHasNearVertex,
             };
         }
 
@@ -2229,57 +2257,69 @@ export async function tessellateTrimmedSurface(
         }
 
         if (sawTouchEvent || sawAmbiguousEvent) {
+            const closestBundle = hitBundles[bundleIndex] ?? [];
             return {
-                relation: "on",
+                relation: "outside",
                 metrics,
-                closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                closestHitX: closestBundle[0]?.x ?? Number.POSITIVE_INFINITY,
                 eventKind: sawAmbiguousEvent ? "ambiguous" : "touch",
                 eventSign: 0,
+                closestBundleHasNearVertex: closestBundle.some((hit) => hit.nearVertex),
             };
         }
         if (sawCrossEvent) {
             if (crossingSum > 0) {
+                const closestBundle = hitBundles[bundleIndex] ?? [];
                 return {
                     relation: "inside",
                     metrics,
-                    closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                    closestHitX: closestBundle[0]?.x ?? Number.POSITIVE_INFINITY,
                     eventKind: "cross",
                     eventSign: 1,
+                    closestBundleHasNearVertex: closestBundle.some((hit) => hit.nearVertex),
                 };
             }
             if (crossingSum < 0) {
+                const closestBundle = hitBundles[bundleIndex] ?? [];
                 return {
                     relation: "outside",
                     metrics,
-                    closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                    closestHitX: closestBundle[0]?.x ?? Number.POSITIVE_INFINITY,
                     eventKind: "cross",
                     eventSign: -1,
+                    closestBundleHasNearVertex: closestBundle.some((hit) => hit.nearVertex),
                 };
             }
             if (firstCrossSign > 0) {
+                const closestBundle = hitBundles[bundleIndex] ?? [];
                 return {
                     relation: "inside",
                     metrics,
-                    closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                    closestHitX: closestBundle[0]?.x ?? Number.POSITIVE_INFINITY,
                     eventKind: "cross",
                     eventSign: 1,
+                    closestBundleHasNearVertex: closestBundle.some((hit) => hit.nearVertex),
                 };
             }
             if (firstCrossSign < 0) {
+                const closestBundle = hitBundles[bundleIndex] ?? [];
                 return {
                     relation: "outside",
                     metrics,
-                    closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                    closestHitX: closestBundle[0]?.x ?? Number.POSITIVE_INFINITY,
                     eventKind: "cross",
                     eventSign: -1,
+                    closestBundleHasNearVertex: closestBundle.some((hit) => hit.nearVertex),
                 };
             }
+            const closestBundle = hitBundles[bundleIndex] ?? [];
             return {
                 relation: "outside",
                 metrics,
-                closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                closestHitX: closestBundle[0]?.x ?? Number.POSITIVE_INFINITY,
                 eventKind: "none",
                 eventSign: 0,
+                closestBundleHasNearVertex: closestBundle.some((hit) => hit.nearVertex),
             };
         }
         return {
@@ -2288,6 +2328,7 @@ export async function tessellateTrimmedSurface(
             closestHitX: Number.POSITIVE_INFINITY,
             eventKind: "none",
             eventSign: 0,
+            closestBundleHasNearVertex: false,
         };
     };
 
@@ -2296,10 +2337,16 @@ export async function tessellateTrimmedSurface(
         metrics: LocalUvTransitionMetrics;
     }
 
+    interface LocalUvProbeDirection {
+        dir: Vec2;
+        quality: number;
+        maxParam: number;
+    }
+
     const appendProbeCandidatesForWire = (
         point: Vec2,
         wire: LocalClassifierWire,
-        outCandidates: Array<{ dir: Vec2; quality: number }>,
+        outCandidates: LocalUvProbeDirection[],
         maxCandidates = 16
     ): void => {
         if (outCandidates.length >= maxCandidates) return;
@@ -2328,37 +2375,41 @@ export async function tessellateTrimmedSurface(
                 const vty = vy / vLen;
                 const sinA = Math.abs(etx * vty - ety * vtx);
                 if (sinA < smallAngleSin) continue;
-                outCandidates.push({ dir: [vtx, vty], quality: sinA });
+                outCandidates.push({ dir: [vtx, vty], quality: sinA, maxParam: vLen });
             }
         });
     };
 
     const finalizeProbeDirections = (
-        probeCandidates: Array<{ dir: Vec2; quality: number }>,
-        maxProbeDirections: number
-    ): Vec2[] => {
+        probeCandidates: LocalUvProbeDirection[],
+        maxProbeDirections: number,
+        options?: { preserveOrder?: boolean; dedupeDot?: number }
+    ): LocalUvProbeDirection[] => {
         if (probeCandidates.length === 0) {
-            return [[1, 0]];
+            return [{ dir: [1, 0], quality: 0, maxParam: Number.POSITIVE_INFINITY }];
         }
-        probeCandidates.sort((a, b) => b.quality - a.quality);
-        const probeDirections: Vec2[] = [];
-        const dedupeDot = 0.9995;
-        for (const candidate of probeCandidates) {
+        const preserveOrder = options?.preserveOrder === true;
+        const dedupeDot = Math.max(0, Math.min(1, options?.dedupeDot ?? 0.9995));
+        const sortedCandidates = preserveOrder
+            ? probeCandidates
+            : [...probeCandidates].sort((a, b) => b.quality - a.quality);
+        const probeDirections: LocalUvProbeDirection[] = [];
+        for (const candidate of sortedCandidates) {
             const [cx, cy] = candidate.dir;
             let duplicate = false;
             for (const existing of probeDirections) {
-                const dot = cx * existing[0] + cy * existing[1];
-                if (Math.abs(dot) >= dedupeDot) {
+                const dot = cx * existing.dir[0] + cy * existing.dir[1];
+                if (dedupeDot > 0 && Math.abs(dot) >= dedupeDot) {
                     duplicate = true;
                     break;
                 }
             }
             if (duplicate) continue;
-            probeDirections.push(candidate.dir);
+            probeDirections.push(candidate);
             if (probeDirections.length >= maxProbeDirections) break;
         }
         if (probeDirections.length === 0) {
-            probeDirections.push([1, 0]);
+            probeDirections.push({ dir: [1, 0], quality: 0, maxParam: Number.POSITIVE_INFINITY });
         }
         return probeDirections;
     };
@@ -2366,16 +2417,16 @@ export async function tessellateTrimmedSurface(
     const classifyPointAgainstWireByTransitions = (
         point: Vec2,
         wire: LocalClassifierWire,
-        options?: { probeDirections?: Vec2[]; edgeToleranceScale?: number; maxProbeDirections?: number }
+        options?: { probeDirections?: LocalUvProbeDirection[]; edgeToleranceScale?: number; maxProbeDirections?: number }
     ): LocalUvTransitionClassification => {
         const metrics = createTransitionMetrics();
         const edgeToleranceScale = Math.max(0.01, options?.edgeToleranceScale ?? localUvTransitionEdgeToleranceScale);
         const maxProbeDirections = Math.max(1, Math.floor(options?.maxProbeDirections ?? localUvTransitionMaxProbes));
-        let probeDirections: Vec2[];
+        let probeDirections: LocalUvProbeDirection[];
         if (Array.isArray(options?.probeDirections) && options.probeDirections.length > 0) {
             probeDirections = options.probeDirections;
         } else {
-            const probeCandidates: Array<{ dir: Vec2; quality: number }> = [];
+            const probeCandidates: LocalUvProbeDirection[] = [];
             appendProbeCandidatesForWire(point, wire, probeCandidates, 16);
             if (probeCandidates.length === 0) {
                 metrics.probeFallbacks++;
@@ -2386,9 +2437,10 @@ export async function tessellateTrimmedSurface(
         let firstResolved: LoopPointRelation | null = null;
         let sawInside = false;
         let sawOutside = false;
-        for (const direction of probeDirections) {
-            const directional = classifyPointAgainstWireByDirection(point, wire, direction, {
+        for (const probe of probeDirections) {
+            const directional = classifyPointAgainstWireByDirection(point, wire, probe.dir, {
                 edgeToleranceScale,
+                maxRayParam: probe.maxParam,
             });
             accumulateTransitionMetrics(metrics, directional.metrics);
             if (directional.relation === "on") {
@@ -2461,39 +2513,47 @@ export async function tessellateTrimmedSurface(
 
         if (localUvStageBFaceWideProbeTraversal) {
             const wirePoints = localClassifierWires.map((wire) => recadrePointForWire(wire));
-            const probeCandidates: Array<{ dir: Vec2; quality: number }> = [];
+            const probeCandidates: LocalUvProbeDirection[] = [];
             for (let wireIndex = 0; wireIndex < localClassifierWires.length; wireIndex++) {
-                appendProbeCandidatesForWire(wirePoints[wireIndex], localClassifierWires[wireIndex], probeCandidates, 64);
+                appendProbeCandidatesForWire(wirePoints[wireIndex], localClassifierWires[wireIndex], probeCandidates, 256);
             }
             if (probeCandidates.length === 0) {
                 transitionMetrics.probeFallbacks++;
             }
-            const probeDirections = finalizeProbeDirections(probeCandidates, localUvTransitionMaxProbes);
-
-            let firstResolvedDecision: LocalUvDecision | null = null;
-            let firstResolvedDistance = Infinity;
-            let firstResolvedBadWire = false;
-            let sawInside = false;
-            let sawOutside = false;
+            const occtMaxProbes = Math.max(
+                localUvTransitionMaxProbes,
+                Math.floor(readTrimNumber("__LOCAL_UV_STAGEB_OCCT_MAX_PROBES__") ?? 8)
+            );
+            const probeDirections = finalizeProbeDirections(probeCandidates, occtMaxProbes, {
+                preserveOrder: true,
+                dedupeDot: 0,
+            });
             const closestCompareTol = Math.max(
                 classifierPointEpsilon * 4,
                 localUvBoundaryTolerance * 0.25,
                 1e-7
             );
 
-            for (const direction of probeDirections) {
+            let acceptedDecision: LocalUvDecision | null = null;
+            let acceptedDistance = Infinity;
+            let acceptedBadWire = false;
+            let lastResolvedDecision: LocalUvDecision | null = null;
+            let lastResolvedDistance = Infinity;
+            let lastResolvedBadWire = false;
+            let globalBoundaryDistance = Infinity;
+
+            for (const probe of probeDirections) {
                 let directionBadWire = false;
                 let directionMinBoundaryDistance = Infinity;
-                let directionDecision: LocalUvDecision | null = null;
+                let directionHeadOrEnd = false;
+                let directionSawIntersection = false;
                 let directionClosestHitX = Number.POSITIVE_INFINITY;
-                let directionHadTie = false;
+                let directionClosestHeadOrEnd = false;
+                let directionClosestDecision: LocalUvDecision | null = null;
+                let directionClosestDecisionDisagree = false;
+                let directionClosestDecisionScore = 0;
+                let directionClosestDecisionVotes = 0;
                 const directionMetrics = createTransitionMetrics();
-                let closestInsideVotes = 0;
-                let closestOutsideVotes = 0;
-                let closestCrossSignSum = 0;
-                let closestCrossCount = 0;
-                let closestTouchCount = 0;
-                let closestAmbiguousCount = 0;
 
                 for (let wireIndex = 0; wireIndex < localClassifierWires.length; wireIndex++) {
                     const wire = localClassifierWires[wireIndex];
@@ -2505,11 +2565,18 @@ export async function tessellateTrimmedSurface(
                     if (boundaryDistance < directionMinBoundaryDistance) {
                         directionMinBoundaryDistance = boundaryDistance;
                     }
+                    if (boundaryDistance < globalBoundaryDistance) {
+                        globalBoundaryDistance = boundaryDistance;
+                    }
+
                     const directional = classifyPointAgainstWireByDirection(
                         wirePoint,
                         wire,
-                        direction,
-                        { edgeToleranceScale: localUvTransitionEdgeToleranceScale }
+                        probe.dir,
+                        {
+                            edgeToleranceScale: localUvTransitionEdgeToleranceScale,
+                            maxRayParam: probe.maxParam,
+                        }
                     );
                     accumulateTransitionMetrics(directionMetrics, directional.metrics);
 
@@ -2517,144 +2584,147 @@ export async function tessellateTrimmedSurface(
                         continue;
                     }
 
-                    const wireDecision: LocalUvDecision =
-                        directional.relation === "on"
-                            ? "uncertain"
-                            : (
-                                (directional.relation === "inside" && wire.orientationBit === 0) ||
-                                (directional.relation === "outside" && wire.orientationBit === 1)
-                            )
-                                ? "outside"
-                                : "inside";
-                    const voteDecision = (decision: LocalUvDecision): void => {
-                        if (decision === "inside") closestInsideVotes++;
-                        else if (decision === "outside") closestOutsideVotes++;
-                    };
-                    const voteTransition = (): void => {
-                        if (!localUvStageBTopTransTieAccumulator) {
-                            return;
-                        }
-                        if (directional.eventKind === "cross" && directional.eventSign !== 0) {
-                            const transitionDecisionSign =
-                                wire.orientationBit === 0 ? -directional.eventSign : directional.eventSign;
-                            closestCrossSignSum += transitionDecisionSign;
-                            closestCrossCount++;
-                        } else if (directional.eventKind === "touch") {
-                            closestTouchCount++;
-                        } else if (directional.eventKind === "ambiguous") {
-                            closestAmbiguousCount++;
-                        }
-                    };
-                    const hitDelta = directional.closestHitX - directionClosestHitX;
-                    if (hitDelta < -closestCompareTol) {
+                    directionSawIntersection = true;
+                    const isHeadOrEndHit =
+                        directional.relation === "on" ||
+                        directional.eventKind === "touch" ||
+                        directional.eventKind === "ambiguous" ||
+                        (directional.closestBundleHasNearVertex && directional.eventKind !== "cross");
+                    const closestDelta = directional.closestHitX - directionClosestHitX;
+                    if (closestDelta < -closestCompareTol) {
                         directionClosestHitX = directional.closestHitX;
-                        directionDecision = wireDecision;
-                        directionHadTie = false;
-                        closestInsideVotes = 0;
-                        closestOutsideVotes = 0;
-                        closestCrossSignSum = 0;
-                        closestCrossCount = 0;
-                        closestTouchCount = 0;
-                        closestAmbiguousCount = 0;
-                        voteDecision(wireDecision);
-                        voteTransition();
-                    } else if (Math.abs(hitDelta) <= closestCompareTol) {
-                        voteDecision(wireDecision);
-                        voteTransition();
-                        if (directionDecision == null) {
-                            directionDecision = wireDecision;
-                        } else if (directionDecision !== wireDecision) {
-                            directionHadTie = true;
-                            if (localUvStageBTopTransTieAccumulator && closestCrossCount > 0) {
-                                if (closestCrossSignSum > 0) {
-                                    directionDecision = "inside";
-                                } else if (closestCrossSignSum < 0) {
-                                    directionDecision = "outside";
-                                } else {
-                                    directionDecision = "uncertain";
-                                }
-                            } else if (closestInsideVotes !== closestOutsideVotes) {
-                                directionDecision =
-                                    closestInsideVotes > closestOutsideVotes ? "inside" : "outside";
-                            } else {
-                                directionDecision = "uncertain";
-                            }
-                        }
+                        directionClosestHeadOrEnd = isHeadOrEndHit;
+                    } else if (Math.abs(closestDelta) <= closestCompareTol && isHeadOrEndHit) {
+                        directionClosestHeadOrEnd = true;
                     }
-                }
 
-                if (
-                    localUvStageBTopTransTieAccumulator &&
-                    directionHadTie &&
-                    directionDecision === "uncertain"
-                ) {
-                    if (closestCrossCount > 0 && closestCrossSignSum !== 0) {
-                        directionDecision = closestCrossSignSum > 0 ? "inside" : "outside";
-                    } else if (closestInsideVotes !== closestOutsideVotes) {
-                        directionDecision =
-                            closestInsideVotes > closestOutsideVotes ? "inside" : "outside";
-                    } else if (closestAmbiguousCount === 0 && closestTouchCount > 0) {
-                        directionDecision = localUvStageBMultiProbePreferOutside ? "outside" : "uncertain";
+                    if (directional.relation === "on" || directional.eventKind !== "cross") {
+                        continue;
+                    }
+
+                    const wireDecision: LocalUvDecision =
+                        (
+                            (directional.relation === "inside" && wire.orientationBit === 0) ||
+                            (directional.relation === "outside" && wire.orientationBit === 1)
+                        )
+                            ? "outside"
+                            : "inside";
+                    const wireDecisionVote = wireDecision === "inside" ? 1 : -1;
+                    const decisionDelta = directional.closestHitX - directionClosestHitX;
+                    if (decisionDelta < -closestCompareTol) {
+                        directionClosestHitX = directional.closestHitX;
+                        directionClosestHeadOrEnd = isHeadOrEndHit;
+                        directionClosestDecision = wireDecision;
+                        directionClosestDecisionDisagree = false;
+                        directionClosestDecisionScore = wireDecisionVote;
+                        directionClosestDecisionVotes = 1;
+                    } else if (Math.abs(decisionDelta) <= closestCompareTol) {
+                        if (directionClosestDecision == null) {
+                            directionClosestDecision = wireDecision;
+                            directionClosestDecisionDisagree = false;
+                            directionClosestDecisionScore = wireDecisionVote;
+                            directionClosestDecisionVotes = 1;
+                        } else if (directionClosestDecision !== wireDecision) {
+                            directionClosestDecisionDisagree = true;
+                            directionClosestDecisionScore += wireDecisionVote;
+                            directionClosestDecisionVotes++;
+                        } else {
+                            directionClosestDecisionScore += wireDecisionVote;
+                            directionClosestDecisionVotes++;
+                        }
+                        if (isHeadOrEndHit) {
+                            directionClosestHeadOrEnd = true;
+                        }
                     }
                 }
 
                 accumulateTransitionMetrics(transitionMetrics, directionMetrics);
-                if (directionHadTie) {
-                    transitionMetrics.transitionTies++;
-                }
-                if (directionDecision == null) {
-                    // No intersections on this probe direction; OCCT classifier treats as OUT.
-                    directionDecision = "outside";
-                }
-                if (directionDecision === "uncertain") {
-                    continue;
-                }
+                directionHeadOrEnd = directionClosestHeadOrEnd;
 
-                if (firstResolvedDecision == null) {
-                    firstResolvedDecision = directionDecision;
-                    firstResolvedDistance = directionMinBoundaryDistance;
-                    firstResolvedBadWire = directionBadWire;
-                    if (!localUvStageBMultiProbeConsensus) {
-                        break;
+                if (
+                    directionClosestDecisionDisagree &&
+                    localUvStageBTopTransTieAccumulator &&
+                    directionClosestDecisionVotes > 0
+                ) {
+                    if (directionClosestDecisionScore > 0) {
+                        directionClosestDecision = "inside";
+                        directionClosestDecisionDisagree = false;
+                    } else if (directionClosestDecisionScore < 0) {
+                        directionClosestDecision = "outside";
+                        directionClosestDecisionDisagree = false;
                     }
                 }
-                if (directionDecision === "inside") {
-                    sawInside = true;
-                } else {
-                    sawOutside = true;
+
+                const directionStateUnknown =
+                    !directionSawIntersection ||
+                    directionClosestDecision == null ||
+                    directionClosestDecisionDisagree;
+                const directionDecision: LocalUvDecision =
+                    directionClosestDecision ?? "outside";
+
+                if (!directionStateUnknown) {
+                    lastResolvedDecision = directionDecision;
+                    lastResolvedDistance = directionMinBoundaryDistance;
+                    lastResolvedBadWire = directionBadWire;
+                }
+
+                // OCCT FaceClassifier::Perform equivalent:
+                // accept this segment only when classifier state is known and
+                // the closest intersection is not a head/end transition.
+                if (!directionStateUnknown && !directionHeadOrEnd) {
+                    acceptedDecision = directionDecision;
+                    acceptedDistance = directionMinBoundaryDistance;
+                    acceptedBadWire = directionBadWire;
+                    break;
+                }
+
+                if (directionHeadOrEnd) {
+                    transitionMetrics.transitionTies++;
                 }
             }
 
-            if (firstResolvedDecision == null) {
+            if (acceptedDecision == null) {
+                acceptedDecision = lastResolvedDecision;
+                acceptedDistance = lastResolvedDistance;
+                acceptedBadWire = lastResolvedBadWire;
+            }
+            if (acceptedDecision == null) {
+                if (localUvStageBUnresolvedPreferInside) {
+                    return {
+                        decision: "inside",
+                        nearBoundaryBand: true,
+                        minBoundaryDistance: Number.isFinite(globalBoundaryDistance)
+                            ? globalBoundaryDistance
+                            : minBoundaryDistance,
+                        badWire: localClassifierWires.some((wire) => wire.hasBadEdges),
+                        source: "stageB",
+                        stageBMetrics: transitionMetrics,
+                    };
+                }
+                // No robust segment classification could be established.
+                // Keep Stage-B conservative and uncertain (caller may arbitrate).
                 transitionMetrics.transitionTies++;
                 return {
                     decision: "uncertain",
                     nearBoundaryBand: true,
-                    minBoundaryDistance,
-                    badWire,
+                    minBoundaryDistance: Number.isFinite(globalBoundaryDistance)
+                        ? globalBoundaryDistance
+                        : minBoundaryDistance,
+                    badWire: localClassifierWires.some((wire) => wire.hasBadEdges),
                     source: "stageB",
                     stageBMetrics: transitionMetrics,
                 };
             }
 
-            minBoundaryDistance = firstResolvedDistance;
-            badWire = firstResolvedBadWire;
-            let stageBDecision: LocalUvDecision = firstResolvedDecision;
-            if (localUvStageBMultiProbeConsensus && sawInside && sawOutside) {
-                transitionMetrics.transitionTies++;
-                stageBDecision = localUvStageBMultiProbePreferOutside ? "outside" : "uncertain";
-            }
-            if (stageBDecision === "uncertain") {
-                return {
-                    decision: "uncertain",
-                    nearBoundaryBand: true,
-                    minBoundaryDistance,
-                    badWire,
-                    source: "stageB",
-                    stageBMetrics: transitionMetrics,
-                };
-            }
-            forceOutside = stageBDecision === "outside";
+            forceOutside = acceptedDecision === "outside";
+            minBoundaryDistance = Number.isFinite(acceptedDistance)
+                ? acceptedDistance
+                : (
+                    Number.isFinite(globalBoundaryDistance)
+                        ? globalBoundaryDistance
+                        : minBoundaryDistance
+                );
+            badWire = acceptedBadWire;
         } else {
             for (const wire of localClassifierWires) {
                 if (wire.hasBadEdges) {
