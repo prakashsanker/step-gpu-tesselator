@@ -6600,6 +6600,7 @@ function buildOcctInspiredConeTrimDomainFromPCurves(
   if (unwrappedWires.length === 0) {
     return null;
   }
+  const hasTrimHoles = face.innerLoops.length > 0;
 
   // Align all wires to a shared U band so the domain rectangle is compact/stable.
   const referenceMeanU = meanLoopU(unwrappedWires[0]);
@@ -6640,13 +6641,35 @@ function buildOcctInspiredConeTrimDomainFromPCurves(
     uMax += shiftU;
   }
 
+  // When holeless cone p-curves overrun by a fractional period, the rectangular
+  // domain leaves a visible seam wedge. Snap the U span to the nearest whole
+  // period count for full-wrap cones so seam edges coincide in 3D.
+  const uSpan = uMax - uMin;
+  if (
+    !hasTrimHoles &&
+    uSpan > period * 1.05 &&
+    readGlobalBoolean('__OCCT_INSPIRED_TRIM_SNAP_PERIOD_SPAN_NO_HOLES__', true)
+  ) {
+    const snappedPeriods = Math.max(1, Math.round(uSpan / period));
+    const snappedSpan = snappedPeriods * period;
+    const maxSnapDelta = period * 0.35;
+    if (Math.abs(snappedSpan - uSpan) <= maxSnapDelta) {
+      const centerU = 0.5 * (uMin + uMax);
+      uMin = centerU - snappedSpan * 0.5;
+      uMax = centerU + snappedSpan * 0.5;
+    }
+  }
+
   const padFactor = Math.max(0, readGlobalNumber('__OCCT_INSPIRED_TRIM_DOMAIN_PAD_FACTOR__') ?? 0.03);
   const minPad = Math.max(1e-6, readGlobalNumber('__OCCT_INSPIRED_TRIM_DOMAIN_PAD_MIN__') ?? 1e-4);
-  const padU = Math.max(minPad, (uMax - uMin) * padFactor);
+  let padU = Math.max(minPad, (uMax - uMin) * padFactor);
   const padV = Math.max(minPad, (vMax - vMin) * padFactor);
+  // Preserve periodic seam alignment on holeless cones by avoiding fractional U padding.
+  if (!hasTrimHoles && readGlobalBoolean('__OCCT_INSPIRED_TRIM_DISABLE_U_PAD_NO_HOLES__', true)) {
+    padU = 0;
+  }
 
   const sourcePointCount = alignedWires.reduce((sum, wire) => sum + wire.length, 0);
-  const hasTrimHoles = face.innerLoops.length > 0;
   const gridScale = Math.max(0.1, readGlobalNumber('__OCCT_INSPIRED_TRIM_GRID_SCALE__') ?? 0.9);
   let minGrid = Math.max(8, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID__') ?? 14));
   let maxGrid = Math.max(minGrid, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID__') ?? 32));
@@ -7574,6 +7597,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<Fac
     const shouldTryOcctInspiredTrimGraph =
       face.surfaceType === 'Cone' &&
       enableOcctInspiredTrimGraph &&
+      (face.innerLoops.length > 0 || readGlobalBoolean('__OCCT_INSPIRED_TRIM_ENABLE_NO_HOLES__', false)) &&
       (occtInspiredTrimGraphFaceIdsRaw == null || occtInspiredTrimGraphFaceIds.has(face.faceIndex));
     if (
       shouldTryOcctInspiredTrimGraph &&
