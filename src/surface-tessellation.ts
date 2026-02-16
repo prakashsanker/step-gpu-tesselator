@@ -1046,8 +1046,8 @@ export async function tessellateTrimmedSurface(
         tolVNormalized: number;
     }
     const classifierPointEpsilon = Math.max(
-        1e-7,
-        Math.min(5e-4, Math.max(du, dv) * 0.005)
+        5e-8,
+        Math.min(2e-4, Math.max(du, dv) * 0.0028)
     );
 
     const normalizeLoopForClassifier = (loop: Vec2[]): Vec2[] => {
