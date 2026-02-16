@@ -864,12 +864,29 @@ export async function tessellateTrimmedSurface(
         readTrimNumber("__LOCAL_UV_CLASSIFIER_BOUNDARY_BAND_SCALE__") ?? 1
     );
     const localUvBoundaryTolerance = Math.max(0, boundaryTolerance * localUvClassifierBandScale);
-    const localUvStageABoundaryBandScale = Math.max(
-        0.05,
-        readTrimNumber("__LOCAL_UV_STAGEA_BOUNDARY_BAND_SCALE__") ?? 0.5
-    );
     const localUvStageBWeightedMixedSign = readTrimBoolean("__LOCAL_UV_STAGEB_WEIGHTED_MIXED_SIGN__", true);
-    const localUvStageBAccumulateCrossings = readTrimBoolean("__LOCAL_UV_STAGEB_ACCUMULATE_CROSSINGS__", true);
+    const localUvStageBAccumulateCrossings = readTrimBoolean("__LOCAL_UV_STAGEB_ACCUMULATE_CROSSINGS__", false);
+    const localUvStageBMultiProbeConsensus = readTrimBoolean("__LOCAL_UV_STAGEB_MULTI_PROBE_CONSENSUS__", false);
+    const localUvStageBTopTransTieAccumulator = readTrimBoolean(
+        "__LOCAL_UV_STAGEB_TOPTRANS_TIE_ACCUMULATOR__",
+        false
+    );
+    const localUvStageBMultiProbePreferOutside = readTrimBoolean(
+        "__LOCAL_UV_STAGEB_MULTI_PROBE_PREFER_OUTSIDE__",
+        true
+    );
+    const localUvTransitionEdgeToleranceScale = Math.max(
+        0.01,
+        readTrimNumber("__LOCAL_UV_TRANSITION_EDGE_TOL_SCALE__") ?? 0.25
+    );
+    const localUvTransitionMaxProbes = Math.max(
+        1,
+        Math.floor(readTrimNumber("__LOCAL_UV_TRANSITION_MAX_PROBES__") ?? 3)
+    );
+    const localUvStageBFaceWideProbeTraversal = readTrimBoolean(
+        "__LOCAL_UV_STAGEB_FACE_WIDE_PROBE_TRAVERSAL__",
+        true
+    );
     const localUvSeamTolerance = Math.max(
         localUvBoundaryTolerance,
         Math.max(du, dv) * 1.5,
@@ -878,9 +895,13 @@ export async function tessellateTrimmedSurface(
     const enableLocalUvFaceClassifierFallback = readTrimBoolean("__ENABLE_LOCAL_UV_FACE_CLASSIFIER_FALLBACK__", true);
     const useLocalUvClassifierShadow = useOccUvInside && enableLocalUvClassifierShadow;
     const useLocalUvClassifierCandidate = useOccUvInside && enableLocalUvClassifierCandidate;
+    const localUvStageAUseEdgeLoop = readTrimBoolean("__LOCAL_UV_STAGEA_USE_EDGE_LOOP__", true);
     // Domain-unsafe wires (typically cone seam/self-intersection cases) should
     // follow OCCT's bad-wire behavior: rely on Stage-B/topological classification.
     const localUvDomainUnsafeForceStageB = readTrimBoolean("__LOCAL_UV_DOMAIN_UNSAFE_FORCE_STAGEB__", true);
+    // Hard gate for parity work: on domain-unsafe faces, skip Stage-A arbitration
+    // and use the forced Stage-B decision directly.
+    const localUvDomainUnsafeStageBOnly = readTrimBoolean("__LOCAL_UV_DOMAIN_UNSAFE_STAGEB_ONLY__", false);
     // Reframe sample points into each wire's periodic band before wire tests.
     // This better matches OCCT wire-local domain behavior on seam-crossing cones.
     const localUvWireLocalRecadre = readTrimBoolean("__LOCAL_UV_WIRE_LOCAL_RECADRE__", true);
@@ -894,6 +915,43 @@ export async function tessellateTrimmedSurface(
     const localUvDomainUnsafeUseStageAProvisional = readTrimBoolean(
         "__LOCAL_UV_DOMAIN_UNSAFE_USE_STAGEA_PROVISIONAL__",
         true
+    );
+    const localUvDomainUnsafeStrictStageAConfidence = readTrimBoolean(
+        "__LOCAL_UV_DOMAIN_UNSAFE_STRICT_STAGEA_CONFIDENCE__",
+        false
+    );
+    // Domain-unsafe Stage-A confidence should behave closer to OCCT fallback order:
+    // do not treat near-boundary Stage-A votes as confident.
+    const localUvDomainUnsafeStageAConfidenceBandMultiplier = Math.max(
+        1,
+        readTrimNumber("__LOCAL_UV_DOMAIN_UNSAFE_STAGEA_CONFIDENCE_BAND_MULTIPLIER__") ?? 1.5
+    );
+    const localUvDomainUnsafeStageAConfidenceMinDistance = Math.max(
+        0,
+        readTrimNumber("__LOCAL_UV_DOMAIN_UNSAFE_STAGEA_CONFIDENCE_MIN_DISTANCE__") ?? 1e-3
+    );
+    // Targeted cone parity guard:
+    // when Stage-A says INSIDE but forced Stage-B says OUTSIDE, only allow
+    // Stage-A override if the point is clearly interior (not near boundary).
+    const localUvDomainUnsafeGuardInsideVsOutside = readTrimBoolean(
+        "__LOCAL_UV_DOMAIN_UNSAFE_GUARD_INSIDE_VS_OUTSIDE__",
+        false
+    );
+    const localUvDomainStageAProvisionalInsideMinSamples = Math.max(
+        4,
+        Math.floor(readTrimNumber("__LOCAL_UV_DOMAIN_STAGEA_PROVISIONAL_INSIDE_MIN_SAMPLES__") ?? 24)
+    );
+    const localUvDomainStageAProvisionalInsideOutsideRatio = Math.max(
+        0,
+        Math.min(1, readTrimNumber("__LOCAL_UV_DOMAIN_STAGEA_PROVISIONAL_INSIDE_OUTSIDE_RATIO__") ?? 0.6)
+    );
+    const localUvDomainUnsafeInsideOverrideBandMultiplier = Math.max(
+        1,
+        readTrimNumber("__LOCAL_UV_DOMAIN_UNSAFE_INSIDE_OVERRIDE_BAND_MULTIPLIER__") ?? 2
+    );
+    const localUvDomainUnsafeInsideOverrideMinDistance = Math.max(
+        0,
+        readTrimNumber("__LOCAL_UV_DOMAIN_UNSAFE_INSIDE_OVERRIDE_MIN_DISTANCE__") ?? 2e-3
     );
     const localUvClassifierStats = {
         inside: 0,
@@ -1098,111 +1156,88 @@ export async function tessellateTrimmedSurface(
         };
     };
 
-    const internalWindingInside = (classifier: PreparedLoopClassifier, px: number, py: number): boolean => {
-        let windingNumber = 0;
+    const internalSiDans = (
+        classifier: PreparedLoopClassifier,
+        px: number,
+        py: number
+    ): boolean => {
+        let nbCrossings = 0;
+        let prevDx = classifier.pointsX[0] - px;
+        let prevDy = classifier.pointsY[0] - py;
+        let prevYIsNegative = prevDy < 0;
         for (let nextIdx = 1; nextIdx <= classifier.pointCount; nextIdx++) {
-            const prevIdx = nextIdx - 1;
-            const x1 = classifier.pointsX[prevIdx];
-            const y1 = classifier.pointsY[prevIdx];
-            const x2 = classifier.pointsX[nextIdx];
-            const y2 = classifier.pointsY[nextIdx];
-            const cross = (x2 - x1) * (py - y1) - (y2 - y1) * (px - x1);
-            if (y1 <= py) {
-                if (y2 > py && cross > 0) {
-                    windingNumber++;
+            const currDx = classifier.pointsX[nextIdx] - px;
+            const currDy = classifier.pointsY[nextIdx] - py;
+            const currYIsNegative = currDy < 0;
+            if (currYIsNegative !== prevYIsNegative) {
+                if (prevDx > 0 && currDx > 0) {
+                    nbCrossings++;
+                } else if (prevDx > 0 || currDx > 0) {
+                    const xIntersect = prevDx - (prevDy * (currDx - prevDx)) / (currDy - prevDy);
+                    if (xIntersect > 0) {
+                        nbCrossings++;
+                    }
                 }
-            } else if (y2 <= py && cross < 0) {
-                windingNumber--;
+                prevYIsNegative = currYIsNegative;
             }
+            prevDx = currDx;
+            prevDy = currDy;
         }
-        return windingNumber !== 0;
+        return (nbCrossings & 1) !== 0;
     };
 
-    const internalOddEvenWithOnDetection = (
+    const internalSiDansOuOn = (
         classifier: PreparedLoopClassifier,
         px: number,
         py: number
     ): LoopPointRelation => {
-        let windingNumber = 0;
+        let nbCrossings = 0;
         const tolU = classifier.tolUNormalized;
         const tolV = classifier.tolVNormalized;
-        const baseCrossTol = Math.max(tolU, tolV, 1e-9);
+        let prevDx = classifier.pointsX[0] - px;
+        let prevDy = classifier.pointsY[0] - py;
+        let prevYIsNegative = prevDy < 0;
 
         for (let nextIdx = 1; nextIdx <= classifier.pointCount; nextIdx++) {
             const prevIdx = nextIdx - 1;
-            const x1 = classifier.pointsX[prevIdx];
-            const y1 = classifier.pointsY[prevIdx];
-            const x2 = classifier.pointsX[nextIdx];
-            const y2 = classifier.pointsY[nextIdx];
+            const currDx = classifier.pointsX[nextIdx] - px;
+            const currDy = classifier.pointsY[nextIdx] - py;
 
-            const segDx = x2 - x1;
-            const segDy = y2 - y1;
-            const segLenSq = segDx * segDx + segDy * segDy;
-            if (segLenSq > 1e-16) {
-                const t = Math.max(0, Math.min(1, ((px - x1) * segDx + (py - y1) * segDy) / segLenSq));
-                const qx = x1 + t * segDx;
-                const qy = y1 + t * segDy;
-                if (Math.abs(px - qx) <= tolU && Math.abs(py - qy) <= tolV) {
-                    return "on";
-                }
-            } else if (Math.abs(px - x1) <= tolU && Math.abs(py - y1) <= tolV) {
+            if (currDx < tolU && currDx > -tolU && currDy < tolV && currDy > -tolV) {
                 return "on";
             }
 
-            const cross = segDx * (py - y1) - segDy * (px - x1);
-            const crossTol = baseCrossTol * (Math.hypot(segDx, segDy) + 1);
-            if (Math.abs(cross) <= crossTol) {
-                const minX = Math.min(x1, x2) - tolU;
-                const maxX = Math.max(x1, x2) + tolU;
-                const minY = Math.min(y1, y2) - tolV;
-                const maxY = Math.max(y1, y2) + tolV;
-                if (px >= minX && px <= maxX && py >= minY && py <= maxY) {
-                    return "on";
-                }
-            }
-
-            if (y1 <= py) {
-                if (y2 > py && cross > crossTol) {
-                    windingNumber++;
-                }
-            } else if (y2 <= py && cross < -crossTol) {
-                windingNumber--;
-            }
-        }
-
-        const isInside = windingNumber !== 0;
-        if (tolU > 0 || tolV > 0) {
-            const cornerInsideA = internalWindingInside(
-                classifier,
-                px - tolU,
-                py - tolV
-            );
-            const cornerInsideB = internalWindingInside(
-                classifier,
-                px + tolU,
-                py - tolV
-            );
-            const cornerInsideC = internalWindingInside(
-                classifier,
-                px - tolU,
-                py + tolV
-            );
-            const cornerInsideD = internalWindingInside(
-                classifier,
-                px + tolU,
-                py + tolV
-            );
+            const edgeDx = classifier.pointsX[nextIdx] - classifier.pointsX[prevIdx];
             if (
-                cornerInsideA !== isInside ||
-                cornerInsideB !== isInside ||
-                cornerInsideC !== isInside ||
-                cornerInsideD !== isInside
+                (classifier.pointsX[prevIdx] - px) * currDx < 0 &&
+                Math.abs(edgeDx) > 1e-12
             ) {
-                return "on";
+                const interpY =
+                    classifier.pointsY[nextIdx] -
+                    ((classifier.pointsY[nextIdx] - classifier.pointsY[prevIdx]) / edgeDx) * currDx;
+                const deltaY = interpY - py;
+                if (deltaY >= -tolV && deltaY <= tolV) {
+                    return "on";
+                }
             }
+
+            const currYIsNegative = currDy < 0;
+            if (currYIsNegative !== prevYIsNegative) {
+                if (prevDx > 0 && currDx > 0) {
+                    nbCrossings++;
+                } else if (prevDx > 0 || currDx > 0) {
+                    const xIntersect = prevDx - (prevDy * (currDx - prevDx)) / (currDy - prevDy);
+                    if (xIntersect > 0) {
+                        nbCrossings++;
+                    }
+                }
+                prevYIsNegative = currYIsNegative;
+            }
+            prevDx = currDx;
+            prevDy = currDy;
         }
 
-        return isInside ? "inside" : "outside";
+        return (nbCrossings & 1) !== 0 ? "inside" : "outside";
     };
 
     const classifyPointAgainstLoop = (
@@ -1219,9 +1254,34 @@ export async function tessellateTrimmedSurface(
         ) {
             return "outside";
         }
+
         const px = transformToNormalized(u, classifier.uMin, classifier.uRange);
         const py = transformToNormalized(v, classifier.vMin, classifier.vRange);
-        return internalOddEvenWithOnDetection(classifier, px, py);
+
+        const result = internalSiDansOuOn(classifier, px, py);
+        if (result === "on") {
+            return "on";
+        }
+
+        const tolU = classifier.tolUNormalized;
+        const tolV = classifier.tolVNormalized;
+        if (tolU > 0 || tolV > 0) {
+            const isInside = result === "inside";
+            const cornerInsideA = internalSiDans(classifier, px - tolU, py - tolV);
+            const cornerInsideB = internalSiDans(classifier, px + tolU, py - tolV);
+            const cornerInsideC = internalSiDans(classifier, px - tolU, py + tolV);
+            const cornerInsideD = internalSiDans(classifier, px + tolU, py + tolV);
+            if (
+                isInside !== cornerInsideA ||
+                isInside !== cornerInsideB ||
+                isInside !== cornerInsideC ||
+                isInside !== cornerInsideD
+            ) {
+                return "on";
+            }
+        }
+
+        return result;
     };
 
     const orientation2D = (a: Vec2, b: Vec2, c: Vec2): number => {
@@ -1524,25 +1584,54 @@ export async function tessellateTrimmedSurface(
     }
 
     const localClassifierWires: LocalClassifierWire[] = [];
+    const buildClassifierLoopFromEdges = (edges: LocalUvClassifierEdgeInput[] | undefined): Vec2[] | null => {
+        if (!Array.isArray(edges) || edges.length === 0) return null;
+        const stitched: Vec2[] = [];
+        for (const edge of edges) {
+            const pts = normalizeEdgePointsForClassifier(edge.points);
+            if (pts.length < 2) continue;
+            if (stitched.length === 0) {
+                stitched.push(...pts);
+            } else {
+                const [lastU, lastV] = stitched[stitched.length - 1];
+                const [firstU, firstV] = pts[0];
+                const isSharedEndpoint =
+                    Math.abs(lastU - firstU) <= classifierPointEpsilon &&
+                    Math.abs(lastV - firstV) <= classifierPointEpsilon;
+                if (isSharedEndpoint) stitched.push(...pts.slice(1));
+                else stitched.push(...pts);
+            }
+        }
+        if (stitched.length < 3) return null;
+        return normalizeLoopForClassifier(stitched);
+    };
     const addClassifierWire = (
         loop: Vec2[],
         orientationBit: 0 | 1,
         edges: LocalUvClassifierEdgeInput[] | undefined,
         hasBadEdgesHint: boolean | undefined
     ): void => {
-        if (loop.length < 3) return;
-        const bounds = computeLoopBounds(loop);
+        const sanitizedEdges = Array.isArray(edges)
+            ? edges.filter((edge) => Array.isArray(edge.points) && edge.points.length >= 2)
+            : [];
+        const edgeLoop =
+            localUvStageAUseEdgeLoop && surfaceTypeForClassifier === "Cone"
+                ? buildClassifierLoopFromEdges(sanitizedEdges)
+                : null;
+        const loopForClassifier = edgeLoop && edgeLoop.length >= 3 ? edgeLoop : loop;
+        if (loopForClassifier.length < 3) return;
+        const bounds = computeLoopBounds(loopForClassifier);
         if (!Number.isFinite(bounds.uMin) || !Number.isFinite(bounds.vMin)) return;
         const prepared = buildPreparedLoopClassifier(
-            loop,
+            loopForClassifier,
             bounds,
             classifierLoopToleranceU,
             classifierLoopToleranceV
         );
         if (!prepared) return;
         localClassifierWires.push({
-            loop,
-            edges: Array.isArray(edges) ? edges.filter((edge) => Array.isArray(edge.points) && edge.points.length >= 2) : [],
+            loop: loopForClassifier,
+            edges: sanitizedEdges,
             prepared,
             orientationBit,
             bounds,
@@ -1558,17 +1647,12 @@ export async function tessellateTrimmedSurface(
 
     const evaluateLocalUvCandidate = (
         u: number,
-        v: number,
-        options?: { allowBoundaryBandUncertain?: boolean }
+        v: number
     ): LocalUvCandidateEval => {
         let minBoundaryDistance = Infinity;
         let forceOutside = false;
         let badWire = false;
         let sawOnBoundary = false;
-        let outerInsideCount = 0;
-        let outerOutsideCount = 0;
-        let holeInsideCount = 0;
-        let holeOutsideCount = 0;
 
         const recadreValueNearBounds = (
             value: number,
@@ -1607,28 +1691,13 @@ export async function tessellateTrimmedSurface(
                 sawOnBoundary = true;
                 continue;
             }
-            if (wire.orientationBit === 1) {
-                if (relation === "inside") outerInsideCount++;
-                else if (relation === "outside") outerOutsideCount++;
-            } else {
-                if (relation === "inside") holeInsideCount++;
-                else if (relation === "outside") holeOutsideCount++;
-            }
             if (
                 (relation === "inside" && wire.orientationBit === 0) ||
                 (relation === "outside" && wire.orientationBit === 1)
             ) {
                 forceOutside = true;
+                break;
             }
-        }
-
-        // Stage-A bad-wire tightening: contradictory same-orientation wire
-        // classifications indicate unstable pcurve semantics.
-        if (
-            (outerInsideCount > 0 && outerOutsideCount > 0) ||
-            (holeInsideCount > 0 && holeOutsideCount > 0)
-        ) {
-            badWire = true;
         }
 
         if (sawOnBoundary) {
@@ -1638,27 +1707,6 @@ export async function tessellateTrimmedSurface(
                 minBoundaryDistance,
                 badWire,
                 source: "stageA",
-                provisionalDecision: forceOutside ? "outside" : "inside",
-            };
-        }
-
-        const stageABoundaryTolerance = Math.max(
-            classifierPointEpsilon,
-            localUvBoundaryTolerance * localUvStageABoundaryBandScale
-        );
-        const nearBoundaryBand =
-            !skipNearBoundaryChecks &&
-            stageABoundaryTolerance > classifierPointEpsilon &&
-            minBoundaryDistance <= stageABoundaryTolerance;
-        const allowBoundaryBandUncertain = options?.allowBoundaryBandUncertain ?? true;
-        if (nearBoundaryBand && allowBoundaryBandUncertain) {
-            return {
-                decision: "uncertain",
-                nearBoundaryBand: true,
-                minBoundaryDistance,
-                badWire,
-                source: "stageA",
-                provisionalDecision: forceOutside ? "outside" : "inside",
             };
         }
 
@@ -1721,6 +1769,9 @@ export async function tessellateTrimmedSurface(
     interface LocalUvDirectionClassification {
         relation: LoopPointRelation;
         metrics: LocalUvTransitionMetrics;
+        closestHitX: number;
+        eventKind: "cross" | "touch" | "ambiguous" | "none";
+        eventSign: -1 | 0 | 1;
     }
 
     const createTransitionMetrics = (): LocalUvTransitionMetrics => ({
@@ -1764,13 +1815,25 @@ export async function tessellateTrimmedSurface(
             py < wire.bounds.vMin - tolV ||
             py > wire.bounds.vMax + tolV
         ) {
-            return { relation: "outside", metrics };
+            return {
+                relation: "outside",
+                metrics,
+                closestHitX: Number.POSITIVE_INFINITY,
+                eventKind: "none",
+                eventSign: 0,
+            };
         }
 
         const [dx, dy] = dir;
         const rayLen = Math.hypot(dx, dy);
         if (rayLen <= 1e-12) {
-            return { relation: "outside", metrics };
+            return {
+                relation: "outside",
+                metrics,
+                closestHitX: Number.POSITIVE_INFINITY,
+                eventKind: "none",
+                eventSign: 0,
+            };
         }
         const ux = dx / rayLen;
         const uy = dy / rayLen;
@@ -1879,11 +1942,23 @@ export async function tessellateTrimmedSurface(
         });
 
         if (hits.length === 1 && hits[0].x === 0) {
-            return { relation: "on", metrics };
+            return {
+                relation: "on",
+                metrics,
+                closestHitX: 0,
+                eventKind: "touch",
+                eventSign: 0,
+            };
         }
 
         if (hits.length === 0) {
-            return { relation: "outside", metrics };
+            return {
+                relation: "outside",
+                metrics,
+                closestHitX: Number.POSITIVE_INFINITY,
+                eventKind: "none",
+                eventSign: 0,
+            };
         }
         hits.sort((a, b) => a.x - b.x);
 
@@ -1897,8 +1972,19 @@ export async function tessellateTrimmedSurface(
                 last.push(hit);
             }
         }
-        const isUnstableBundle = (bundle: IntersectionHit[]): boolean =>
-            bundle.length > 0 && bundle.every((hit) => hit.nearVertex && hit.highTolVertex);
+        const isUnstableBundle = (bundle: IntersectionHit[]): boolean => {
+            if (bundle.length === 0) return false;
+            const allNearVertex = bundle.every((hit) => hit.nearVertex);
+            if (!allNearVertex) return false;
+            const hasHighTol = bundle.some((hit) => hit.highTolVertex);
+            if (hasHighTol) return true;
+            // OCCT CheckSkip analogue extension: even without explicit high vertex
+            // tolerance metadata, a closest near-vertex bundle with mixed in/out
+            // transitions is unstable and should be bridged to the next bundle.
+            const hasPositive = bundle.some((hit) => hit.transition > 0);
+            const hasNegative = bundle.some((hit) => hit.transition < 0);
+            return hasPositive && hasNegative;
+        };
         const resolveComplexVertexBundle = (
             bundle: IntersectionHit[]
         ): { resolved: boolean; transition: -1 | 0 | 1 } => {
@@ -2060,6 +2146,56 @@ export async function tessellateTrimmedSurface(
             bundleIndex++;
             metrics.bundleSkips++;
         }
+        if (!localUvStageBAccumulateCrossings) {
+            // OCCT-like closest-hit ownership: classify from the nearest stable
+            // intersection bundle only. If that bundle is touch/ambiguous, let the
+            // caller try another probe direction.
+            if (bundleIndex >= hitBundles.length) {
+                return {
+                    relation: "outside",
+                    metrics,
+                    closestHitX: Number.POSITIVE_INFINITY,
+                    eventKind: "none",
+                    eventSign: 0,
+                };
+            }
+            const firstBundle = hitBundles[bundleIndex];
+            const closestHitX = firstBundle[0]?.x ?? Number.POSITIVE_INFINITY;
+            let event = evaluateBundleEvent(firstBundle, true);
+            if (event.kind === "ambiguous") {
+                event = evaluateBundleEvent(firstBundle, false);
+            }
+            if (event.kind === "cross") {
+                return {
+                    relation: event.sign > 0 ? "inside" : "outside",
+                    metrics,
+                    closestHitX,
+                    eventKind: "cross",
+                    eventSign: event.sign,
+                };
+            }
+            if (event.kind === "touch") {
+                if (event.count > 1 && event.hasPositive && event.hasNegative) {
+                    metrics.transitionTies++;
+                }
+                return {
+                    relation: "on",
+                    metrics,
+                    closestHitX,
+                    eventKind: "touch",
+                    eventSign: 0,
+                };
+            }
+            metrics.transitionTies++;
+            return {
+                relation: "on",
+                metrics,
+                closestHitX,
+                eventKind: "ambiguous",
+                eventSign: 0,
+            };
+        }
+
         let sawTouchEvent = false;
         let sawAmbiguousEvent = false;
         let sawCrossEvent = false;
@@ -2076,9 +2212,6 @@ export async function tessellateTrimmedSurface(
                 event = evaluateBundleEvent(nextBundle, false);
             }
             if (event.kind === "cross") {
-                if (!localUvStageBAccumulateCrossings) {
-                    return { relation: event.sign > 0 ? "inside" : "outside", metrics };
-                }
                 sawCrossEvent = true;
                 if (firstCrossSign === 0) firstCrossSign = event.sign;
                 crossingSum += event.sign;
@@ -2096,16 +2229,66 @@ export async function tessellateTrimmedSurface(
         }
 
         if (sawTouchEvent || sawAmbiguousEvent) {
-            return { relation: "on", metrics };
+            return {
+                relation: "on",
+                metrics,
+                closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                eventKind: sawAmbiguousEvent ? "ambiguous" : "touch",
+                eventSign: 0,
+            };
         }
         if (sawCrossEvent) {
-            if (crossingSum > 0) return { relation: "inside", metrics };
-            if (crossingSum < 0) return { relation: "outside", metrics };
-            if (firstCrossSign > 0) return { relation: "inside", metrics };
-            if (firstCrossSign < 0) return { relation: "outside", metrics };
-            return { relation: "outside", metrics };
+            if (crossingSum > 0) {
+                return {
+                    relation: "inside",
+                    metrics,
+                    closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                    eventKind: "cross",
+                    eventSign: 1,
+                };
+            }
+            if (crossingSum < 0) {
+                return {
+                    relation: "outside",
+                    metrics,
+                    closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                    eventKind: "cross",
+                    eventSign: -1,
+                };
+            }
+            if (firstCrossSign > 0) {
+                return {
+                    relation: "inside",
+                    metrics,
+                    closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                    eventKind: "cross",
+                    eventSign: 1,
+                };
+            }
+            if (firstCrossSign < 0) {
+                return {
+                    relation: "outside",
+                    metrics,
+                    closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                    eventKind: "cross",
+                    eventSign: -1,
+                };
+            }
+            return {
+                relation: "outside",
+                metrics,
+                closestHitX: hitBundles[bundleIndex]?.[0]?.x ?? Number.POSITIVE_INFINITY,
+                eventKind: "none",
+                eventSign: 0,
+            };
         }
-        return { relation: "outside", metrics };
+        return {
+            relation: "outside",
+            metrics,
+            closestHitX: Number.POSITIVE_INFINITY,
+            eventKind: "none",
+            eventSign: 0,
+        };
     };
 
     interface LocalUvTransitionClassification {
@@ -2113,36 +2296,28 @@ export async function tessellateTrimmedSurface(
         metrics: LocalUvTransitionMetrics;
     }
 
-    const classifyPointAgainstWireByTransitions = (
+    const appendProbeCandidatesForWire = (
         point: Vec2,
-        wire: LocalClassifierWire
-    ): LocalUvTransitionClassification => {
+        wire: LocalClassifierWire,
+        outCandidates: Array<{ dir: Vec2; quality: number }>,
+        maxCandidates = 16
+    ): void => {
+        if (outCandidates.length >= maxCandidates) return;
         // OCCT-inspired probing constants from FaceExplorer.cxx
         const probeStart = 0.123;
         const probeEnd = 0.7;
         const probeStep = 0.2111;
         const smallAngleSin = 0.001;
-
-        const probeCandidates: Array<{ dir: Vec2; quality: number }> = [];
-        const metrics = createTransitionMetrics();
-        const edgeToleranceScale = Math.max(
-            0.01,
-            readTrimNumber("__LOCAL_UV_TRANSITION_EDGE_TOL_SCALE__") ?? 0.25
-        );
-        const maxProbeDirections = Math.max(
-            1,
-            Math.floor(readTrimNumber("__LOCAL_UV_TRANSITION_MAX_PROBES__") ?? 3)
-        );
         const [px, py] = point;
         forEachWireSegment(wire, (_edge, a, b) => {
             const ex = b[0] - a[0];
             const ey = b[1] - a[1];
             const eLen = Math.hypot(ex, ey);
-            if (eLen <= 1e-12 || probeCandidates.length >= 16) return;
+            if (eLen <= 1e-12 || outCandidates.length >= maxCandidates) return;
             const etx = ex / eLen;
             const ety = ey / eLen;
 
-            for (let t = probeStart; t < probeEnd && probeCandidates.length < 16; t += probeStep) {
+            for (let t = probeStart; t < probeEnd && outCandidates.length < maxCandidates; t += probeStep) {
                 const sx = a[0] * t + b[0] * (1 - t);
                 const sy = a[1] * t + b[1] * (1 - t);
                 const vx = sx - px;
@@ -2153,16 +2328,18 @@ export async function tessellateTrimmedSurface(
                 const vty = vy / vLen;
                 const sinA = Math.abs(etx * vty - ety * vtx);
                 if (sinA < smallAngleSin) continue;
-                probeCandidates.push({ dir: [vtx, vty], quality: sinA });
+                outCandidates.push({ dir: [vtx, vty], quality: sinA });
             }
         });
-        if (probeCandidates.length === 0) {
-            metrics.probeFallbacks++;
-            probeCandidates.push({ dir: [1, 0], quality: 1 });
-        }
+    };
 
-        // OCCT-style bias: prefer one strong probe segment and only retry with
-        // alternates if the primary probe is ambiguous/on-boundary.
+    const finalizeProbeDirections = (
+        probeCandidates: Array<{ dir: Vec2; quality: number }>,
+        maxProbeDirections: number
+    ): Vec2[] => {
+        if (probeCandidates.length === 0) {
+            return [[1, 0]];
+        }
         probeCandidates.sort((a, b) => b.quality - a.quality);
         const probeDirections: Vec2[] = [];
         const dedupeDot = 0.9995;
@@ -2183,7 +2360,32 @@ export async function tessellateTrimmedSurface(
         if (probeDirections.length === 0) {
             probeDirections.push([1, 0]);
         }
+        return probeDirections;
+    };
 
+    const classifyPointAgainstWireByTransitions = (
+        point: Vec2,
+        wire: LocalClassifierWire,
+        options?: { probeDirections?: Vec2[]; edgeToleranceScale?: number; maxProbeDirections?: number }
+    ): LocalUvTransitionClassification => {
+        const metrics = createTransitionMetrics();
+        const edgeToleranceScale = Math.max(0.01, options?.edgeToleranceScale ?? localUvTransitionEdgeToleranceScale);
+        const maxProbeDirections = Math.max(1, Math.floor(options?.maxProbeDirections ?? localUvTransitionMaxProbes));
+        let probeDirections: Vec2[];
+        if (Array.isArray(options?.probeDirections) && options.probeDirections.length > 0) {
+            probeDirections = options.probeDirections;
+        } else {
+            const probeCandidates: Array<{ dir: Vec2; quality: number }> = [];
+            appendProbeCandidatesForWire(point, wire, probeCandidates, 16);
+            if (probeCandidates.length === 0) {
+                metrics.probeFallbacks++;
+            }
+            probeDirections = finalizeProbeDirections(probeCandidates, maxProbeDirections);
+        }
+
+        let firstResolved: LoopPointRelation | null = null;
+        let sawInside = false;
+        let sawOutside = false;
         for (const direction of probeDirections) {
             const directional = classifyPointAgainstWireByDirection(point, wire, direction, {
                 edgeToleranceScale,
@@ -2192,12 +2394,37 @@ export async function tessellateTrimmedSurface(
             if (directional.relation === "on") {
                 continue;
             }
-            return { relation: directional.relation, metrics };
+            if (firstResolved == null) {
+                firstResolved = directional.relation;
+                if (!localUvStageBMultiProbeConsensus) {
+                    return { relation: directional.relation, metrics };
+                }
+            }
+            if (directional.relation === "inside") sawInside = true;
+            else sawOutside = true;
         }
 
-        // Every tested probe ended up ON/ambiguous.
-        metrics.transitionTies++;
-        return { relation: "on", metrics };
+        if (firstResolved == null) {
+            // Every tested probe ended up ON/ambiguous.
+            metrics.transitionTies++;
+            return { relation: "on", metrics };
+        }
+
+        if (!localUvStageBMultiProbeConsensus) {
+            return { relation: firstResolved, metrics };
+        }
+
+        if (sawInside && sawOutside) {
+            // OCCT Segment/OtherSegment inspiration: if alternate robust probes disagree,
+            // avoid trusting a single segment. Prefer conservative OUT unless configured otherwise.
+            metrics.transitionTies++;
+            return {
+                relation: localUvStageBMultiProbePreferOutside ? "outside" : "on",
+                metrics,
+            };
+        }
+
+        return { relation: firstResolved, metrics };
     };
 
     const evaluateLocalUvCandidateByWireTransitions = (
@@ -2232,19 +2459,174 @@ export async function tessellateTrimmedSurface(
             return [uu, v];
         };
 
-        for (const wire of localClassifierWires) {
-            if (wire.hasBadEdges) {
-                badWire = true;
+        if (localUvStageBFaceWideProbeTraversal) {
+            const wirePoints = localClassifierWires.map((wire) => recadrePointForWire(wire));
+            const probeCandidates: Array<{ dir: Vec2; quality: number }> = [];
+            for (let wireIndex = 0; wireIndex < localClassifierWires.length; wireIndex++) {
+                appendProbeCandidatesForWire(wirePoints[wireIndex], localClassifierWires[wireIndex], probeCandidates, 64);
             }
-            const wirePoint = recadrePointForWire(wire);
-            const transitionClassification = classifyPointAgainstWireByTransitions(wirePoint, wire);
-            accumulateTransitionMetrics(transitionMetrics, transitionClassification.metrics);
-            const relation = transitionClassification.relation;
-            const boundaryDistance = distancePointToWire(wirePoint, wire);
-            if (boundaryDistance < minBoundaryDistance) {
-                minBoundaryDistance = boundaryDistance;
+            if (probeCandidates.length === 0) {
+                transitionMetrics.probeFallbacks++;
             }
-            if (relation === "on") {
+            const probeDirections = finalizeProbeDirections(probeCandidates, localUvTransitionMaxProbes);
+
+            let firstResolvedDecision: LocalUvDecision | null = null;
+            let firstResolvedDistance = Infinity;
+            let firstResolvedBadWire = false;
+            let sawInside = false;
+            let sawOutside = false;
+            const closestCompareTol = Math.max(
+                classifierPointEpsilon * 4,
+                localUvBoundaryTolerance * 0.25,
+                1e-7
+            );
+
+            for (const direction of probeDirections) {
+                let directionBadWire = false;
+                let directionMinBoundaryDistance = Infinity;
+                let directionDecision: LocalUvDecision | null = null;
+                let directionClosestHitX = Number.POSITIVE_INFINITY;
+                let directionHadTie = false;
+                const directionMetrics = createTransitionMetrics();
+                let closestInsideVotes = 0;
+                let closestOutsideVotes = 0;
+                let closestCrossSignSum = 0;
+                let closestCrossCount = 0;
+                let closestTouchCount = 0;
+                let closestAmbiguousCount = 0;
+
+                for (let wireIndex = 0; wireIndex < localClassifierWires.length; wireIndex++) {
+                    const wire = localClassifierWires[wireIndex];
+                    if (wire.hasBadEdges) {
+                        directionBadWire = true;
+                    }
+                    const wirePoint = wirePoints[wireIndex];
+                    const boundaryDistance = distancePointToWire(wirePoint, wire);
+                    if (boundaryDistance < directionMinBoundaryDistance) {
+                        directionMinBoundaryDistance = boundaryDistance;
+                    }
+                    const directional = classifyPointAgainstWireByDirection(
+                        wirePoint,
+                        wire,
+                        direction,
+                        { edgeToleranceScale: localUvTransitionEdgeToleranceScale }
+                    );
+                    accumulateTransitionMetrics(directionMetrics, directional.metrics);
+
+                    if (!Number.isFinite(directional.closestHitX)) {
+                        continue;
+                    }
+
+                    const wireDecision: LocalUvDecision =
+                        directional.relation === "on"
+                            ? "uncertain"
+                            : (
+                                (directional.relation === "inside" && wire.orientationBit === 0) ||
+                                (directional.relation === "outside" && wire.orientationBit === 1)
+                            )
+                                ? "outside"
+                                : "inside";
+                    const voteDecision = (decision: LocalUvDecision): void => {
+                        if (decision === "inside") closestInsideVotes++;
+                        else if (decision === "outside") closestOutsideVotes++;
+                    };
+                    const voteTransition = (): void => {
+                        if (!localUvStageBTopTransTieAccumulator) {
+                            return;
+                        }
+                        if (directional.eventKind === "cross" && directional.eventSign !== 0) {
+                            const transitionDecisionSign =
+                                wire.orientationBit === 0 ? -directional.eventSign : directional.eventSign;
+                            closestCrossSignSum += transitionDecisionSign;
+                            closestCrossCount++;
+                        } else if (directional.eventKind === "touch") {
+                            closestTouchCount++;
+                        } else if (directional.eventKind === "ambiguous") {
+                            closestAmbiguousCount++;
+                        }
+                    };
+                    const hitDelta = directional.closestHitX - directionClosestHitX;
+                    if (hitDelta < -closestCompareTol) {
+                        directionClosestHitX = directional.closestHitX;
+                        directionDecision = wireDecision;
+                        directionHadTie = false;
+                        closestInsideVotes = 0;
+                        closestOutsideVotes = 0;
+                        closestCrossSignSum = 0;
+                        closestCrossCount = 0;
+                        closestTouchCount = 0;
+                        closestAmbiguousCount = 0;
+                        voteDecision(wireDecision);
+                        voteTransition();
+                    } else if (Math.abs(hitDelta) <= closestCompareTol) {
+                        voteDecision(wireDecision);
+                        voteTransition();
+                        if (directionDecision == null) {
+                            directionDecision = wireDecision;
+                        } else if (directionDecision !== wireDecision) {
+                            directionHadTie = true;
+                            if (localUvStageBTopTransTieAccumulator && closestCrossCount > 0) {
+                                if (closestCrossSignSum > 0) {
+                                    directionDecision = "inside";
+                                } else if (closestCrossSignSum < 0) {
+                                    directionDecision = "outside";
+                                } else {
+                                    directionDecision = "uncertain";
+                                }
+                            } else if (closestInsideVotes !== closestOutsideVotes) {
+                                directionDecision =
+                                    closestInsideVotes > closestOutsideVotes ? "inside" : "outside";
+                            } else {
+                                directionDecision = "uncertain";
+                            }
+                        }
+                    }
+                }
+
+                if (
+                    localUvStageBTopTransTieAccumulator &&
+                    directionHadTie &&
+                    directionDecision === "uncertain"
+                ) {
+                    if (closestCrossCount > 0 && closestCrossSignSum !== 0) {
+                        directionDecision = closestCrossSignSum > 0 ? "inside" : "outside";
+                    } else if (closestInsideVotes !== closestOutsideVotes) {
+                        directionDecision =
+                            closestInsideVotes > closestOutsideVotes ? "inside" : "outside";
+                    } else if (closestAmbiguousCount === 0 && closestTouchCount > 0) {
+                        directionDecision = localUvStageBMultiProbePreferOutside ? "outside" : "uncertain";
+                    }
+                }
+
+                accumulateTransitionMetrics(transitionMetrics, directionMetrics);
+                if (directionHadTie) {
+                    transitionMetrics.transitionTies++;
+                }
+                if (directionDecision == null) {
+                    // No intersections on this probe direction; OCCT classifier treats as OUT.
+                    directionDecision = "outside";
+                }
+                if (directionDecision === "uncertain") {
+                    continue;
+                }
+
+                if (firstResolvedDecision == null) {
+                    firstResolvedDecision = directionDecision;
+                    firstResolvedDistance = directionMinBoundaryDistance;
+                    firstResolvedBadWire = directionBadWire;
+                    if (!localUvStageBMultiProbeConsensus) {
+                        break;
+                    }
+                }
+                if (directionDecision === "inside") {
+                    sawInside = true;
+                } else {
+                    sawOutside = true;
+                }
+            }
+
+            if (firstResolvedDecision == null) {
+                transitionMetrics.transitionTies++;
                 return {
                     decision: "uncertain",
                     nearBoundaryBand: true,
@@ -2254,11 +2636,57 @@ export async function tessellateTrimmedSurface(
                     stageBMetrics: transitionMetrics,
                 };
             }
-            if (
-                (relation === "inside" && wire.orientationBit === 0) ||
-                (relation === "outside" && wire.orientationBit === 1)
-            ) {
-                forceOutside = true;
+
+            minBoundaryDistance = firstResolvedDistance;
+            badWire = firstResolvedBadWire;
+            let stageBDecision: LocalUvDecision = firstResolvedDecision;
+            if (localUvStageBMultiProbeConsensus && sawInside && sawOutside) {
+                transitionMetrics.transitionTies++;
+                stageBDecision = localUvStageBMultiProbePreferOutside ? "outside" : "uncertain";
+            }
+            if (stageBDecision === "uncertain") {
+                return {
+                    decision: "uncertain",
+                    nearBoundaryBand: true,
+                    minBoundaryDistance,
+                    badWire,
+                    source: "stageB",
+                    stageBMetrics: transitionMetrics,
+                };
+            }
+            forceOutside = stageBDecision === "outside";
+        } else {
+            for (const wire of localClassifierWires) {
+                if (wire.hasBadEdges) {
+                    badWire = true;
+                }
+                const wirePoint = recadrePointForWire(wire);
+                const transitionClassification = classifyPointAgainstWireByTransitions(wirePoint, wire, {
+                    edgeToleranceScale: localUvTransitionEdgeToleranceScale,
+                    maxProbeDirections: localUvTransitionMaxProbes,
+                });
+                accumulateTransitionMetrics(transitionMetrics, transitionClassification.metrics);
+                const relation = transitionClassification.relation;
+                const boundaryDistance = distancePointToWire(wirePoint, wire);
+                if (boundaryDistance < minBoundaryDistance) {
+                    minBoundaryDistance = boundaryDistance;
+                }
+                if (relation === "on") {
+                    return {
+                        decision: "uncertain",
+                        nearBoundaryBand: true,
+                        minBoundaryDistance,
+                        badWire,
+                        source: "stageB",
+                        stageBMetrics: transitionMetrics,
+                    };
+                }
+                if (
+                    (relation === "inside" && wire.orientationBit === 0) ||
+                    (relation === "outside" && wire.orientationBit === 1)
+                ) {
+                    forceOutside = true;
+                }
             }
         }
 
@@ -2366,9 +2794,7 @@ export async function tessellateTrimmedSurface(
                     badWire: true,
                     source: "stageA" as const,
                 }
-                : evaluateLocalUvCandidate(u, v, {
-                    allowBoundaryBandUncertain: options?.allowStageABoundaryBandUncertain ?? true,
-                });
+                : evaluateLocalUvCandidate(u, v);
             if (!forceStageB) {
                 localUvClassifierStats.stageAEvaluations++;
                 if (stageAEval.decision === "inside") {
@@ -2494,6 +2920,180 @@ export async function tessellateTrimmedSurface(
     let localUvPolarityCalibrationSamples = 0;
     let localUvPolarityCalibrationDirectMismatch = 0;
     let localUvPolarityCalibrationInvertedMismatch = 0;
+    type DomainFaceRoutingPolicy = "default" | "prefer_stageB_disagreement";
+    type DomainDisagreementPreference = 0 | 1 | 2; // 0 unknown, 1 prefer Stage-A, 2 prefer Stage-B
+    const enableDomainDisagreementMap = readTrimBoolean("__LOCAL_UV_DOMAIN_DISAGREEMENT_MAP__", false);
+
+    let domainDisableStageAProvisionalInside = false;
+    const domainFaceRoutingPolicy: DomainFaceRoutingPolicy = (() => {
+        if (
+            !localClassifierDomainUnsafe ||
+            localUvDomainUnsafeStageBOnly ||
+            !useLocalUvTopologicalFallback ||
+            !localUvDomainUnsafeForceStageB ||
+            localClassifierWires.length === 0
+        ) {
+            return "default";
+        }
+
+        const sampleGrid = Math.max(
+            4,
+            Math.floor(readTrimNumber("__LOCAL_UV_DOMAIN_POLICY_SAMPLE_GRID__") ?? 9)
+        );
+        const minStageAUncertain = Math.max(
+            16,
+            Math.floor(readTrimNumber("__LOCAL_UV_DOMAIN_POLICY_MIN_STAGEA_UNCERTAIN__") ?? 48)
+        );
+
+        let stageAInside = 0;
+        let stageAOutside = 0;
+        let stageAUncertain = 0;
+        let stageBInside = 0;
+        let stageBOutside = 0;
+        let stageBUncertain = 0;
+        let disagreeAInsideBOutside = 0;
+        let disagreeAOutsideBInside = 0;
+        let stageAProvisionalInside = 0;
+        let stageAProvisionalInsideVsStageBOutside = 0;
+
+        const uSpan = Math.max(1e-9, uMax - uMin);
+        const vSpan = Math.max(1e-9, vMax - vMin);
+        for (let j = 1; j < sampleGrid; j++) {
+            for (let i = 1; i < sampleGrid; i++) {
+                const u = uMin + (uSpan * i) / sampleGrid;
+                const v = vMin + (vSpan * j) / sampleGrid;
+                const stageAOnly = evaluateLocalUvWithPeriodicTraversal(u, v, {
+                    disableStageB: true,
+                    allowStageABoundaryBandUncertain: true,
+                });
+                const forcedStageB = evaluateLocalUvWithPeriodicTraversal(u, v, { forceStageB: true });
+
+                if (stageAOnly.decision === "inside") stageAInside++;
+                else if (stageAOnly.decision === "outside") stageAOutside++;
+                else stageAUncertain++;
+                if (stageAOnly.decision === "uncertain" && stageAOnly.provisionalDecision === "inside") {
+                    stageAProvisionalInside++;
+                    if (forcedStageB.decision === "outside") {
+                        stageAProvisionalInsideVsStageBOutside++;
+                    }
+                }
+
+                if (forcedStageB.decision === "inside") stageBInside++;
+                else if (forcedStageB.decision === "outside") stageBOutside++;
+                else stageBUncertain++;
+
+                if (
+                    stageAOnly.decision !== "uncertain" &&
+                    forcedStageB.decision !== "uncertain" &&
+                    stageAOnly.decision !== forcedStageB.decision
+                ) {
+                    if (stageAOnly.decision === "inside" && forcedStageB.decision === "outside") {
+                        disagreeAInsideBOutside++;
+                    } else if (stageAOnly.decision === "outside" && forcedStageB.decision === "inside") {
+                        disagreeAOutsideBInside++;
+                    }
+                }
+            }
+        }
+
+        if (
+            stageAProvisionalInside >= localUvDomainStageAProvisionalInsideMinSamples &&
+            stageAProvisionalInsideVsStageBOutside >=
+                stageAProvisionalInside * localUvDomainStageAProvisionalInsideOutsideRatio
+        ) {
+            domainDisableStageAProvisionalInside = true;
+        }
+
+        const pathologicalStageACluster =
+            stageAInside === 0 &&
+            stageAOutside > 0 &&
+            stageAUncertain >= minStageAUncertain &&
+            stageBOutside > stageBInside &&
+            disagreeAInsideBOutside > 0;
+
+        if (pathologicalStageACluster) {
+            return "prefer_stageB_disagreement";
+        }
+        return "default";
+    })();
+    const domainDisagreementGridSize = Math.max(
+        4,
+        Math.floor(readTrimNumber("__LOCAL_UV_DOMAIN_DISAGREEMENT_MAP_GRID__") ?? 9)
+    );
+    const domainDisagreementMap: DomainDisagreementPreference[] | null = (() => {
+        if (
+            !enableDomainDisagreementMap ||
+            !localClassifierDomainUnsafe ||
+            localUvDomainUnsafeStageBOnly ||
+            !useLocalUvTopologicalFallback ||
+            !localUvDomainUnsafeForceStageB ||
+            localClassifierWires.length === 0
+        ) {
+            return null;
+        }
+        const cellsPerAxis = domainDisagreementGridSize - 1;
+        const map = new Array<DomainDisagreementPreference>(cellsPerAxis * cellsPerAxis).fill(0);
+        const uSpan = Math.max(1e-9, uMax - uMin);
+        const vSpan = Math.max(1e-9, vMax - vMin);
+        for (let j = 1; j < domainDisagreementGridSize; j++) {
+            for (let i = 1; i < domainDisagreementGridSize; i++) {
+                const u = uMin + (uSpan * i) / domainDisagreementGridSize;
+                const v = vMin + (vSpan * j) / domainDisagreementGridSize;
+                const stageAOnly = evaluateLocalUvWithPeriodicTraversal(u, v, {
+                    disableStageB: true,
+                    allowStageABoundaryBandUncertain: true,
+                });
+                const forcedStageB = evaluateLocalUvWithPeriodicTraversal(u, v, { forceStageB: true });
+
+                let pref: DomainDisagreementPreference = 0;
+                if (
+                    stageAOnly.decision !== "uncertain" &&
+                    forcedStageB.decision !== "uncertain" &&
+                    stageAOnly.decision !== forcedStageB.decision
+                ) {
+                    // Conservative routing for current failure mode: prefer the
+                    // branch that votes outside when A/B disagree.
+                    pref = stageAOnly.decision === "outside" ? 1 : 2;
+                } else if (stageAOnly.decision !== "uncertain" && forcedStageB.decision === "uncertain") {
+                    pref = 1;
+                } else if (stageAOnly.decision === "uncertain" && forcedStageB.decision !== "uncertain") {
+                    pref = 2;
+                }
+
+                const idx = (j - 1) * cellsPerAxis + (i - 1);
+                map[idx] = pref;
+            }
+        }
+        return map;
+    })();
+    const getDomainDisagreementPreference = (uRaw: number, vRaw: number): DomainDisagreementPreference => {
+        if (!domainDisagreementMap) return 0;
+        const cellsPerAxis = domainDisagreementGridSize - 1;
+        const uSpan = Math.max(1e-9, uMax - uMin);
+        const vSpan = Math.max(1e-9, vMax - vMin);
+        const fu = Math.max(0, Math.min(1, (uRaw - uMin) / uSpan));
+        const fv = Math.max(0, Math.min(1, (vRaw - vMin) / vSpan));
+        const iu = Math.max(0, Math.min(cellsPerAxis - 1, Math.floor(fu * cellsPerAxis)));
+        const iv = Math.max(0, Math.min(cellsPerAxis - 1, Math.floor(fv * cellsPerAxis)));
+        return domainDisagreementMap[iv * cellsPerAxis + iu] ?? 0;
+    };
+    const shouldPreferStageAUnderDisagreement = (
+        disagreementPref: DomainDisagreementPreference,
+        preferStageBForDisagreement: boolean,
+        stageBDecision: LocalUvDecision,
+        stageADecision: LocalUvDecision
+    ): boolean => {
+        if (disagreementPref === 1) return true;
+        if (disagreementPref === 2) return false;
+        if (
+            preferStageBForDisagreement &&
+            stageBDecision !== "uncertain" &&
+            stageBDecision !== stageADecision
+        ) {
+            return false;
+        }
+        return true;
+    };
 
     const classifyWithLocalUvClassifierRaw = (uRaw: number, v: number): LocalUvClassification => {
         if (localClassifierDomainUnsafe) {
@@ -2510,16 +3110,39 @@ export async function tessellateTrimmedSurface(
             if (localClassifierWires.length > 0) {
                 if (useLocalUvTopologicalFallback && localUvDomainUnsafeForceStageB) {
                     const forcedStageB = evaluateLocalUvWithPeriodicTraversal(uRaw, v, { forceStageB: true });
+                    if (localUvDomainUnsafeStageBOnly) {
+                        return {
+                            decision: forcedStageB.decision,
+                            nearBoundaryBand: forcedStageB.nearBoundaryBand,
+                            seamProximate: isSeamProximate(uRaw),
+                            source: "domain_stageB",
+                            stageBMetrics: forcedStageB.stageBMetrics,
+                        };
+                    }
                     let stageAOnly: LocalUvCandidateEval | null = null;
                     if (localUvDomainUnsafeArbitrateStageA) {
                         stageAOnly = evaluateLocalUvWithPeriodicTraversal(uRaw, v, {
                             disableStageB: true,
                             allowStageABoundaryBandUncertain: true,
                         });
+                        const stageAConfidenceDistance = Math.max(
+                            classifierPointEpsilon * 4,
+                            localUvBoundaryTolerance * localUvDomainUnsafeStageAConfidenceBandMultiplier,
+                            localUvDomainUnsafeStageAConfidenceMinDistance
+                        );
                         const stageAConfident =
-                            stageAOnly.decision !== "uncertain" &&
-                            !stageAOnly.badWire &&
-                            stageAOnly.minBoundaryDistance > classifierPointEpsilon * 0.5;
+                            localUvDomainUnsafeStrictStageAConfidence
+                                ? (
+                                    stageAOnly.decision !== "uncertain" &&
+                                    !stageAOnly.badWire &&
+                                    !stageAOnly.nearBoundaryBand &&
+                                    stageAOnly.minBoundaryDistance > stageAConfidenceDistance
+                                )
+                                : (
+                                    stageAOnly.decision !== "uncertain" &&
+                                    !stageAOnly.badWire &&
+                                    stageAOnly.minBoundaryDistance > classifierPointEpsilon * 0.5
+                                );
                         const stageBMetrics = forcedStageB.stageBMetrics;
                         const forcedAmbiguous =
                             forcedStageB.decision === "uncertain" ||
@@ -2532,14 +3155,44 @@ export async function tessellateTrimmedSurface(
                                 )
                             );
                         const shouldArbitrate = localUvDomainUnsafeArbitrateTiesOnly ? forcedAmbiguous : true;
+                        const preferStageBForDisagreement = domainFaceRoutingPolicy === "prefer_stageB_disagreement";
+                        const disagreementPref = getDomainDisagreementPreference(uRaw, v);
+                        const minInsideOverrideDistance = Math.max(
+                            localUvBoundaryTolerance * localUvDomainUnsafeInsideOverrideBandMultiplier,
+                            localUvDomainUnsafeInsideOverrideMinDistance
+                        );
+                        const canUseStageAInsideVsStageBOutside =
+                            !localUvDomainUnsafeGuardInsideVsOutside ||
+                            stageAOnly.decision !== "inside" ||
+                            forcedStageB.decision !== "outside" ||
+                            (
+                                !stageAOnly.nearBoundaryBand &&
+                                stageAOnly.minBoundaryDistance >= minInsideOverrideDistance
+                            );
                         if (shouldArbitrate && stageAConfident) {
+                            const blockConfidentInsideOverride =
+                                domainDisableStageAProvisionalInside &&
+                                stageAOnly.decision === "inside" &&
+                                forcedStageB.decision === "outside";
                             if (forcedStageB.decision === "uncertain" || forcedStageB.decision !== stageAOnly.decision) {
-                                return {
-                                    decision: stageAOnly.decision,
-                                    nearBoundaryBand: stageAOnly.nearBoundaryBand,
-                                    seamProximate: isSeamProximate(uRaw),
-                                    source: "domain_stageA",
-                                };
+                                if (blockConfidentInsideOverride || !canUseStageAInsideVsStageBOutside) {
+                                    // Keep Stage-B on boundary-adjacent inside-vs-outside disagreements.
+                                    // This targets repeated cone false-inside cohorts.
+                                    // Continue to provisional handling below.
+                                } else
+                                if (shouldPreferStageAUnderDisagreement(
+                                    disagreementPref,
+                                    preferStageBForDisagreement,
+                                    forcedStageB.decision,
+                                    stageAOnly.decision
+                                )) {
+                                    return {
+                                        decision: stageAOnly.decision,
+                                        nearBoundaryBand: stageAOnly.nearBoundaryBand,
+                                        seamProximate: isSeamProximate(uRaw),
+                                        source: "domain_stageA",
+                                    };
+                                }
                             }
                         }
                         const stageAProvisional =
@@ -2552,12 +3205,34 @@ export async function tessellateTrimmedSurface(
                             stageAProvisional &&
                             forcedStageB.decision !== stageAProvisional
                         ) {
-                            return {
-                                decision: stageAProvisional,
-                                nearBoundaryBand: true,
-                                seamProximate: isSeamProximate(uRaw),
-                                source: "domain_stageA",
-                            };
+                            const blockProvisionalInsideOverride =
+                                domainDisableStageAProvisionalInside &&
+                                stageAProvisional === "inside" &&
+                                forcedStageB.decision === "outside";
+                            const canUseProvisionalInsideVsStageBOutside =
+                                !localUvDomainUnsafeGuardInsideVsOutside ||
+                                stageAProvisional !== "inside" ||
+                                forcedStageB.decision !== "outside" ||
+                                (
+                                    !stageAOnly.nearBoundaryBand &&
+                                    stageAOnly.minBoundaryDistance >= minInsideOverrideDistance
+                                );
+                            if (blockProvisionalInsideOverride || !canUseProvisionalInsideVsStageBOutside) {
+                                // Do not force inside from provisional hint near boundary.
+                            } else
+                            if (shouldPreferStageAUnderDisagreement(
+                                disagreementPref,
+                                preferStageBForDisagreement,
+                                forcedStageB.decision,
+                                stageAProvisional
+                            )) {
+                                return {
+                                    decision: stageAProvisional,
+                                    nearBoundaryBand: true,
+                                    seamProximate: isSeamProximate(uRaw),
+                                    source: "domain_stageA",
+                                };
+                            }
                         }
                     }
                     return {
