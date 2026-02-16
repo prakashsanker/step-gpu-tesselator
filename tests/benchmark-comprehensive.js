@@ -1078,9 +1078,12 @@ async function main() {
         const page = await browser.newPage();
 
         page.setDefaultTimeout(config.timeoutMs);
+        const verboseBrowserLogs = process.env.BENCH_VERBOSE_BROWSER_LOGS === '1';
         page.on('console', (msg) => {
             if (msg.type() === 'error') {
                 log(`[Browser Error] ${msg.text()}`, 'red');
+            } else if (verboseBrowserLogs) {
+                log(`[Browser ${msg.type()}] ${msg.text()}`, 'dim');
             }
         });
 

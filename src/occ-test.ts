@@ -7241,7 +7241,6 @@ function chooseTrimGridDensity(face: FaceWithEdgesInfo, uvOuter: Vec2[], uvHoles
     }
   }
 
-  return Math.max(effectiveMinGrid, Math.min(effectiveMaxGrid, base));
   // Keep seam-sensitive periodic trims away from under-sampled fold artifacts.
   // This applies to cone/cylinder trims that cross the U seam and is intentionally
   // scoped so we do not globally increase cost.
@@ -7444,7 +7443,11 @@ async function tessellateFaceFromOcctTriangulation(face: FaceWithEdgesInfo): Pro
 async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<FaceTessellationResult> {
   const faceStart = performance.now();
   const curveVerboseLogs = curveDebugEnabled();
-  const preferGeometryOnlyLoad = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+  const preferGeometryOnlyLoadRaw = readGlobalBoolean('__PERF_GEOMETRY_ONLY_LOAD__', false);
+  const preserveConeQualityInPerfMode = readGlobalBoolean('__PERF_PRESERVE_CONE_QUALITY__', true);
+  const preferGeometryOnlyLoad =
+    preferGeometryOnlyLoadRaw &&
+    !(preserveConeQualityInPerfMode && face.surfaceType === 'Cone');
   const perfCurvedSegmentScale = preferGeometryOnlyLoad
     ? Math.max(0.25, readGlobalNumber('__PERF_CURVED_SEGMENT_SCALE__') ?? 0.6)
     : 1.0;
@@ -8249,8 +8252,8 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<Fac
           }
 
           const budgetKeyPrefix = mode === 'cylinder' ? '__PERF_CYLINDER_TRIM_TRI_BUDGET' : '__PERF_CONE_TRIM_TRI_BUDGET';
-          const defaultNoHoles = mode === 'cylinder' ? 520 : 220;
-          const defaultWithHoles = mode === 'cylinder' ? 760 : 620;
+          const defaultNoHoles = mode === 'cylinder' ? 520 : 900;
+          const defaultWithHoles = mode === 'cylinder' ? 760 : 780;
           const baseBudget = Math.max(
             96,
             Math.floor(
@@ -8407,7 +8410,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<Fac
             preferGridForHoles: true,
           };
         }
-        const isConeSurfaceForTrim = face.surfaceType === 'Cone' && surface.type === 'CONICAL_SURFACE';
+        const isConeSurfaceForTrim = face.surfaceType === 'Cone';
         if (isConeSurfaceForTrim) {
           const period = Math.PI * 2;
           const uBounds = getLoopUBounds(loops.uvOuter);
@@ -8437,7 +8440,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<Fac
           );
           const seamMinUSamples = Math.max(
             minUSamples,
-            Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_SEAM_MIN__') ?? (preferGeometryOnlyLoad ? 22 : 26))
+            Math.floor(readGlobalNumber('__CONE_TRIM_U_SAMPLES_SEAM_MIN__') ?? (preferGeometryOnlyLoad ? 30 : 26))
           );
           let gridDensityU = Math.round(fullUSamples * (uSpan / period));
           if (hasTrimHoles) {
@@ -8458,12 +8461,16 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<Fac
             minVDensity,
             Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_HOLES_MIN__') ?? (preferGeometryOnlyLoad ? 5 : 6))
           );
+          const seamMinVDensity = Math.max(
+            minVDensity,
+            Math.floor(readGlobalNumber('__CONE_TRIM_V_SAMPLES_SEAM_MIN__') ?? (preferGeometryOnlyLoad ? 10 : 7))
+          );
           let gridDensityV = Math.ceil(vSpan / vStep);
           if (hasTrimHoles) {
             gridDensityV = Math.max(gridDensityV, minVDensityWithHoles);
           }
           if (coneCrossesSeam || degeneratePeriodicTrim) {
-            gridDensityV = Math.max(gridDensityV, minVDensityWithHoles);
+            gridDensityV = Math.max(gridDensityV, seamMinVDensity);
           }
           gridDensityV = clampInt(gridDensityV, minVDensity, maxVDensity);
           ({ gridDensityU, gridDensityV } = applyAnisotropicTrimTriangleBudget('cone', {
@@ -8479,7 +8486,7 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<Fac
             minVDensity,
             maxVDensity,
             minVDensityWithHoles,
-            seamMinVDensity: minVDensityWithHoles,
+            seamMinVDensity,
           }));
 
           trimmedBuildOptions = {
@@ -8585,8 +8592,8 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<Fac
           face.surfaceType === 'Cone' &&
           enableConeSeamSplit &&
           isConeSeamSplitFaceEnabled &&
-          loops.uvOuter.length >= 3 &&
-          loops.uvHoles.length > 0;
+          coneCrossesSeam &&
+          loops.uvOuter.length >= 3;
         const shouldTryCylinderSeamSplit =
           face.surfaceType === 'Cylinder' &&
           enableCylinderSeamSplit &&
@@ -8630,6 +8637,16 @@ async function tessellateCurvedFaceFromOCC(face: FaceWithEdgesInfo): Promise<Fac
             `(crossesSeam=${cylinderCrossesSeam}, likelyPeriodic=${cylinderLikelyPeriodic}, wrappedOuter=${!!cylinderWrappedOuterForSplit}, ` +
             `rawOuter=${!!loops.uvOuterRawWrapped}, ` +
             `outerPts=${loops.uvOuter.length}, holes=${loops.uvHoles.length})`
+          );
+        }
+        if (curveVerboseLogs) {
+          const anisotropicU = trimmedBuildOptions?.gridDensityU;
+          const anisotropicV = trimmedBuildOptions?.gridDensityV;
+          curveDebugLog(
+            `[trim-grid] face ${face.faceIndex} ${face.surfaceType}: ` +
+            `baseGrid=${gridDensity}, anisotropic=` +
+            `${Number.isFinite(anisotropicU as number) ? anisotropicU : 'n/a'}x` +
+            `${Number.isFinite(anisotropicV as number) ? anisotropicV : 'n/a'}`
           );
         }
 
