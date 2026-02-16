@@ -6651,13 +6651,15 @@ function buildOcctInspiredConeTrimDomainFromPCurves(
   let minGrid = Math.max(8, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID__') ?? 14));
   let maxGrid = Math.max(minGrid, Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID__') ?? 32));
   if (!hasTrimHoles) {
+    // Holeless cones were under-sampled in strict local-classifier mode, causing
+    // visible seam wedges and quality-gate triangle underflow on cone/conical fixtures.
     const minGridNoHoles = Math.max(
       minGrid,
-      Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID_NO_HOLES__') ?? 26)
+      Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MIN_GRID_NO_HOLES__') ?? 32)
     );
     const maxGridNoHoles = Math.max(
       minGridNoHoles,
-      Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID_NO_HOLES__') ?? 48)
+      Math.floor(readGlobalNumber('__OCCT_INSPIRED_TRIM_MAX_GRID_NO_HOLES__') ?? 56)
     );
     minGrid = minGridNoHoles;
     maxGrid = Math.max(maxGrid, maxGridNoHoles);
